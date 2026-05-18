@@ -1,0 +1,67 @@
+{
+  "name": "repospend",
+  "version": "0.0.1",
+  "description": "Local-first AI usage and cost dashboard grouped by Git repository.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mehmetdemircs/RepoSpend.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mehmetdemircs/RepoSpend/issues"
+  },
+  "homepage": "https://github.com/mehmetdemircs/RepoSpend#readme",
+  "bin": {
+    "repospend": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "web-dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @repospend/types --filter @repospend/core build && pnpm --parallel --filter @repospend/server --filter @repospend/web dev",
+    "predev": "pnpm doctor:native",
+    "build": "pnpm --filter @repospend/web build && node scripts/build-package.mjs",
+    "pack:prepare": "pnpm build",
+    "prepack": "pnpm pack:prepare",
+    "test": "pnpm --filter @repospend/types --filter @repospend/core build && pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm --filter @repospend/types --filter @repospend/core build && pnpm --stream --filter @repospend/types --filter @repospend/core --filter @repospend/server --filter @repospend/web typecheck",
+    "clean": "pnpm -r clean && rm -rf dist web-dist",
+    "rebuild:native": "pnpm rebuild better-sqlite3",
+    "doctor:native": "node scripts/check-native.mjs"
+  },
+  "keywords": [
+    "codex",
+    "usage",
+    "cost",
+    "dashboard",
+    "sqlite",
+    "local-first"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "dependencies": {
+    "@fastify/static": "^9.1.3",
+    "better-sqlite3": "^12.10.0",
+    "fastify": "^5.6.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^22.19.1",
+    "esbuild": "^0.28.0",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vitest": "^3.2.4"
+  }
+}
