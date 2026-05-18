@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 2005 --open",
     "build": "tsc -b && vite build",
     "test": "vitest run --passWithNoTests",
-    "lint": "eslint src --ext .ts,.tsx",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
     "clean": "rm -rf dist"
   },

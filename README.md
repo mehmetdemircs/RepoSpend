@@ -1,10 +1,16 @@
 # RepoSpend
 
-RepoSpend is a local dashboard for seeing where your AI coding usage is going.
+[![npm version](https://img.shields.io/npm/v/repospend)](https://www.npmjs.com/package/repospend)
+[![npm downloads](https://img.shields.io/npm/dm/repospend)](https://www.npmjs.com/package/repospend)
+[![license](https://img.shields.io/npm/l/repospend)](./LICENSE)
+[![node](https://img.shields.io/node/v/repospend)](https://www.npmjs.com/package/repospend)
+[![CI](https://github.com/mehmetdemircs/RepoSpend/actions/workflows/ci.yml/badge.svg)](https://github.com/mehmetdemircs/RepoSpend/actions/workflows/ci.yml)
 
-It reads your local Codex data, groups work by Git repository, and shows the repos,
-sessions, models, commands, and days that are driving token usage and
-API-equivalent cost.
+RepoSpend shows which repos, Codex sessions, models, and days are burning your AI
+coding tokens.
+
+It runs locally, reads your Codex files read-only, and does not upload prompts or
+telemetry.
 
 `0.0.1` is an early Codex-first release.
 
