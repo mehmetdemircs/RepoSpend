@@ -53,6 +53,17 @@ input {
   flex-wrap: wrap;
 }
 
+.chart-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.chart-panel-body {
+  flex: 1;
+  min-height: 0;
+}
+
 .app-shell {
   display: grid;
   min-height: 100vh;
@@ -263,7 +274,7 @@ input {
 .content-shell {
   min-width: 0;
   width: 100%;
-  max-width: 1600px;
+  max-width: 2400px;
   padding: 24px;
 }
 
@@ -306,13 +317,52 @@ input {
 
 .overview-chart-stack {
   display: grid;
+  align-items: stretch;
   gap: 16px;
+}
+
+.overview-chart-panel {
+  height: 100%;
+  min-height: 364px;
 }
 
 .overview-chart-pair {
   display: grid;
+  align-items: stretch;
   gap: 16px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.timeline-context-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  margin: -2px 0 12px;
+  padding: 0 2px 12px;
+}
+
+.timeline-context-item {
+  min-width: 0;
+}
+
+.timeline-context-item span {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.timeline-context-item strong {
+  display: block;
+  overflow: hidden;
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 3px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .primary-kpi-grid {
@@ -760,6 +810,47 @@ input {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.settings-toggle-card {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.42);
+  color: #e2e8f0;
+  cursor: pointer;
+  padding: 12px;
+}
+
+.settings-toggle-card:hover {
+  border-color: rgba(45, 212, 191, 0.28);
+}
+
+.settings-toggle-card input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: #2dd4bf;
+}
+
+.settings-toggle-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-toggle-copy strong {
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.settings-toggle-copy span {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .limit-select {
   display: grid;
   gap: 6px;
@@ -939,6 +1030,62 @@ input {
   min-width: 0;
   flex-direction: column;
   gap: 5px;
+}
+
+.combo-icon {
+  position: relative;
+  display: inline-flex;
+  width: 25px;
+  height: 18px;
+  flex: 0 0 25px;
+  align-items: center;
+}
+
+.combo-icon-main {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+}
+
+.combo-icon-main .brand-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.combo-icon-corner {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  display: grid;
+  width: 13px;
+  height: 13px;
+  place-items: center;
+  border: 1px solid rgba(15, 23, 42, 0.96);
+  border-radius: 5px;
+  background: #0f172a;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+}
+
+.combo-icon-corner .brand-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.combo-icon-claude-vscode .combo-icon-corner,
+.combo-icon-claude-terminal .combo-icon-corner {
+  background: #fff7ed;
+  border-color: rgba(15, 23, 42, 0.88);
+}
+
+.combo-icon-codex-vscode .combo-icon-corner,
+.combo-icon-codex-terminal .combo-icon-corner {
+  background: #042f2e;
+  border-color: rgba(15, 23, 42, 0.88);
+}
+
+.terminal-combo-icon {
+  color: #cbd5e1;
 }
 
 .brand-icon {
@@ -2140,6 +2287,34 @@ td {
   line-height: 1.55;
 }
 
+.rtk-install-cmd {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  padding: 7px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.55);
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rtk-init-row {
+  display: grid;
+  grid-template-columns: 170px 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.rtk-tool-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
 .rtk-health-banner {
   padding: 14px;
 }
@@ -2775,6 +2950,27 @@ td {
   color: #fca5a5;
 }
 
+@media (min-width: 1800px) {
+  .content-shell {
+    padding: 24px 32px 32px 24px;
+  }
+
+  .overview-chart-stack {
+    align-items: stretch;
+    grid-template-columns: minmax(520px, 1.15fr) repeat(2, minmax(360px, 0.9fr));
+  }
+
+  .overview-chart-pair {
+    display: contents;
+  }
+}
+
+@media (min-width: 2600px) {
+  .overview-chart-stack {
+    grid-template-columns: minmax(680px, 1.2fr) repeat(2, minmax(520px, 0.9fr));
+  }
+}
+
 @media (max-width: 900px) {
   .insights-grid {
     grid-template-columns: 1fr;
@@ -2961,6 +3157,7 @@ tbody tr.selected {
 
   .primary-kpi-grid,
   .secondary-metric-grid,
+  .timeline-context-row,
   .session-key-metrics,
   .session-mini-grid,
   .source-breakdown-row,

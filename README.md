@@ -156,6 +156,31 @@ Claude Code cost may show as unknown when local files do not include token count
 or a model name. RepoSpend shows those sessions with unknown tokens/cost rather
 than guessing.
 
+### Why RepoSpend's token totals can look lower than `ccusage`
+
+If you compare RepoSpend to `ccusage` you may see matching costs but different
+"total tokens", especially for Codex where cache reads dominate. This is
+expected.
+
+RepoSpend treats `cached_input_tokens` as a **subset of** `input_tokens`, which
+is how the OpenAI and Anthropic APIs document the field. The "total tokens"
+number reflects the tokens the model actually processed. `ccusage` adds cached
+tokens as a separate line item in its "Total Tokens" column, which inflates the
+total but does not change billing.
+
+The dollar cost is the source of truth and should agree between the two tools
+within rounding. If costs diverge, that is a real discrepancy worth
+investigating; token-count divergence on its own usually is not.
+
+### Codex Desktop on Windows
+
+RepoSpend captures Codex **CLI** usage on Windows from `~/.codex/`. The Codex
+**Desktop app** (installed as the MSIX package
+`OpenAI.Codex_<id>` under `%LOCALAPPDATA%\Packages\`) does not persist session
+transcripts or per-turn token usage to disk. Only Electron caches and debug
+logs are stored locally. Real session data lives server-side. Neither RepoSpend
+nor `ccusage` can report on Codex Desktop usage from local files alone.
+
 ## What It Reads
 
 RepoSpend only reads local files. It does not edit Codex, Claude Code, or RTK

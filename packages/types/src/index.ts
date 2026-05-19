@@ -160,6 +160,7 @@ export interface UsageGroup {
   sessionCount: number;
   messageCount: number;
   warnings: string[];
+  verified?: boolean;
 }
 
 export interface Summary {

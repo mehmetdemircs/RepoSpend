@@ -24,9 +24,18 @@ interface CodexThreadRow {
   thread_source?: unknown;
 }
 
+type ImportedModel = { model: string; provider: string | undefined };
+
 let nativeSqliteRebuildAttempted = false;
 
 interface SessionTokenBreakdown extends CodexTokenAggregation {
+  id: string | undefined;
+  cwd: string | undefined;
+  title: string | undefined;
+  startedAt: string | undefined;
+  endedAt: string | undefined;
+  model: string | undefined;
+  provider: string | undefined;
   messageCount: number;
   source: string | undefined;
   originator: string | undefined;
@@ -105,13 +114,10 @@ export function scanCodex(options: CodexAdapterOptions): CodexScanResult {
   if (stateExists) {
     const stateSessions = readThreads(statePath, sessionFiles, options, warnings);
     sessions.push(...stateSessions);
-    if (!stateSessions.length && sessionsExists) {
-      sessions.push(...readStandaloneSessions(sessionFiles, options));
-    }
   }
 
-  if (!stateExists && sessionsExists) {
-    sessions.push(...readStandaloneSessions(sessionFiles, options));
+  if (sessionsExists) {
+    sessions.push(...readStandaloneSessions(sessionFiles, options).filter((session) => !hasImportedSession(sessions, session)));
   }
 
   return {
@@ -158,13 +164,49 @@ function readThreads(statePath: string, sessionFiles: Map<string, string>, optio
       return [];
     }
 
+    const importedModels = readImportedModelMap(options.codexHome ?? path.join(os.homedir(), ".codex"), warnings);
     const rows = db.prepare(`SELECT ${selectedColumns.map((column) => `"${column}"`).join(", ")} FROM threads`).all() as CodexThreadRow[];
-    return rows.map((row, index) => threadToUsage(row, index, sessionFiles, options));
+    const sessions = rows.map((row, index) => threadToUsage(row, index, sessionFiles, options, importedModels));
+    return attributeSubagentsToParentSurfaces(sessions, rows);
   } catch (error) {
     warnings.push(`Unable to read Codex SQLite state at ${statePath}: ${errorMessage(error)}`);
     return [];
   } finally {
     db?.close();
+  }
+}
+
+function attributeSubagentsToParentSurfaces(sessions: NormalizedUsage[], rows: CodexThreadRow[]): NormalizedUsage[] {
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const parentIdsByChildId = new Map<string, string>();
+  for (const row of rows) {
+    const childId = stringValue(row.id);
+    const parentId = codexParentThreadId(stringValue(row.source));
+    if (childId && parentId) parentIdsByChildId.set(childId, parentId);
+  }
+
+  return sessions.map((session) => {
+    if (session.sourceApp !== "Codex subagent") return session;
+    const parent = sessionsById.get(parentIdsByChildId.get(session.id) ?? "");
+    if (!parent || parent.sourceApp === "Codex subagent") return session;
+    return {
+      ...session,
+      sourceApp: parent.sourceApp,
+      sourceAppRaw: session.sourceAppRaw,
+      surfaceReason: `subagent attributed to parent thread ${parent.id}: ${parent.surfaceReason}`,
+    };
+  });
+}
+
+function codexParentThreadId(source: string | undefined): string | undefined {
+  if (!source?.trim().startsWith("{")) return undefined;
+  try {
+    const object = asRecord(JSON.parse(source));
+    const subagent = asRecord(object?.subagent);
+    const threadSpawn = asRecord(subagent?.thread_spawn);
+    return stringValue(threadSpawn?.parent_thread_id);
+  } catch {
+    return undefined;
   }
 }
 
@@ -242,24 +284,30 @@ function exitLabel(status: number | null): string {
   return status === null ? "" : ` with exit code ${status}`;
 }
 
-function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<string, string>, options: CodexAdapterOptions): NormalizedUsage {
+function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<string, string>, options: CodexAdapterOptions, importedModels = new Map<string, ImportedModel>()): NormalizedUsage {
+  const id = stringValue(row.id) ?? `codex-thread-${index}`;
   const sourcePath = stringValue(row.rollout_path) ?? matchSessionPath(stringValue(row.id), sessionFiles) ?? "";
   const sessionBreakdown = sourcePath ? readSessionBreakdown(sourcePath) : emptyBreakdown();
   const dbTokens = parseTokenTotal(row.tokens_used);
-  const cwd = stringValue(row.cwd) ?? fallbackCwdFromPath(sourcePath);
+  const cwd = stringValue(row.cwd) ?? sessionBreakdown.cwd ?? fallbackCwdFromPath(sourcePath);
   const repo = resolveRepoInfo(cwd, options.config);
+  const inferredModel = stringValue(row.model) || sessionBreakdown.model ? undefined : importedModels.get(id);
+  const model = stringValue(row.model) ?? sessionBreakdown.model ?? inferredModel?.model;
+  const provider = sessionBreakdown.provider ?? inferredModel?.provider ?? stringValue(row.model_provider);
   const inputTokens = sessionBreakdown.inputTokens;
   const cachedInputTokens = sessionBreakdown.cachedInputTokens;
   const outputTokens = sessionBreakdown.outputTokens;
   const reasoningTokens = sessionBreakdown.reasoningTokens;
   const totalTokens = sessionBreakdown.totalTokens || dbTokens || inputTokens + outputTokens + reasoningTokens;
   const hasPricedBreakdown = inputTokens + cachedInputTokens + outputTokens + reasoningTokens > 0;
-  const warnings = [...repo.warnings, ...sessionBreakdown.warnings];
+  const warnings = [...repo.warnings, ...sessionBreakdown.warnings, ...(inferredModel ? ["model_inferred_from_import_source"] : [])];
   const threadSource = stringValue(row.thread_source) ?? sessionBreakdown.threadSource;
-  const sourceAppRaw = stringValue(row.source) ?? sessionBreakdown.source ?? sessionBreakdown.originator ?? threadSource;
+  const sourceAppRaw = codexSourceRaw(stringValue(row.source), sessionBreakdown.source, sessionBreakdown.originator, threadSource);
   const surface = detectSurface(sourceAppRaw, threadSource);
+  const startedAt = dateValue(row.created_at) ?? sessionBreakdown.startedAt;
+  const endedAt = dateValue(row.updated_at) ?? sessionBreakdown.endedAt;
   const usage: NormalizedUsage = {
-    id: stringValue(row.id) ?? `codex-thread-${index}`,
+    id,
     sourceClient: "codex",
     sourceApp: codexSourceAppLabel(sourceAppRaw, threadSource),
     sourceAppRaw,
@@ -269,11 +317,11 @@ function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<str
     cwd,
     gitRemoteUrl: repo.gitRemoteUrl,
     gitBranch: repo.gitBranch,
-    title: stringValue(row.title),
-    startedAt: dateValue(row.created_at),
-    endedAt: dateValue(row.updated_at),
-    model: stringValue(row.model),
-    provider: stringValue(row.model_provider),
+    title: stringValue(row.title) ?? sessionBreakdown.title,
+    startedAt,
+    endedAt,
+    model,
+    provider,
     inputTokens,
     cachedInputTokens,
     outputTokens,
@@ -288,7 +336,7 @@ function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<str
     rawTokenTotal: dbTokens || sessionBreakdown.totalTokens || undefined,
     warnings,
     codexHome: options.codexHome ?? path.join(os.homedir(), ".codex"),
-    durationMs: durationMs(dateValue(row.created_at), dateValue(row.updated_at)),
+    durationMs: durationMs(startedAt, endedAt),
     rawEventCount: sessionBreakdown.rawEventCount,
     parseStatus: sessionBreakdown.parseStatus,
     parseErrors: sessionBreakdown.parseErrors,
@@ -327,26 +375,28 @@ function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<str
 function readStandaloneSessions(sessionFiles: Map<string, string>, options: CodexAdapterOptions): NormalizedUsage[] {
   return [...sessionFiles.entries()].map(([id, sourcePath]) => {
     const breakdown = readSessionBreakdown(sourcePath);
-    const cwd = fallbackCwdFromPath(sourcePath);
+    const cwd = breakdown.cwd ?? fallbackCwdFromPath(sourcePath);
     const repo = resolveRepoInfo(cwd, options.config);
-    const model = undefined;
-    const surface = detectSurface(breakdown.source ?? breakdown.originator, breakdown.threadSource);
-    return {
-      id,
+    const model = breakdown.model;
+    const provider = breakdown.provider ?? providerForModel(model ?? "");
+    const sourceAppRaw = codexSourceRaw(undefined, breakdown.source, breakdown.originator, breakdown.threadSource);
+    const surface = detectSurface(sourceAppRaw, breakdown.threadSource);
+    const usage: NormalizedUsage = {
+      id: breakdown.id ?? id,
       sourceClient: "codex",
-      sourceApp: codexSourceAppLabel(breakdown.source ?? breakdown.originator, breakdown.threadSource),
-      sourceAppRaw: breakdown.source ?? breakdown.originator ?? breakdown.threadSource,
+      sourceApp: codexSourceAppLabel(sourceAppRaw, breakdown.threadSource),
+      sourceAppRaw,
       sourcePath,
       repoRoot: repo.repoRoot,
       repoName: repo.repoName,
       cwd,
       gitRemoteUrl: repo.gitRemoteUrl,
       gitBranch: repo.gitBranch,
-      title: undefined,
-      startedAt: undefined,
-      endedAt: undefined,
+      title: breakdown.title,
+      startedAt: breakdown.startedAt,
+      endedAt: breakdown.endedAt,
       model,
-      provider: undefined,
+      provider,
       inputTokens: breakdown.inputTokens,
       cachedInputTokens: breakdown.cachedInputTokens,
       outputTokens: breakdown.outputTokens,
@@ -359,8 +409,9 @@ function readStandaloneSessions(sessionFiles: Map<string, string>, options: Code
       estimatedCostUsd: undefined,
       messageCount: breakdown.messageCount,
       rawTokenTotal: breakdown.totalTokens || undefined,
-      warnings: [...repo.warnings, ...breakdown.warnings, "unknown_pricing"],
+      warnings: [...repo.warnings, ...breakdown.warnings],
       codexHome: options.codexHome ?? path.join(os.homedir(), ".codex"),
+      durationMs: durationMs(breakdown.startedAt, breakdown.endedAt),
       rawEventCount: breakdown.rawEventCount,
       parseStatus: breakdown.parseStatus,
       parseErrors: breakdown.parseErrors,
@@ -387,7 +438,93 @@ function readStandaloneSessions(sessionFiles: Map<string, string>, options: Code
       sessionOutcome: inferOutcome(breakdown),
       compaction: breakdown.compaction,
     };
+    const hasPricedBreakdown = breakdown.inputTokens + breakdown.cachedInputTokens + breakdown.outputTokens + breakdown.reasoningTokens > 0;
+    const cost = hasPricedBreakdown ? calculateCostUsd(usage, options.pricing) : undefined;
+    return {
+      ...usage,
+      estimatedCostUsd: cost,
+      warnings: cost === undefined ? [...usage.warnings, hasPricedBreakdown ? "unknown_pricing" : "missing_token_breakdown"] : usage.warnings,
+    };
   });
+}
+
+function hasImportedSession(sessions: NormalizedUsage[], candidate: NormalizedUsage): boolean {
+  const candidatePath = comparableSourcePath(candidate.sourcePath);
+  return sessions.some((session) => {
+    if (session.id && session.id === candidate.id) return true;
+    const sessionPath = comparableSourcePath(session.sourcePath);
+    return Boolean(candidatePath && sessionPath && candidatePath === sessionPath);
+  });
+}
+
+function readImportedModelMap(codexHome: string, warnings: string[]): Map<string, ImportedModel> {
+  const importsPath = path.join(codexHome, "external_agent_session_imports.json");
+  const models = new Map<string, ImportedModel>();
+  if (!fs.existsSync(importsPath)) return models;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(importsPath, "utf8"));
+  } catch (error) {
+    warnings.push(`Unable to read Codex external import index at ${importsPath}: ${errorMessage(error)}`);
+    return models;
+  }
+  const records = Array.isArray(asRecord(parsed)?.records) ? asRecord(parsed)?.records as unknown[] : [];
+  for (const record of records) {
+    const item = asRecord(record);
+    const importedThreadId = stringValue(item?.imported_thread_id);
+    const sourcePath = normalizeVerbatimPath(stringValue(item?.source_path));
+    if (!importedThreadId || !sourcePath || !fs.existsSync(sourcePath)) continue;
+    const model = readImportedSourceModel(sourcePath, warnings);
+    if (model) models.set(importedThreadId, { model, provider: providerForModel(model) });
+  }
+  return models;
+}
+
+function readImportedSourceModel(sourcePath: string, warnings: string[]): string | undefined {
+  const counts = new Map<string, number>();
+  let content: string;
+  try {
+    content = fs.readFileSync(sourcePath, "utf8");
+  } catch (error) {
+    warnings.push(`Unable to read Codex external import source at ${sourcePath}: ${errorMessage(error)}`);
+    return undefined;
+  }
+  for (const [index, line] of content.split(/\r?\n/).entries()) {
+    if (!line.trim()) continue;
+    try {
+      const model = modelFromImportedRecord(JSON.parse(line));
+      if (model) counts.set(model, (counts.get(model) ?? 0) + 1);
+    } catch (error) {
+      warnings.push(`Unable to parse Codex external import source ${sourcePath} line ${index + 1}: ${errorMessage(error)}`);
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
+}
+
+function modelFromImportedRecord(record: unknown): string | undefined {
+  const object = asRecord(record);
+  const type = stringValue(object?.type) ?? stringValue(asRecord(object?.payload)?.type);
+  const message = asRecord(object?.message) ?? asRecord(asRecord(object?.payload)?.message);
+  const model = stringValue(message?.model) ?? stringValue(object?.model);
+  if (!model || model === "<synthetic>") return undefined;
+  if (type && type !== "assistant") return undefined;
+  return model;
+}
+
+function providerForModel(model: string): string | undefined {
+  const normalized = model.toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.startsWith("claude")) return "anthropic";
+  if (normalized.startsWith("gpt") || normalized.startsWith("o")) return "openai";
+  return undefined;
+}
+
+function normalizeVerbatimPath(value: string | undefined): string | undefined {
+  return value?.replace(/^\\\\\?\\/, "");
+}
+
+function comparableSourcePath(value: string | undefined): string | undefined {
+  return normalizeVerbatimPath(value)?.replace(/\\/g, "/");
 }
 
 function indexSessionFiles(sessionsPath: string, warnings: string[]): Map<string, string> {
@@ -428,6 +565,7 @@ function readSessionBreakdown(filePath: string): SessionTokenBreakdown {
     let responseMessageCount = 0;
     let lastUserMessageText: string | undefined;
     for (const record of records) {
+      applySessionBounds(breakdown, record);
       applySessionMetadata(breakdown, record);
       applyPromptTimeline(breakdown, record);
       if (isCodexEventMessage(record)) eventMessageCount += 1;
@@ -521,6 +659,13 @@ function matchSessionPath(id: string | undefined, sessionFiles: Map<string, stri
 
 function emptyBreakdown(): SessionTokenBreakdown {
   return {
+    id: undefined,
+    cwd: undefined,
+    title: undefined,
+    startedAt: undefined,
+    endedAt: undefined,
+    model: undefined,
+    provider: undefined,
     inputTokens: 0,
     cachedInputTokens: 0,
     outputTokens: 0,
@@ -567,9 +712,26 @@ function applySessionMetadata(breakdown: SessionTokenBreakdown, record: unknown)
   if (!record || typeof record !== "object") return;
   const object = record as Record<string, unknown>;
   const payload = firstObject(object.payload) ?? object;
+  const collaborationMode = firstObject(payload.collaboration_mode);
+  const collaborationSettings = firstObject(collaborationMode?.settings);
+  breakdown.id ??= stringValue(payload.id);
+  breakdown.cwd ??= stringValue(payload.cwd);
+  breakdown.title ??= stringValue(payload.title);
+  breakdown.model ??= stringValue(payload.model) ?? stringValue(collaborationSettings?.model);
+  breakdown.provider ??= stringValue(payload.model_provider);
   breakdown.source ??= stringValue(payload.source);
   breakdown.originator ??= stringValue(payload.originator);
   breakdown.threadSource ??= stringValue(payload.thread_source);
+}
+
+function applySessionBounds(breakdown: SessionTokenBreakdown, record: unknown): void {
+  if (!record || typeof record !== "object") return;
+  const object = record as Record<string, unknown>;
+  const payload = firstObject(object.payload);
+  const timestamp = dateValue(object.timestamp) ?? dateValue(payload?.timestamp);
+  const sessionStartedAt = object.type === "session_meta" ? dateValue(payload?.timestamp) ?? timestamp : timestamp;
+  if (sessionStartedAt && (!breakdown.startedAt || sessionStartedAt < breakdown.startedAt)) breakdown.startedAt = sessionStartedAt;
+  if (timestamp && (!breakdown.endedAt || timestamp > breakdown.endedAt)) breakdown.endedAt = timestamp;
 }
 
 function isCodexEventMessage(record: unknown): boolean {
@@ -693,9 +855,15 @@ function hasNearbyDuplicatePromptTimelineItem(items: PromptTimelineItem[], item:
   });
 }
 
+function codexSourceRaw(source: string | undefined, sessionSource: string | undefined, originator: string | undefined, threadSource: string | undefined): string | undefined {
+  if (originator && /codex\s+desktop/i.test(originator)) return originator;
+  return source ?? sessionSource ?? originator ?? threadSource;
+}
+
 function detectSurface(source: string | undefined, threadSource: string | undefined): { surface: NormalizedUsage["detectedSurface"]; confidence: NormalizedUsage["surfaceConfidence"]; reason: string } {
   const raw = `${source ?? ""} ${threadSource ?? ""}`.toLowerCase();
   if (threadSource === "subagent") return { surface: "codex_exec", confidence: "medium", reason: "thread_source is subagent" };
+  if (raw.includes("codex desktop")) return { surface: "local_agent", confidence: "high", reason: "originator metadata identifies Codex Desktop" };
   if (raw.includes("vscode")) return { surface: "vscode_extension", confidence: "high", reason: "source metadata includes vscode" };
   if (raw.includes("cli") || raw.includes("terminal") || raw.includes("tui")) return { surface: "terminal_cli", confidence: "high", reason: "source metadata indicates CLI/terminal" };
   if (raw.includes("exec")) return { surface: "codex_exec", confidence: "medium", reason: "source metadata includes exec" };
@@ -723,9 +891,14 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
 function codexSourceAppLabel(source: string | undefined, threadSource: string | undefined): string {
   if (threadSource === "subagent") return "Codex subagent";
   if (!source) return "Codex";
+  if (/codex\s+desktop/i.test(source)) return "Codex Desktop";
   if (source === "vscode" || source === "codex_vscode" || source === "codex-vscode") return "VS Code";
   if (source === "cli" || source === "terminal" || source === "codex-tui") return "Terminal";
   if (source === "codex_app" || source === "codex-app") return "Codex app";

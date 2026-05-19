@@ -5,7 +5,7 @@ import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { pricingInfo } from "@repospend/core";
 import type { DashboardResponse } from "@repospend/types";
-import { clearRepoSpendLocalData, exportCsv, exportJson, parseFilters, readDashboardData, readPricingData, writePricingData } from "./data.js";
+import { clearRepoSpendLocalData, exportCsv, exportJson, parseDashboardOptions, parseFilters, readDashboardData, readPricingData, writePricingData } from "./data.js";
 import { demoModeEnabled, readDemoDashboardData, readDemoRtkGain } from "./demo-data.js";
 import { readRtkGain } from "./rtk.js";
 
@@ -21,9 +21,11 @@ export function createServer(options: ServerOptions = {}) {
   app.get("/api/health", async () => ({ ok: true, app: "RepoSpend", version: readPackageVersion() }));
 
   app.get("/api/dashboard", async (request): Promise<DashboardResponse> => {
-    const filters = parseFilters(request.query as Record<string, unknown>);
+    const query = request.query as Record<string, unknown>;
+    const filters = parseFilters(query);
+    const dashboardOptions = parseDashboardOptions(query);
     const demoMode = demoModeEnabled();
-    const data = demoMode ? readDemoDashboardData(filters) : readDashboardData(filters);
+    const data = demoMode ? readDemoDashboardData(filters, dashboardOptions) : readDashboardData(filters, dashboardOptions);
     const rtkGain = demoMode ? readDemoRtkGain() : await readRtkGain();
     return {
       ...data,

@@ -35,9 +35,15 @@ export function buildSourcePickerOptions(sources: Source[], sessions: Session[],
 }
 
 export function buildGroupPickerOptions(groups: UsageGroup[], selected: string[], sortMode: FilterSortMode, icon: PickerIcon): PickerOption[] {
-  const options = groups
+  const options: PickerOption[] = groups
     .filter((group) => icon !== "model" || group.totalTokens > 0 || selected.includes(group.label))
-    .map((group) => ({ value: icon === "repo" ? group.id : group.label, label: group.label, icon, usage: group.totalTokens }));
+    .map((group) => ({
+      value: icon === "repo" ? group.id : group.label,
+      label: group.label,
+      icon,
+      usage: group.totalTokens,
+      ...(icon === "repo" && group.verified !== undefined ? { verified: group.verified } : {}),
+    }));
   for (const value of selected) {
     if (!options.some((option) => option.value === value)) {
       options.push({ value, label: value, icon, usage: 0 });
@@ -59,7 +65,8 @@ export function readDisplaySettings(): DisplaySettings {
     const parsed = JSON.parse(window.localStorage.getItem("repospend.displaySettings.v2") ?? "{}") as Partial<DisplaySettings>;
     const chartGroupLimit = chartLimitOptions.includes(parsed.chartGroupLimit ?? 0) ? parsed.chartGroupLimit! : defaultDisplaySettings.chartGroupLimit;
     const tablePageSize = pageSizeOptions.includes(parsed.tablePageSize ?? 0) ? parsed.tablePageSize! : defaultDisplaySettings.tablePageSize;
-    return { chartGroupLimit, tablePageSize };
+    const splitSourceApps = typeof parsed.splitSourceApps === "boolean" ? parsed.splitSourceApps : defaultDisplaySettings.splitSourceApps;
+    return { chartGroupLimit, tablePageSize, splitSourceApps };
   } catch {
     return defaultDisplaySettings;
   }

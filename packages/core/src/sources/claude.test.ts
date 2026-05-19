@@ -110,13 +110,60 @@ describe("Claude Code adapter", () => {
       }),
     );
 
-    const result = withEnv({ HOME: home, XDG_CONFIG_HOME: path.join(home, ".config") }, () => scanClaude({ pricing: { "claude-haiku-4-5": { inputPerMillion: 1, outputPerMillion: 5 } } }));
+    const result = withEnv({ HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: path.join(home, ".config") }, () => scanClaude({ pricing: { "claude-haiku-4-5": { inputPerMillion: 1, outputPerMillion: 5 } } }));
 
     expect(result.sessions).toHaveLength(1);
     expect(result.sessions[0]?.id).toBe("local-session");
-    expect(result.sessions[0]?.sourceApp).toBe("Claude desktop local agent");
+    expect(result.sessions[0]?.sourceApp).toBe("Claude Desktop App");
     expect(result.sessions[0]?.detectedSurface).toBe("local_agent");
     expect(result.sessions[0]?.repoRoot).toBe(repo);
+  });
+
+  it("infers desktop app metadata from local-agent session paths", () => {
+    const home = makeTempDir();
+    const repo = makeTempDir();
+    fs.mkdirSync(path.join(repo, ".git"));
+    const sessionDir = path.join(home, ".config", "Claude", "local-agent-mode-sessions", "local-session-without-entrypoint");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, "audit.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "local-session-without-entrypoint",
+        timestamp: "2026-05-18T10:00:00.000Z",
+        cwd: repo,
+        message: { role: "assistant", model: "claude-haiku-4-5", usage: { input_tokens: 100, output_tokens: 20 } },
+      }),
+    );
+
+    const result = withEnv({ HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: path.join(home, ".config") }, () => scanClaude({ pricing: { "claude-haiku-4-5": { inputPerMillion: 1, outputPerMillion: 5 } } }));
+
+    expect(result.sessions[0]?.sourceApp).toBe("Claude Desktop App");
+    expect(result.sessions[0]?.sourceAppRaw).toBe("local-agent");
+    expect(result.sessions[0]?.detectedSurface).toBe("local_agent");
+  });
+
+  it("normalizes Claude desktop entrypoints as the desktop app", () => {
+    const claudeHome = makeTempDir();
+    const projectDir = path.join(claudeHome, "projects", "-tmp-desktop");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "desktop.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "desktop",
+        timestamp: "2026-05-18T10:00:00.000Z",
+        cwd: "/tmp/desktop",
+        entrypoint: "claude-desktop",
+        message: { role: "assistant", model: "claude-haiku-4-5", usage: { input_tokens: 100, output_tokens: 20 } },
+      }),
+    );
+
+    const result = scanClaude({ claudeHome, pricing: { "claude-haiku-4-5": { inputPerMillion: 1, outputPerMillion: 5 } } });
+
+    expect(result.sessions[0]?.sourceApp).toBe("Claude Desktop App");
+    expect(result.sessions[0]?.sourceAppRaw).toBe("claude-desktop");
+    expect(result.sessions[0]?.detectedSurface).toBe("local_agent");
   });
 
   it("does not mark successful tool output as failed just because it mentions errors", () => {
@@ -149,6 +196,30 @@ describe("Claude Code adapter", () => {
         timestamp: "2026-05-18T10:00:00.000Z",
         cwd: "/tmp/vscode",
         entrypoint: "claude-vscode",
+        message: { role: "assistant", model: "claude-sonnet-4-5", usage: { input_tokens: 100, output_tokens: 20 } },
+      }),
+    );
+
+    const result = scanClaude({ claudeHome, pricing: { "claude-sonnet-4-5": { inputPerMillion: 3, outputPerMillion: 15 } } });
+
+    expect(result.sessions[0]?.sourceApp).toBe("VS Code");
+    expect(result.sessions[0]?.sourceAppRaw).toBe("claude-vscode");
+    expect(result.sessions[0]?.detectedSurface).toBe("vscode_extension");
+  });
+
+  it("groups Claude sidechain sessions by their entrypoint surface", () => {
+    const claudeHome = makeTempDir();
+    const projectDir = path.join(claudeHome, "projects", "-tmp-sidechain");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "agent-sidechain.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "sidechain",
+        timestamp: "2026-05-18T10:00:00.000Z",
+        cwd: "/tmp/sidechain",
+        entrypoint: "claude-vscode",
+        isSidechain: true,
         message: { role: "assistant", model: "claude-sonnet-4-5", usage: { input_tokens: 100, output_tokens: 20 } },
       }),
     );

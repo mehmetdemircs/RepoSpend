@@ -50,6 +50,23 @@ describe("dashboard snapshot", () => {
 
     expect(dashboard.sessions.map((session) => session.id)).toEqual(["a", "b"]);
   });
+
+  it("supports filtering sessions whose model was not recorded", () => {
+    const dashboard = buildDashboardSnapshot({
+      sources: [],
+      sourceStats: [],
+      sessions: [
+        usage({ id: "missing", repoName: "A", repoRoot: "/repo/a", sourceApp: "VS Code", model: undefined, totalTokens: 100 }),
+        usage({ id: "known", repoName: "B", repoRoot: "/repo/b", sourceApp: "Terminal", model: "gpt-5", totalTokens: 100 }),
+      ],
+      filters: { model: ["unknown-model"] },
+    });
+
+    expect(dashboard.sessions.map((session) => session.id)).toEqual(["missing"]);
+    expect(dashboard.models).toEqual([
+      expect.objectContaining({ id: "unknown-model", label: "Model not recorded", sessionCount: 1 }),
+    ]);
+  });
 });
 
 describe("repo rollup and usage health", () => {

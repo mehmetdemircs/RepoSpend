@@ -2,6 +2,16 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.0.6
+
+- Improve Codex session metadata recovery from rollout logs, including standalone Codex Desktop sessions and imported Claude model metadata.
+- Add an optional source-scoped app display mode so shared surfaces can be shown as source-specific entries such as "Codex on VS Code".
+- Improve sparse timeline charts and RTK unavailable-state guidance in the dashboard.
+- Document why RepoSpend token totals can differ from `ccusage` while API-equivalent costs still match.
+- Show a git-branch icon next to repos with a confirmed git root and a folder icon for path-inferred repos, giving a quick visual signal of data confidence.
+- Fix Windows extended-length path prefix (\\?\) handling in git root detection, which caused repos on Windows to incorrectly appear as unverified.
+
+
 ## 0.0.5
 
 - Fix Codex token under-count on long sessions by summing per-turn `last_token_usage` instead of taking the max of `total_token_usage`, which Codex resets on each context compaction.

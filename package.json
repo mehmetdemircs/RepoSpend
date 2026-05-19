@@ -1,6 +1,6 @@
 {
   "name": "repospend",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Local-first dashboard for tracking AI coding token usage by repo, source, session, model, and day.",
   "license": "Apache-2.0",
   "author": "Mehmet Mustafa Demir",

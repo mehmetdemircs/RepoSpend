@@ -231,13 +231,14 @@ function claudeFileToUsage(file: ClaudeSessionFile, index: number, options: Clau
   const cwd = breakdown.cwd ?? fallbackCwd;
   const repo = resolveRepoInfo(cwd, options.config);
   const warnings = [...repo.warnings, ...breakdown.warnings];
+  const entrypoint = breakdown.entrypoint ?? inferClaudeEntrypointFromPath(file.filePath);
   if (!breakdown.cwd) warnings.push("repo_inferred_from_claude_project_dir");
   const hasTokenBreakdown = breakdown.totalTokens > 0 && breakdown.usageCount > 0;
   const usage: NormalizedUsage = {
     id,
     sourceClient: "claude",
-    sourceApp: claudeSourceAppLabel(breakdown.entrypoint),
-    sourceAppRaw: breakdown.entrypoint,
+    sourceApp: claudeSourceAppLabel(entrypoint),
+    sourceAppRaw: entrypoint,
     sourcePath: file.filePath,
     repoRoot: repo.repoRoot,
     repoName: repo.repoName,
@@ -267,9 +268,9 @@ function claudeFileToUsage(file: ClaudeSessionFile, index: number, options: Clau
     rawEventCount: breakdown.rawEventCount,
     parseStatus: breakdown.parseStatus,
     parseErrors: breakdown.parseErrors,
-    detectedSurface: claudeSurface(breakdown.entrypoint),
+    detectedSurface: claudeSurface(entrypoint),
     surfaceConfidence: "medium",
-    surfaceReason: breakdown.entrypoint ? `Claude Code entrypoint: ${breakdown.entrypoint}` : "Claude Code transcript",
+    surfaceReason: entrypoint ? `Claude Code entrypoint: ${entrypoint}` : "Claude Code transcript",
     userPromptCount: breakdown.userPromptCount,
     assistantMessageCount: breakdown.assistantMessageCount,
     toolCallCount: breakdown.toolCallCount,
@@ -295,6 +296,10 @@ function claudeFileToUsage(file: ClaudeSessionFile, index: number, options: Clau
     estimatedCostUsd: cost,
     warnings: cost === undefined ? [...usage.warnings, "unknown_pricing"] : usage.warnings,
   };
+}
+
+function inferClaudeEntrypointFromPath(filePath: string): string | undefined {
+  return filePath.split(path.sep).includes("local-agent-mode-sessions") ? "local-agent" : undefined;
 }
 
 function readClaudeBreakdown(filePath: string, seenUsageKeys: Set<string>): ClaudeSessionBreakdown {
@@ -495,14 +500,14 @@ function inferOutcome(breakdown: ClaudeSessionBreakdown): NormalizedUsage["sessi
 function claudeSurface(entrypoint: string | undefined): NormalizedUsage["detectedSurface"] {
   const value = entrypoint?.toLowerCase() ?? "";
   if (value.includes("vscode")) return "vscode_extension";
-  if (value.includes("local-agent")) return "local_agent";
+  if (value.includes("local-agent") || value.includes("desktop")) return "local_agent";
   return "terminal_cli";
 }
 
 function claudeSourceAppLabel(entrypoint: string | undefined): string {
   const value = entrypoint?.toLowerCase() ?? "";
   if (value.includes("vscode")) return "VS Code";
-  if (value.includes("local-agent")) return "Claude desktop local agent";
+  if (value.includes("local-agent") || value.includes("desktop")) return "Claude Desktop App";
   if (value === "cli" || value.includes("terminal")) return "Terminal";
   return "Claude Code";
 }

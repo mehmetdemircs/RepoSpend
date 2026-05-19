@@ -1,5 +1,6 @@
 import { buildDashboardSnapshot, calculateCostUsd, defaultPricing } from "@repospend/core";
 import type { DashboardSnapshot, DashboardSourceStats, NormalizedUsage, RtkGain, SourceStatus, UsageFilters } from "@repospend/types";
+import { displaySessions, type DashboardReadOptions } from "./data.js";
 
 const baseDate = "2026-05-18";
 const demoPricing = {
@@ -48,11 +49,11 @@ export function demoModeEnabled(): boolean {
   return process.env.REPOSPEND_DEMO_DATA === "lotr";
 }
 
-export function readDemoDashboardData(filters: UsageFilters = {}): DashboardSnapshot {
+export function readDemoDashboardData(filters: UsageFilters = {}, options: DashboardReadOptions = {}): DashboardSnapshot {
   return buildDashboardSnapshot({
     sources: demoSources,
     sourceStats: demoSourceStats,
-    sessions: demoSessions,
+    sessions: displaySessions(demoSessions, options),
     filters,
   });
 }
@@ -314,7 +315,7 @@ const demoInputs: DemoSessionInput[] = [
     repo: "rivendell-dashboard",
     title: "Refactor the council-of-elrond planner",
     sourceClient: "claude",
-    sourceApp: "Claude desktop local agent",
+    sourceApp: "Claude Desktop App",
     sourceAppRaw: "claude-desktop-local-agent",
     model: "claude-sonnet-4-6",
     provider: "anthropic",
@@ -628,7 +629,7 @@ function detectedSurfaceForApp(sourceApp: string): NormalizedUsage["detectedSurf
   if (sourceApp === "VS Code") return "vscode_extension";
   if (sourceApp === "Terminal") return "terminal_cli";
   if (sourceApp === "Codex app") return "codex_app_cloud";
-  if (sourceApp === "Claude desktop local agent") return "local_agent";
+  if (sourceApp === "Claude Desktop App") return "local_agent";
   return "terminal_cli";
 }
 

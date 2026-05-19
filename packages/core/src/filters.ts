@@ -5,7 +5,7 @@ export function filterUsage(sessions: NormalizedUsage[], filters: UsageFilters):
     if (!matchesAny(session.sourceClient, filters.source)) return false;
     if (!matchesAny(session.sourceApp, filters.sourceApp)) return false;
     if (!matchesRepo(session, filters.repo)) return false;
-    if (!matchesAny(session.model, filters.model)) return false;
+    if (!matchesModel(session.model, filters.model)) return false;
     const startedAt = timestamp(session.startedAt);
     const hasDateFilter = Boolean(filters.from || filters.to);
     if (hasDateFilter && startedAt === undefined) return false;
@@ -27,6 +27,12 @@ function matchesRepo(session: NormalizedUsage, filter: UsageFilters["repo"]): bo
   const values = filterValues(filter);
   if (!values.length) return true;
   return values.includes(session.repoName) || values.includes(session.repoRoot);
+}
+
+function matchesModel(value: string | undefined, filter: UsageFilters["model"]): boolean {
+  const values = filterValues(filter);
+  if (!values.length) return true;
+  return value !== undefined ? values.includes(value) : values.includes("unknown-model");
 }
 
 function filterValues(filter: string | string[] | undefined): string[] {

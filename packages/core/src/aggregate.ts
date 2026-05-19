@@ -43,11 +43,15 @@ export function summarize(sessions: NormalizedUsage[]): Summary {
 }
 
 export function groupByRepo(sessions: NormalizedUsage[]): UsageGroup[] {
-  return groupBy(sessions, (session) => session.repoRoot, (session) => session.repoName);
+  const groups = groupBy(sessions, (session) => session.repoRoot, (session) => session.repoName);
+  return groups.map((group) => ({
+    ...group,
+    verified: sessions.some((s) => s.repoRoot === group.id && !s.warnings.includes("repo_unverified_no_git_root")),
+  }));
 }
 
 export function groupByModel(sessions: NormalizedUsage[]): UsageGroup[] {
-  return groupBy(sessions, (session) => session.model ?? "unknown-model", (session) => session.model ?? "Unknown model");
+  return groupBy(sessions, (session) => session.model ?? "unknown-model", (session) => session.model ?? "Model not recorded");
 }
 
 export function groupBySourceApp(sessions: NormalizedUsage[]): UsageGroup[] {

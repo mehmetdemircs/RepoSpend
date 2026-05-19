@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { ArrowDownUp, Bot, Boxes, Calculator, ChartNoAxesCombined, CircleDollarSign, Code2, Columns3, Command, Copy, Database, Download, ExternalLink, Filter, Folder, Info, LayoutDashboard, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Server, Settings, Terminal, TriangleAlert, X } from "lucide-react";
+import { ArrowDownUp, Bot, Boxes, Calculator, ChartNoAxesCombined, CircleDollarSign, Code2, Columns3, Command, Copy, Database, Download, ExternalLink, Filter, Folder, GitBranch, Info, LayoutDashboard, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Server, Settings, Terminal, TriangleAlert, X } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -141,8 +141,14 @@ function App() {
         params.set(key, value);
       }
     });
+    if (displaySettings.splitSourceApps) params.set("splitSourceApps", "true");
     return params.toString();
-  }, [filters]);
+  }, [displaySettings.splitSourceApps, filters]);
+  const filterOptionsQuery = React.useMemo(() => {
+    const params = new URLSearchParams();
+    if (displaySettings.splitSourceApps) params.set("splitSourceApps", "true");
+    return params.toString();
+  }, [displaySettings.splitSourceApps]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -152,9 +158,9 @@ function App() {
       .then((dashboard) => {
         if (!mounted) return;
         setData(dashboard);
-        if (!query) setFilterOptionsData(dashboard);
+        if (query === filterOptionsQuery) setFilterOptionsData(dashboard);
         else {
-          void fetchJson<DashboardResponse>("/api/dashboard")
+          void fetchJson<DashboardResponse>(`/api/dashboard${filterOptionsQuery ? `?${filterOptionsQuery}` : ""}`)
             .then((optionDashboard) => {
               if (mounted) setFilterOptionsData(optionDashboard);
             })
@@ -172,7 +178,7 @@ function App() {
     return () => {
       mounted = false;
     };
-  }, [query]);
+  }, [filterOptionsQuery, query]);
 
   React.useEffect(() => {
     const repoSource = filterOptionsData ?? data;
@@ -227,6 +233,9 @@ function App() {
   }, [displaySettings]);
 
   const updateDisplaySettings = React.useCallback((next: Partial<DisplaySettings>) => {
+    if (next.splitSourceApps !== undefined) {
+      setFilters((current) => ({ ...current, sourceApp: [] }));
+    }
     setDisplaySettings((current) => ({ ...current, ...next }));
   }, []);
 
@@ -423,22 +432,11 @@ function App() {
             </div>
 
             <div className="overview-chart-stack">
-              <ChartPanel title={`${metricLabel(metric)} over time`}>
-                <ResponsiveContainer width="100%" height={320}>
-                  <LineChart data={[...data.days].sort((a, b) => a.id.localeCompare(b.id))}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.14)" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12, fill: "#94a3b8" }} />
-                    <YAxis tickFormatter={(value) => metricTick(metric, Number(value))} width={62} tick={{ fill: "#94a3b8" }} />
-                    <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} formatter={(value) => tooltipMetric(metric, Number(value))} />
-                    <Legend />
-                    <Line type="monotone" dataKey={metric} name={metricLabel(metric)} stroke="#6d5dfc" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartPanel>
+              <MetricTimelinePanel data={data} metric={metric} />
 
               <div className="overview-chart-pair">
-                <ChartPanel title={`Models: ${metricLabel(metric)}`}>
-                  <ResponsiveContainer width="100%" height={260}>
+                <ChartPanel title={`Models: ${metricLabel(metric)}`} className="overview-chart-panel">
+                  <ResponsiveContainer width="100%" height={284}>
                     <BarChart data={groupUsageForChart(data.models, metric, displaySettings.chartGroupLimit)} layout="vertical" margin={{ left: 16, right: 16 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.14)" />
                       <XAxis type="number" tickFormatter={(value) => metricTick(metric, Number(value))} tick={{ fill: "#94a3b8" }} />
@@ -449,8 +447,8 @@ function App() {
                   </ResponsiveContainer>
                 </ChartPanel>
 
-                <ChartPanel title={`${metricLabel(metric)} by repo`}>
-                  <ResponsiveContainer width="100%" height={260}>
+                <ChartPanel title={`${metricLabel(metric)} by repo`} className="overview-chart-panel">
+                  <ResponsiveContainer width="100%" height={284}>
                     <BarChart data={groupUsageForChart(data.repos, metric, displaySettings.chartGroupLimit)} margin={{ left: 8, right: 8, bottom: 48 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.14)" />
                       <XAxis dataKey="label" angle={-30} textAnchor="end" height={70} tick={{ fontSize: 12, fill: "#94a3b8" }} />
@@ -660,6 +658,113 @@ function NavButton({ icon, label, active, onClick }: { icon: React.ReactElement;
       <span>{label}</span>
     </button>
   );
+}
+
+type TimelineGranularity = "day" | "hour";
+type TimelineRow = UsageGroup & { chartLabel: string; fullLabel: string; chartValue: number };
+
+function MetricTimelinePanel({ data, metric }: { data: ApiData; metric: MetricKey }) {
+  const timeline = React.useMemo(() => buildMetricTimeline(data, metric), [data, metric]);
+  const metricName = metricLabel(metric);
+
+  return (
+    <ChartPanel title={timeline.title} className="overview-chart-panel timeline-chart-panel">
+      <div className="timeline-context-row">
+        <TimelineContextItem label="Granularity" value={count(timeline.rows.length, timeline.granularity === "hour" ? "active hour" : "active day")} />
+        <TimelineContextItem label="Peak" value={timeline.peak ? `${timeline.peak.fullLabel} · ${formatTimelineMetric(metric, timeline.peak.chartValue)}` : "No activity"} />
+        <TimelineContextItem label="Average" value={formatTimelineMetric(metric, timeline.averageValue)} />
+      </div>
+
+      <ResponsiveContainer width="100%" height={timeline.sparse ? 232 : 248}>
+        {timeline.sparse ? (
+          <BarChart data={timeline.rows} margin={{ left: 8, right: 16, bottom: timeline.rows.length > 2 ? 34 : 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.14)" />
+            <XAxis dataKey="chartLabel" angle={timeline.rows.length > 2 ? -18 : 0} textAnchor={timeline.rows.length > 2 ? "end" : "middle"} height={timeline.rows.length > 2 ? 62 : 36} tick={{ fontSize: 12, fill: "#94a3b8" }} />
+            <YAxis tickFormatter={(value) => metricTick(metric, Number(value))} width={62} tick={{ fill: "#94a3b8" }} />
+            <Tooltip
+              contentStyle={chartTooltipStyle}
+              labelStyle={chartTooltipLabelStyle}
+              itemStyle={chartTooltipItemStyle}
+              labelFormatter={(_, payload) => payload?.[0]?.payload?.fullLabel ?? ""}
+              formatter={(value) => tooltipMetric(metric, Number(value))}
+            />
+            <Bar dataKey="chartValue" name={metricName} radius={[5, 5, 0, 0]}>
+              {timeline.rows.map((_, index) => (
+                <Cell key={index} fill={colors[index % colors.length]} />
+              ))}
+            </Bar>
+          </BarChart>
+        ) : (
+          <LineChart data={timeline.rows}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.14)" />
+            <XAxis dataKey="chartLabel" tick={{ fontSize: 12, fill: "#94a3b8" }} />
+            <YAxis tickFormatter={(value) => metricTick(metric, Number(value))} width={62} tick={{ fill: "#94a3b8" }} />
+            <Tooltip
+              contentStyle={chartTooltipStyle}
+              labelStyle={chartTooltipLabelStyle}
+              itemStyle={chartTooltipItemStyle}
+              labelFormatter={(_, payload) => payload?.[0]?.payload?.fullLabel ?? ""}
+              formatter={(value) => tooltipMetric(metric, Number(value))}
+            />
+            <Legend />
+            <Line type="monotone" dataKey="chartValue" name={metricName} stroke="#6d5dfc" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+          </LineChart>
+        )}
+      </ResponsiveContainer>
+    </ChartPanel>
+  );
+}
+
+function TimelineContextItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="timeline-context-item">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function buildMetricTimeline(data: ApiData, metric: MetricKey): { title: string; granularity: TimelineGranularity; rows: TimelineRow[]; sparse: boolean; peak: TimelineRow | undefined; averageValue: number } {
+  const dayRows = buildTimelineRows(data.days, metric, "day");
+  const hourRows = buildTimelineRows(data.hours, metric, "hour");
+  const useHours = dayRows.length <= 3 && hourRows.length >= 4;
+  const granularity: TimelineGranularity = useHours ? "hour" : "day";
+  const rows = useHours ? hourRows : dayRows;
+  const peak = [...rows].sort((a, b) => b.chartValue - a.chartValue)[0];
+  const averageValue = rows.length ? rows.reduce((sum, row) => sum + row.chartValue, 0) / rows.length : 0;
+  const title = useHours ? `${metricLabel(metric)} by active hour` : rows.length <= 3 ? `${metricLabel(metric)} by active day` : `${metricLabel(metric)} over time`;
+  return { title, granularity, rows, sparse: useHours || rows.length <= 3, peak, averageValue };
+}
+
+function buildTimelineRows(groups: UsageGroup[], metric: MetricKey, granularity: TimelineGranularity): TimelineRow[] {
+  return [...groups]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((group) => ({
+      ...group,
+      chartLabel: granularity === "hour" ? formatHourBucket(group.id, "short") : formatDayBucket(group.id, "short"),
+      fullLabel: granularity === "hour" ? formatHourBucket(group.id, "long") : formatDayBucket(group.id, "long"),
+      chartValue: timelineMetricValue(group, metric),
+    }));
+}
+
+function timelineMetricValue(group: UsageGroup, metric: MetricKey): number {
+  return metric === "estimatedCostUsd" ? group.estimatedCostUsd ?? 0 : group[metric];
+}
+
+function formatTimelineMetric(metric: MetricKey, value: number): string {
+  return metric === "estimatedCostUsd" ? money(value) : tokens(Math.round(value));
+}
+
+function formatDayBucket(value: string, length: "short" | "long"): string {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, length === "short" ? { month: "short", day: "numeric" } : { dateStyle: "medium" });
+}
+
+function formatHourBucket(value: string, length: "short" | "long"): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, length === "short" ? { month: "short", day: "numeric", hour: "numeric" } : { dateStyle: "medium", timeStyle: "short" });
 }
 
 function OverviewKpis({ data, onOpenRepo }: { data: ApiData; onOpenRepo: (repoId: string) => void }) {
@@ -913,7 +1018,7 @@ function RecentSessionsPanel({ sessions, onOpenSession }: { sessions: Session[];
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</div>
               <div className="truncate text-xs text-slate-500">
-                {session.repoName} · {sourceLabel(session.sourceClient)} · {session.sourceApp || surfaceLabel(session.detectedSurface)} · {session.startedAt ? session.startedAt.slice(0, 10) : "Unknown date"}
+                <RepoLabel name={session.repoName} verified={sessionIsRepoVerified(session)} /> · {sourceLabel(session.sourceClient)} · {session.sourceApp || surfaceLabel(session.detectedSurface)} · {session.startedAt ? session.startedAt.slice(0, 10) : "Unknown date"}
               </div>
               <BadgeRow labels={sessionBadges(session)} />
             </div>
@@ -984,18 +1089,7 @@ function RtkDashboard({ gain, pricing, displaySettings }: { gain: RtkGain; prici
     return (
       <section className="mt-4 space-y-4">
         <RtkHealthBanner gain={gain} />
-        <div className="panel p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex items-start gap-3">
-              <Terminal className="mt-1 h-5 w-5 text-slate-500" aria-hidden />
-              <div>
-                <h2 className="text-base font-semibold">RTK Insights</h2>
-                <p className="mt-1 text-sm text-slate-600">RTK data is unavailable. {gain.error ?? "Install or configure the rtk command proxy to see local token savings here."}</p>
-                <p className="mt-1 text-xs text-slate-500">This page is global and does not use RepoSpend filters.</p>
-              </div>
-            </div>
-          </div>
-        </div>
+        <RtkInstallGuide />
         <RtkExplainer />
         <RtkCoverageGaps gain={gain} />
         <RtkRecommendedActions actions={recommendedActions} />
@@ -1153,12 +1247,103 @@ function RtkHealthBanner({ gain }: { gain: RtkGain }) {
           <p>
             {detected
               ? "RepoSpend can read local RTK activity, so token-savings insights are available."
-              : "RepoSpend cannot read local RTK activity yet. Install or enable the RTK command proxy to see command-output token savings."}
+              : "RepoSpend cannot find RTK data on this machine. Install RTK and connect it to your AI tool to track how many tokens it saves on command output."}
           </p>
           {!detected ? <p className="mt-1 text-xs">Try running <code>rtk gain --history</code> in your terminal to confirm RTK is installed and producing a local report.</p> : null}
           {detected && gain.rtkCodexHookStatus === "unknown" ? <p className="mt-1 text-xs">Codex hook status is unknown from the current RTK report.</p> : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+type OsPlatform = "windows" | "unix";
+
+function detectOs(): OsPlatform {
+  return navigator.userAgent.toLowerCase().includes("win") ? "windows" : "unix";
+}
+
+const rtkInitOptions: Array<{ tool: string; cmd: string }> = [
+  { tool: "Claude Code / Copilot", cmd: "rtk init -g" },
+  { tool: "Gemini CLI", cmd: "rtk init -g --gemini" },
+  { tool: "Codex", cmd: "rtk init -g --codex" },
+  { tool: "Cursor", cmd: "rtk init -g --agent cursor" },
+  { tool: "Windsurf", cmd: "rtk init --agent windsurf" },
+  { tool: "Cline / Roo Code", cmd: "rtk init --agent cline" },
+  { tool: "Kilo Code", cmd: "rtk init --agent kilocode" },
+  { tool: "Google Antigravity", cmd: "rtk init --agent antigravity" },
+  { tool: "Hermes", cmd: "rtk init --agent hermes" },
+];
+
+function RtkInstallGuide() {
+  const [os, setOs] = React.useState<OsPlatform>(detectOs);
+  const [copiedKey, setCopiedKey] = React.useState<string | null>(null);
+
+  function copy(text: string, key: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey(null), 1800);
+    }).catch(() => {});
+  }
+
+  const installCmd = os === "windows"
+    ? "winget install -e --id rtk-ai.rtk"
+    : "curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh | sh";
+
+  return (
+    <div className="panel p-4">
+      <div className="panel-inline-heading">
+        <Download className="h-4 w-4 text-teal" aria-hidden />
+        <h2>Install RTK</h2>
+      </div>
+      <p className="mt-2 text-sm text-slate-600">RTK is a single binary with no dependencies. Three steps to enable token savings tracking.</p>
+
+      <div className="breakdown-tabs mt-3">
+        <button type="button" className={os === "windows" ? "active" : ""} onClick={() => setOs("windows")}>Windows</button>
+        <button type="button" className={os === "unix" ? "active" : ""} onClick={() => setOs("unix")}>macOS / Linux</button>
+      </div>
+
+      <ol className="mt-4 space-y-5">
+        <li>
+          <p className="text-sm font-medium text-slate-400">1. Install the binary</p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <code className="rtk-install-cmd">{installCmd}</code>
+            <button type="button" className="button shrink-0" onClick={() => copy(installCmd, "install")}>
+              <Copy className="h-3.5 w-3.5" aria-hidden />
+              {copiedKey === "install" ? "Copied" : "Copy"}
+            </button>
+          </div>
+        </li>
+
+        <li>
+          <p className="text-sm font-medium text-slate-400">2. Wire up your AI tool</p>
+          <div className="mt-1.5 space-y-1.5">
+            {rtkInitOptions.map(({ tool, cmd }) => (
+              <div key={cmd} className="rtk-init-row">
+                <span className="rtk-tool-label">{tool}</span>
+                <code className="rtk-install-cmd">{cmd}</code>
+                <button type="button" className="button shrink-0" onClick={() => copy(cmd, cmd)}>
+                  <Copy className="h-3.5 w-3.5" aria-hidden />
+                  {copiedKey === cmd ? "Copied" : "Copy"}
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-slate-500">Restart your AI tool after running the relevant command.</p>
+        </li>
+
+        <li>
+          <p className="text-sm font-medium text-slate-400">3. Verify</p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <code className="rtk-install-cmd">rtk gain</code>
+            <button type="button" className="button shrink-0" onClick={() => copy("rtk gain", "verify")}>
+              <Copy className="h-3.5 w-3.5" aria-hidden />
+              {copiedKey === "verify" ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">If you see token stats, RTK is working. Refresh this page to load your data.</p>
+        </li>
+      </ol>
     </div>
   );
 }
@@ -1421,7 +1606,7 @@ function RepoTable({
         <tbody>
           {pager.items.map((repo) => (
             <tr key={repo.id} onClick={() => onSelect(repo.id)} className={`clickable-row ${selectedRepo === repo.id ? "selected" : ""}`}>
-              <td className="font-medium">{repo.label}</td>
+              <td className="font-medium"><RepoLabel name={repo.label} verified={repo.verified === true} /></td>
               <td><CostValue value={repo.estimatedCostUsd} breakdown={repo} /></td>
               <td><TokenValue value={repo.totalTokens} showUnit={false} /></td>
               <td><CountValue value={repo.sessionCount} noun="session" showUnit={false} /></td>
@@ -1491,7 +1676,7 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
       <section className="panel repo-hero">
         <div className="repo-hero-main">
           <div className="repo-hero-eyebrow">{dateRangeLabel}</div>
-          <h2>{repo.label}</h2>
+          <h2><RepoLabel name={repo.label} verified={repo.verified === true} /></h2>
           <p>
             {repo.label} — {count(row.sessionCount, "session")} · {money(row.estimatedCostUsd)} estimated · {tokens(row.totalTokens)} · {count(row.fileEditCount, "file")} edited
           </p>
@@ -1972,7 +2157,7 @@ function SessionsTable({
               onClick={() => onSelectSession?.(session.id)}
               className={`${selectedSessionId === session.id ? "selected" : ""} ${isCostOutlier(session, costOutlierThreshold) ? "cost-outlier-row" : ""} ${onSelectSession ? "clickable-row" : ""}`}
             >
-              {!compact ? <td>{session.repoName}</td> : null}
+              {!compact ? <td><RepoLabel name={session.repoName} verified={sessionIsRepoVerified(session)} /></td> : null}
               {!compact ? <td><div className="source-app-cell"><SourceBadge source={session.sourceClient} /><AppLabel app={session.sourceApp} surface={session.detectedSurface} /></div></td> : null}
               <td className="max-w-72 truncate font-medium" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</td>
               <td><OutcomeBadge outcome={session.sessionOutcome} /></td>
@@ -2782,6 +2967,17 @@ function SettingsAdvancedTab({
               options={pageSizeOptions}
               onChange={(value) => setDisplaySettings({ tablePageSize: value })}
             />
+            <label className="settings-toggle-card">
+              <input
+                type="checkbox"
+                checked={displaySettings.splitSourceApps}
+                onChange={(event) => setDisplaySettings({ splitSourceApps: event.target.checked })}
+              />
+              <span className="settings-toggle-copy">
+                <strong>Split apps by source</strong>
+                <span>Shows VS Code and Terminal as separate entries for Codex and Claude Code instead of grouping them together.</span>
+              </span>
+            </label>
           </div>
         </div>
 
@@ -3137,7 +3333,7 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
               <tbody>
                 {repoPager.items.map((repo) => (
                   <tr className="clickable-row" key={repo.repoRoot} role="button" tabIndex={0} onClick={() => onOpenRepo(repo.repoRoot)} onKeyDown={(event) => activateClickableRow(event, () => onOpenRepo(repo.repoRoot))}>
-                    <td className="font-medium">{repo.repoName}</td>
+                    <td className="font-medium"><RepoLabel name={repo.repoName} verified={false} /></td>
                     <td><CountValue value={repo.importantFailures} noun="issue" showUnit={false} /></td>
                     <td><CountValue value={repo.harmlessNonZeroEvents} noun="event" showUnit={false} /></td>
                     <td><CountValue value={repo.repeatedFailureClusters} noun="cluster" showUnit={false} /></td>
@@ -3185,7 +3381,7 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
                 {reviewPager.items.map((session) => (
                   <tr className="clickable-row" key={session.id} role="button" tabIndex={0} onClick={() => onOpenSession(session.id)} onKeyDown={(event) => activateClickableRow(event, () => onOpenSession(session.id))}>
                     <td className="max-w-80 truncate font-medium" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</td>
-                    <td>{session.repoName}</td>
+                    <td><RepoLabel name={session.repoName} verified={sessionIsRepoVerified(session)} /></td>
                     <td><OutcomeBadge outcome={session.sessionOutcome} /></td>
                     <td><CountValue value={importantCommandFailures(session)} noun="issue" showUnit={false} /></td>
                     <td><CountValue value={(session.harmlessNonZeroEvents ?? 0) + (session.exploratoryMisses ?? 0)} noun="event" showUnit={false} /></td>
@@ -3320,7 +3516,7 @@ function ExpensiveSessionsTable({ sessions, pageSize, onOpenSession, onOpenRepo 
                 <button className="row-link-button" type="button" onClick={(event) => {
                   event.stopPropagation();
                   onOpenRepo(session.repoRoot || session.repoName);
-                }}>{session.repoName}</button>
+                }}><RepoLabel name={session.repoName} verified={sessionIsRepoVerified(session)} /></button>
               </td>
               <td className="max-w-80 truncate font-medium" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</td>
               <td><div className="source-app-cell"><SourceBadge source={session.sourceClient} /><AppLabel app={session.sourceApp} surface={session.detectedSurface} /></div></td>
@@ -3422,13 +3618,13 @@ function EmptyPanel({ title, text }: { title: string; text: string }) {
   );
 }
 
-function ChartPanel({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartPanel({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="panel overflow-hidden">
+    <div className={`panel chart-panel overflow-hidden ${className}`}>
       <div className="panel-heading">
         <h2>{title}</h2>
       </div>
-      <div className="p-3">{children}</div>
+      <div className="chart-panel-body p-3">{children}</div>
     </div>
   );
 }
@@ -3497,7 +3693,7 @@ function FilterPillPicker({
               aria-pressed={active}
               title={option.usage === undefined ? (active ? `Remove ${option.label}` : `Add ${option.label}`) : `${option.label}: ${tokensExact(option.usage)} in this option set`}
             >
-              <PickerIconView kind={option.icon ?? iconKind} label={option.label} />
+              <PickerIconView kind={option.icon ?? iconKind} label={option.label} verified={option.verified === true} />
               <span>{option.label}</span>
             </button>
           );
@@ -3688,11 +3884,24 @@ function SourceBadge({ source, label }: { source: Session["sourceClient"]; label
   );
 }
 
-function PickerIconView({ kind, label }: { kind: PickerIcon; label: string }) {
+function sessionIsRepoVerified(session: Session): boolean {
+  return !session.warnings.includes("repo_unverified_no_git_root");
+}
+
+function RepoLabel({ name, verified }: { name: string; verified: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {verified ? <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Folder className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+      {name}
+    </span>
+  );
+}
+
+function PickerIconView({ kind, label, verified }: { kind: PickerIcon; label: string; verified?: boolean }) {
   if (label === "All") return <Boxes className="h-4 w-4" aria-hidden />;
   if (kind === "source") return <AppIcon app={label} />;
   if (kind === "app") return <AppIcon app={label} />;
-  if (kind === "repo") return <Folder className="h-4 w-4" aria-hidden />;
+  if (kind === "repo") return verified ? <GitBranch className="h-4 w-4" aria-hidden /> : <Folder className="h-4 w-4" aria-hidden />;
   if (label.toLowerCase().includes("claude")) return <ClaudeIcon />;
   if (label.toLowerCase().includes("gpt")) return <CodexIcon />;
   return <Bot className="h-4 w-4" aria-hidden />;
@@ -3700,7 +3909,11 @@ function PickerIconView({ kind, label }: { kind: PickerIcon; label: string }) {
 
 function AppIcon({ app, surface }: { app?: string; surface?: Session["detectedSurface"] }) {
   const kind = (app || surface || "").toLowerCase();
-  if (kind.includes("desktop local agent") || surface === "local_agent") return <ClaudeDesktopIcon />;
+  if (kind.includes("codex on vs code") || kind.includes("codex on vscode")) return <CompositeAppIcon source="codex" surface="vscode" />;
+  if (kind.includes("codex on terminal") || kind.includes("codex on cli")) return <CompositeAppIcon source="codex" surface="terminal" />;
+  if (kind.includes("claude code on vs code") || kind.includes("claude code on vscode")) return <CompositeAppIcon source="claude" surface="vscode" />;
+  if (kind.includes("claude code on terminal") || kind.includes("claude code on cli")) return <CompositeAppIcon source="claude" surface="terminal" />;
+  if (kind.includes("desktop local agent") || kind.includes("desktop app") || surface === "local_agent") return <ClaudeDesktopIcon />;
   if (kind.includes("claude")) return <ClaudeIcon />;
   if (kind.includes("vs code") || kind.includes("vscode") || surface === "vscode_extension") return <VsCodeIcon />;
   if (kind.includes("codex app") || kind.includes("subagent") || surface === "codex_app_cloud") return <CodexAppIcon />;
@@ -3709,6 +3922,19 @@ function AppIcon({ app, surface }: { app?: string; surface?: Session["detectedSu
   if (kind.includes("terminal") || kind.includes("cli") || surface === "terminal_cli") return <Terminal className="h-4 w-4" aria-hidden />;
   if (!app) return <Boxes className="h-4 w-4" aria-hidden />;
   return <Command className="h-4 w-4" aria-hidden />;
+}
+
+function CompositeAppIcon({ source, surface }: { source: "codex" | "claude"; surface: "vscode" | "terminal" }) {
+  return (
+    <span className={`combo-icon combo-icon-${source}-${surface}`} aria-hidden>
+      <span className="combo-icon-main">
+        {surface === "vscode" ? <VsCodeIcon /> : <Terminal className="brand-icon terminal-combo-icon" aria-hidden />}
+      </span>
+      <span className="combo-icon-corner">
+        {source === "codex" ? <CodexIcon /> : <ClaudeIcon />}
+      </span>
+    </span>
+  );
 }
 
 function VsCodeIcon() {
@@ -4323,8 +4549,8 @@ function repoModelBreakdown(sessions: Session[], repo: RepoRow): RepoModelSpend[
   const rows = new Map<string, RepoModelSpend>();
   const totalCost = repo.estimatedCostUsd ?? sessions.reduce((sum, session) => sum + (session.estimatedCostUsd ?? 0), 0);
   for (const session of sessions) {
-    const id = session.model ?? "Unknown model";
-    const row = rows.get(id) ?? { id, label: id, sessionCount: 0, totalTokens: 0, estimatedCostUsd: undefined, costShare: 0 };
+    const id = session.model ?? "unknown-model";
+    const row = rows.get(id) ?? { id, label: session.model ?? "Model not recorded", sessionCount: 0, totalTokens: 0, estimatedCostUsd: undefined, costShare: 0 };
     row.sessionCount += 1;
     row.totalTokens += session.totalTokens;
     if (session.estimatedCostUsd !== undefined) row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));

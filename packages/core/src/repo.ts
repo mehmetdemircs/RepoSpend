@@ -13,8 +13,14 @@ export interface RepoInfo {
   warnings: string[];
 }
 
+function normalizeRoot(p: string): string {
+  // Strip Windows extended-length path prefix (\\?\) before normalizing
+  const stripped = p.startsWith("\\\\?\\") ? p.slice(4) : p;
+  return stripped.replace(/^([a-zA-Z]):/, (_, letter: string) => letter.toUpperCase() + ":");
+}
+
 export function findGitRoot(cwd: string, fileSystem: Pick<FileSystemLike, "existsSync" | "statSync"> = fs): string | undefined {
-  let current = path.resolve(cwd);
+  let current = normalizeRoot(path.resolve(cwd));
 
   while (true) {
     const gitPath = path.join(current, ".git");
@@ -68,8 +74,8 @@ function safeFindGitRoot(cwd: string, fileSystem: Pick<FileSystemLike, "existsSy
 }
 
 export function fallbackWorkspaceRoot(cwd: string): string {
-  const resolved = path.resolve(cwd || process.cwd());
-  const home = process.env.HOME ? path.resolve(process.env.HOME) : undefined;
+  const resolved = normalizeRoot(path.resolve(cwd || process.cwd()));
+  const home = process.env.HOME ? normalizeRoot(path.resolve(process.env.HOME)) : undefined;
   if (home && (resolved === home || resolved.startsWith(`${home}${path.sep}`))) {
     const relative = path.relative(home, resolved).split(path.sep).filter(Boolean);
     const first = relative[0];

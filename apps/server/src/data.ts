@@ -4,6 +4,10 @@ import type { DashboardSnapshot, NormalizedUsage, UsageFilters } from "@repospen
 
 export type DashboardData = DashboardSnapshot;
 
+export interface DashboardReadOptions {
+  splitSourceApps?: boolean;
+}
+
 interface RawUsageData {
   sources: ReturnType<typeof scanUsageSources>["sources"];
   sourceStats: ReturnType<typeof scanUsageSources>["sourceStats"];
@@ -13,9 +17,9 @@ interface RawUsageData {
 const scanCacheTtlMs = 10_000;
 let scanCache: { cwd: string; expiresAt: number; data: RawUsageData } | undefined;
 
-export function readDashboardData(filters: UsageFilters = {}): DashboardData {
+export function readDashboardData(filters: UsageFilters = {}, options: DashboardReadOptions = {}): DashboardData {
   const raw = readRawUsageData();
-  return buildDashboardSnapshot({ ...raw, filters });
+  return buildDashboardSnapshot({ ...raw, sessions: displaySessions(raw.sessions, options), filters });
 }
 
 export function clearScanCache(): void {
@@ -55,6 +59,12 @@ export function parseFilters(query: Record<string, unknown>): UsageFilters {
   if (from) filters.from = from;
   if (to) filters.to = to;
   return filters;
+}
+
+export function parseDashboardOptions(query: Record<string, unknown>): DashboardReadOptions {
+  return {
+    splitSourceApps: query.splitSourceApps === "true" || query.splitSourceApps === "1",
+  };
 }
 
 export function readPricingData(): { path: string; models: PricingTable } {
@@ -101,6 +111,44 @@ function listQuery(value: unknown): string[] | undefined {
   const values = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
   const parsed = values.flatMap((item) => typeof item === "string" ? item.split(",") : []).map((item) => item.trim()).filter(Boolean);
   return parsed.length ? parsed : undefined;
+}
+
+export function displaySessions(sessions: NormalizedUsage[], options: DashboardReadOptions): NormalizedUsage[] {
+  if (!options.splitSourceApps) return sessions;
+  return sessions.map((session) => {
+    const sourceApp = sourceScopedAppLabel(session);
+    return sourceApp === session.sourceApp ? session : { ...session, sourceApp };
+  });
+}
+
+function sourceScopedAppLabel(session: NormalizedUsage): string {
+  const app = session.sourceApp || fallbackSurfaceLabel(session.detectedSurface);
+  if (!app || app === "Unknown") return sourceClientLabel(session.sourceClient);
+  if (!shouldScopeApp(app)) return app;
+  return `${sourceClientLabel(session.sourceClient)} on ${app}`;
+}
+
+function shouldScopeApp(app: string): boolean {
+  const normalized = app.toLowerCase();
+  return normalized.includes("vs code") || normalized.includes("vscode") || normalized.includes("terminal") || normalized.includes("cli");
+}
+
+function sourceClientLabel(source: NormalizedUsage["sourceClient"]): string {
+  if (source === "codex") return "Codex";
+  if (source === "claude") return "Claude Code";
+  if (source === "gemini-cli") return "Gemini CLI";
+  if (source === "opencode") return "OpenCode";
+  if (source === "cursor") return "Cursor";
+  return "Unknown";
+}
+
+function fallbackSurfaceLabel(surface: NormalizedUsage["detectedSurface"]): string {
+  if (surface === "terminal_cli") return "Terminal";
+  if (surface === "vscode_extension") return "VS Code";
+  if (surface === "local_agent") return "Desktop local agent";
+  if (surface === "codex_exec") return "Codex";
+  if (surface === "codex_app_cloud") return "Codex app";
+  return "Unknown";
 }
 
 function runtimeCwd(): string {
