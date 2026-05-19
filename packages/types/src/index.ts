@@ -88,7 +88,26 @@ export interface AgentFrictionSignals {
   fileEditCount: number;
 }
 
+export interface CompactionEvent {
+  /** ISO timestamp of the compaction. */
+  timestamp: string | undefined;
+  /** "manual" when the user invoked /compact, "auto" when the agent compacted because context filled up. */
+  trigger: "manual" | "auto";
+}
+
+export interface CompactionStats {
+  /** Total compaction events observed in this session. */
+  count: number;
+  /** Compactions triggered automatically by the agent (e.g. context window pressure). */
+  autoCount: number;
+  /** Compactions triggered by the user (e.g. /compact). */
+  manualCount: number;
+  /** Individual compaction events with timestamps, when available. */
+  events: CompactionEvent[];
+}
+
 export interface NormalizedSession extends SessionIdentity, TokenAggregation, AgentFrictionSignals {
+  compaction?: CompactionStats | undefined;
 }
 
 export type NormalizedUsage = NormalizedSession;
@@ -361,6 +380,7 @@ export interface DashboardResponseSummary extends Summary {
 }
 
 export interface DashboardResponse extends Omit<DashboardSnapshot, "summary"> {
+  appVersion: string;
   summary: DashboardResponseSummary;
   pricing: PricingResponse;
   rtkGain: RtkGain;

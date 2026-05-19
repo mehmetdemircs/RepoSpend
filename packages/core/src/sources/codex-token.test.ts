@@ -36,8 +36,25 @@ describe("Codex token normalization", () => {
     expect(aggregation.inputTokens).toBe(150);
     expect(aggregation.outputTokens).toBe(50);
     expect(aggregation.totalTokens).toBe(200);
-    expect(aggregation.tokenAggregationMethod).toBe("direct_usage");
-    expect(aggregation.tokenConfidence).toBe("medium");
+    expect(aggregation.tokenAggregationMethod).toBe("delta_sum");
+    expect(aggregation.tokenConfidence).toBe("high");
+  });
+
+  it("sums per-turn last_token_usage instead of using max of total_token_usage", () => {
+    const aggregation = aggregateTokens([
+      lastAndTotal({ input: 100, cached: 20, output: 40, reasoning: 10, total: 150 }, { input: 100, cached: 20, output: 40, reasoning: 10, total: 150 }),
+      lastAndTotal({ input: 80, cached: 50, output: 30, reasoning: 5, total: 115 }, { input: 180, cached: 70, output: 70, reasoning: 15, total: 265 }),
+      // Compaction: total snapshot resets, last shows just this turn's billed tokens.
+      lastAndTotal({ input: 90, cached: 10, output: 25, reasoning: 5, total: 120 }, { input: 90, cached: 10, output: 25, reasoning: 5, total: 120 }),
+    ]);
+
+    // Per-turn sums: input = 270, cached = 80, output = 95 (40+30+25), reasoning = 20 (10+5+5).
+    expect(aggregation.inputTokens).toBe(270);
+    expect(aggregation.cachedInputTokens).toBe(80);
+    expect(aggregation.outputTokens).toBe(95);
+    expect(aggregation.reasoningTokens).toBe(20);
+    expect(aggregation.tokenAggregationMethod).toBe("delta_sum");
+    expect(aggregation.tokenConfidence).toBe("high");
   });
 
   it("does not add cached input a second time when total tokens are absent", () => {
@@ -66,6 +83,27 @@ function tokenCount(input: number, cached: number, outputWithReasoning: number, 
           reasoning_output_tokens: reasoning,
           total_tokens: total,
         },
+      },
+    },
+  };
+}
+
+type UsageInput = { input: number; cached: number; output: number; reasoning: number; total: number };
+function lastAndTotal(last: UsageInput, total: UsageInput) {
+  const toBlock = (u: UsageInput) => ({
+    input_tokens: u.input,
+    cached_input_tokens: u.cached,
+    output_tokens: u.output + u.reasoning,
+    reasoning_output_tokens: u.reasoning,
+    total_tokens: u.total,
+  });
+  return {
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        last_token_usage: toBlock(last),
+        total_token_usage: toBlock(total),
       },
     },
   };

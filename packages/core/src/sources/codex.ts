@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import type { CommandCategory, CommandIssueClassification, CommandIssueImpact, CommandIssueSample, CommandIssueSeverity, NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
+import type { CommandCategory, CommandIssueClassification, CommandIssueImpact, CommandIssueSample, CommandIssueSeverity, CompactionStats, NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
 import { calculateCostUsd, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
 import { analyzeAgentFriction, type CommandIssue } from "./agent-friction.js";
@@ -52,6 +52,7 @@ interface SessionTokenBreakdown extends CodexTokenAggregation {
   fileReadCount: number;
   fileEditCount: number;
   promptTimeline: PromptTimelineItem[];
+  compaction: CompactionStats;
   warnings: string[];
 }
 
@@ -312,6 +313,7 @@ function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<str
     fileEditCount: sessionBreakdown.fileEditCount,
     promptTimeline: sessionBreakdown.promptTimeline,
     sessionOutcome: inferOutcome(sessionBreakdown),
+    compaction: sessionBreakdown.compaction,
   };
   const cost = hasPricedBreakdown ? calculateCostUsd(usage, options.pricing) : undefined;
   const costWarnings = hasPricedBreakdown ? warnings : [...warnings, "missing_token_breakdown"];
@@ -383,6 +385,7 @@ function readStandaloneSessions(sessionFiles: Map<string, string>, options: Code
       fileEditCount: breakdown.fileEditCount,
       promptTimeline: breakdown.promptTimeline,
       sessionOutcome: inferOutcome(breakdown),
+      compaction: breakdown.compaction,
     };
   });
 }
@@ -423,11 +426,15 @@ function readSessionBreakdown(filePath: string): SessionTokenBreakdown {
     breakdown.parseStatus = parse.errors.length ? (records.length ? "partial" : "failed") : "ok";
     let eventMessageCount = 0;
     let responseMessageCount = 0;
+    let lastUserMessageText: string | undefined;
     for (const record of records) {
       applySessionMetadata(breakdown, record);
       applyPromptTimeline(breakdown, record);
       if (isCodexEventMessage(record)) eventMessageCount += 1;
       if (isResponseMessage(record)) responseMessageCount += 1;
+      const userText = extractUserMessageText(record);
+      if (userText !== undefined) lastUserMessageText = userText;
+      applyCompactionEvent(breakdown, record, lastUserMessageText);
     }
     breakdown.messageCount = eventMessageCount || responseMessageCount;
     const tokenAggregation = aggregateTokens(records);
@@ -548,6 +555,7 @@ function emptyBreakdown(): SessionTokenBreakdown {
     fileReadCount: 0,
     fileEditCount: 0,
     promptTimeline: [],
+    compaction: { count: 0, autoCount: 0, manualCount: 0, events: [] },
   };
 }
 
@@ -580,6 +588,41 @@ function isResponseMessage(record: unknown): boolean {
   return payload?.type === "message" && (payload.role === "user" || payload.role === "assistant");
 }
 
+function extractUserMessageText(record: unknown): string | undefined {
+  if (!record || typeof record !== "object") return undefined;
+  const object = record as Record<string, unknown>;
+  const payload = firstObject(object.payload) ?? object;
+  const payloadType = stringValue(payload.type);
+  const roleValue = stringValue(payload.role);
+  const isUser =
+    payloadType === "user_message" ||
+    (object.type === "response_item" && payloadType === "message" && roleValue === "user");
+  if (!isUser) return undefined;
+  return extractMessageText(payload) ?? extractMessageText(object);
+}
+
+function applyCompactionEvent(breakdown: SessionTokenBreakdown, record: unknown, lastUserMessageText: string | undefined): void {
+  if (!record || typeof record !== "object") return;
+  const object = record as Record<string, unknown>;
+  if (object.type !== "event_msg") return;
+  const payload = firstObject(object.payload);
+  if (payload?.type !== "context_compacted") return;
+  const trigger: "manual" | "auto" = isManualCompactCommand(lastUserMessageText) ? "manual" : "auto";
+  breakdown.compaction.count += 1;
+  if (trigger === "manual") breakdown.compaction.manualCount += 1;
+  else breakdown.compaction.autoCount += 1;
+  breakdown.compaction.events.push({
+    timestamp: dateValue(object.timestamp) ?? dateValue(payload.timestamp),
+    trigger,
+  });
+}
+
+function isManualCompactCommand(text: string | undefined): boolean {
+  if (!text) return false;
+  // User typed `/compact` (optionally followed by an instruction). Codex passes the slash command through as a normal user message.
+  return /^\s*\/compact\b/.test(text);
+}
+
 function applyPromptTimeline(breakdown: SessionTokenBreakdown, record: unknown): void {
   if (breakdown.promptTimeline.length >= 80 || !record || typeof record !== "object") return;
   const object = record as Record<string, unknown>;
@@ -595,11 +638,15 @@ function applyPromptTimeline(breakdown: SessionTokenBreakdown, record: unknown):
   if (!role) return;
   const text = extractMessageText(payload) ?? extractMessageText(object);
   if (!text) return;
-  breakdown.promptTimeline.push({
+  const timelineText = compactTimelineText(text);
+  if (!timelineText || isCodexStartupContext(timelineText)) return;
+  const item = {
     role,
-    text: normalizeTimelineText(text),
+    text: normalizeTimelineText(timelineText),
     timestamp: dateValue(payload.timestamp) ?? dateValue(object.timestamp) ?? dateValue(payload.created_at) ?? dateValue(object.created_at),
-  });
+  };
+  if (hasNearbyDuplicatePromptTimelineItem(breakdown.promptTimeline, item)) return;
+  breakdown.promptTimeline.push(item);
 }
 
 function extractMessageText(record: Record<string, unknown>): string | undefined {
@@ -623,8 +670,27 @@ function extractMessageText(record: Record<string, unknown>): string | undefined
   return undefined;
 }
 
+function compactTimelineText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 function normalizeTimelineText(text: string): string {
-  return text.replace(/\s+/g, " ").trim().slice(0, 1000);
+  return compactTimelineText(text).slice(0, 1000);
+}
+
+function isCodexStartupContext(text: string): boolean {
+  return text.includes("<environment_context>") && (text.includes("# AGENTS.md instructions") || text.includes("<INSTRUCTIONS>"));
+}
+
+function hasNearbyDuplicatePromptTimelineItem(items: PromptTimelineItem[], item: PromptTimelineItem): boolean {
+  return items.some((existing) => {
+    if (existing.role !== item.role || existing.text !== item.text) return false;
+    if (!existing.timestamp || !item.timestamp) return true;
+    const existingTime = new Date(existing.timestamp).getTime();
+    const itemTime = new Date(item.timestamp).getTime();
+    if (!Number.isFinite(existingTime) || !Number.isFinite(itemTime)) return false;
+    return Math.abs(existingTime - itemTime) <= 5_000;
+  });
 }
 
 function detectSurface(source: string | undefined, threadSource: string | undefined): { surface: NormalizedUsage["detectedSurface"]; confidence: NormalizedUsage["surfaceConfidence"]; reason: string } {
@@ -658,12 +724,12 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function codexSourceAppLabel(source: string | undefined, threadSource: string | undefined): string {
-  if (threadSource === "subagent") return "Codex app";
+  if (threadSource === "subagent") return "Codex subagent";
   if (!source) return "Codex";
   if (source === "vscode" || source === "codex_vscode" || source === "codex-vscode") return "VS Code";
   if (source === "cli" || source === "terminal" || source === "codex-tui") return "Terminal";
   if (source === "codex_app" || source === "codex-app") return "Codex app";
-  if (source.trim().startsWith("{")) return threadSource === "subagent" ? "Codex app" : "Codex";
+  if (source.trim().startsWith("{")) return threadSource === "subagent" ? "Codex subagent" : "Codex";
   return source
     .replace(/^codex[_-]/, "")
     .split(/[_-]/)

@@ -44,7 +44,10 @@ git tag v0.0.3
 git push origin main v0.0.3
 ```
 
-The publish workflow runs when a `v*.*.*` tag is pushed.
+The publish workflow runs when a `v*.*.*` tag is pushed. After npm publishes
+successfully, the workflow also creates a GitHub release for the tag using the
+matching section from `CHANGELOG.md`. For example, tag `v0.0.4` uses the
+`## 0.0.4` changelog section.
 
 ## npm Trusted Publishing
 

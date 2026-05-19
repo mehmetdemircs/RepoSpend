@@ -1,15 +1,15 @@
 # RepoSpend Context
 
-RepoSpend is a local-first AI coding usage dashboard. The product promise is repo-first visibility: show which Git repositories, sessions, models, command patterns, and days are consuming local Codex tokens.
+RepoSpend is a local-first AI coding usage dashboard. The product promise is repo-first visibility: show which Git repositories, sessions, models, command patterns, and days are consuming local AI coding tokens.
 
 ## Current Release
 
-- Version: `0.0.1`
+- Version: `0.0.5`
 - Scope: early debug release
-- Source client: Codex only
+- Source clients: Codex and initial Claude Code support
 - Server: localhost-only local Fastify API
 - Dashboard: React/Vite/Tailwind dark analytics UI
-- Storage: reads Codex from `~/.codex`; stores RepoSpend-owned local settings under `~/.repospend`
+- Storage: reads Codex from `~/.codex` and Claude Code from local Claude paths; stores RepoSpend-owned local settings under `~/.repospend`
 - License: Apache-2.0
 
 ## Main Navigation
@@ -31,7 +31,7 @@ RepoSpend is a local-first AI coding usage dashboard. The product promise is rep
 - **Dashboard Snapshot**: The filtered, zero-token-cleaned read model used by the local API and dashboard.
 - **Usage Health**: Derived signals that explain what looks healthy, what needs attention, and which sessions are affected.
 - **Agent Friction**: Command signals focused on important failures, repeated failure clusters, high-impact command issues, and harmless non-zero exits.
-- **API-equivalent Cost**: A local estimate based on token counts and public API-style pricing assumptions. It is not the user's actual ChatGPT/Codex bill.
+- **API-equivalent Cost**: A local estimate based on token counts and public API-style pricing assumptions. It is not the user's actual ChatGPT, Codex, Claude, or Claude Code bill.
 - **RTK Savings**: Estimated tokens avoided by the local `rtk` command proxy, when local RTK reports are available.
 - **Data Health**: Local scan status: files scanned, sessions imported, parser issues, token checkpoints, and last scan time.
 
@@ -42,6 +42,6 @@ RepoSpend is a local-first AI coding usage dashboard. The product promise is rep
 - Make large tables paginated and sortable.
 - Hide technical columns by default; expose them through column controls.
 - Use focused detail pages for sessions and repos instead of crowding list pages.
-- Keep cost language careful: estimates are not invoices or subscription charges.
+- Keep cost language careful: estimates are not actual bills, subscription usage, savings, or invoices.
 - Keep local-first trust visible: no login, no telemetry, no cloud sync.
-- Avoid project-level setup in `0.0.1`; first run should work without creating repo config files.
+- Avoid project-level setup in the early debug release; first run should work without creating repo config files.

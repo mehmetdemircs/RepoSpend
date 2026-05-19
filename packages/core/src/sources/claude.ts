@@ -18,6 +18,8 @@ interface ClaudeRecord {
   message?: unknown;
   toolUseResult?: unknown;
   version?: unknown;
+  isSidechain?: unknown;
+  requestId?: unknown;
 }
 
 interface ClaudeTokenTotals {
@@ -97,7 +99,14 @@ export function scanClaude(options: ClaudeAdapterOptions): ClaudeScanResult {
   const warnings: string[] = [];
   const discovery = discoverClaudeSessionFiles(claudeHome, warnings, Boolean(options.claudeHome));
   const historyExists = fs.existsSync(historyPath);
-  const sessions = discovery.files.map((file, index) => claudeFileToUsage(file, index, options));
+  // Dedup usage across files: when a Claude Code session is resumed, prior
+  // assistant messages are replayed into the new .jsonl with their original
+  // `message.id` + `requestId`. Counting them again would inflate tokens/cost.
+  const seenUsageKeys = new Set<string>();
+  const orderedFiles = discovery.files
+    .map((file) => ({ file, mtimeMs: safeMtimeMs(file.filePath) }))
+    .sort((a, b) => a.mtimeMs - b.mtimeMs);
+  const sessions = orderedFiles.map(({ file }, index) => claudeFileToUsage(file, index, options, seenUsageKeys));
   const historyEntryCount = countHistoryEntries(historyPath);
   const parseFailureCount = sessions.filter((session) => session.parseStatus === "failed" || (session.parseErrors?.length ?? 0) > 0).length;
   const unreadableFileCount = sessions.filter((session) => session.parseErrors?.some((error) => error.startsWith("unable_to_read_session_file:"))).length;
@@ -215,8 +224,8 @@ function walk(root: string, maxDepth: number, onFile: (path: string) => void, de
   }
 }
 
-function claudeFileToUsage(file: ClaudeSessionFile, index: number, options: ClaudeAdapterOptions): NormalizedUsage {
-  const breakdown = readClaudeBreakdown(file.filePath);
+function claudeFileToUsage(file: ClaudeSessionFile, index: number, options: ClaudeAdapterOptions, seenUsageKeys: Set<string>): NormalizedUsage {
+  const breakdown = readClaudeBreakdown(file.filePath, seenUsageKeys);
   const id = breakdown.id ?? (path.basename(file.filePath).replace(/\.jsonl$/i, "") || `claude-session-${index}`);
   const fallbackCwd = inferProjectPath(file.projectDir, file.projectsPath);
   const cwd = breakdown.cwd ?? fallbackCwd;
@@ -288,7 +297,7 @@ function claudeFileToUsage(file: ClaudeSessionFile, index: number, options: Clau
   };
 }
 
-function readClaudeBreakdown(filePath: string): ClaudeSessionBreakdown {
+function readClaudeBreakdown(filePath: string, seenUsageKeys: Set<string>): ClaudeSessionBreakdown {
   const breakdown = emptyBreakdown();
   try {
     const text = fs.readFileSync(filePath, "utf8");
@@ -297,7 +306,7 @@ function readClaudeBreakdown(filePath: string): ClaudeSessionBreakdown {
     breakdown.parseErrors = parse.errors;
     breakdown.parseStatus = parse.errors.length ? (parse.records.length ? "partial" : "failed") : "ok";
     for (const record of parse.records) {
-      applyClaudeRecord(breakdown, record);
+      applyClaudeRecord(breakdown, record, seenUsageKeys);
     }
     breakdown.totalTokens = breakdown.inputTokens + breakdown.outputTokens;
   } catch (error) {
@@ -309,7 +318,7 @@ function readClaudeBreakdown(filePath: string): ClaudeSessionBreakdown {
   return breakdown;
 }
 
-function applyClaudeRecord(breakdown: ClaudeSessionBreakdown, record: ClaudeRecord): void {
+function applyClaudeRecord(breakdown: ClaudeSessionBreakdown, record: ClaudeRecord, seenUsageKeys: Set<string>): void {
   const timestamp = dateValue(record.timestamp);
   if (timestamp) {
     breakdown.startedAt = minDate(breakdown.startedAt, timestamp);
@@ -334,11 +343,23 @@ function applyClaudeRecord(breakdown: ClaudeSessionBreakdown, record: ClaudeReco
     const usageTokens = usage ? usageTotal(usage) : 0;
     const model = normalizeClaudeModel(message.model);
     if (model && (usageTokens > 0 || !breakdown.model)) breakdown.model = model;
-    if (usage && usageTokens > 0) applyUsage(breakdown, usage);
+    if (usage && usageTokens > 0 && !alreadySeenUsage(record, message, seenUsageKeys)) {
+      applyUsage(breakdown, usage);
+    }
     applyContentSignals(breakdown, message.content);
   }
 
   if (looksFailedToolResult(record.toolUseResult)) breakdown.failedToolCallCount += 1;
+}
+
+function alreadySeenUsage(record: ClaudeRecord, message: Record<string, unknown>, seenUsageKeys: Set<string>): boolean {
+  const messageId = stringValue(message.id);
+  const requestId = stringValue(record.requestId);
+  if (!messageId || !requestId) return false;
+  const key = `${requestId}:${messageId}`;
+  if (seenUsageKeys.has(key)) return true;
+  seenUsageKeys.add(key);
+  return false;
 }
 
 function applyUsage(breakdown: ClaudeSessionBreakdown, usage: Record<string, unknown>): void {
@@ -584,4 +605,12 @@ function looksFailedToolResult(value: unknown): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function safeMtimeMs(filePath: string): number {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return 0;
+  }
 }

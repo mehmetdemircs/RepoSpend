@@ -2,6 +2,16 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.0.5
+
+- Fix Codex token under-count on long sessions by summing per-turn `last_token_usage` instead of taking the max of `total_token_usage`, which Codex resets on each context compaction.
+- Track Codex context compactions per session (auto vs. manual `/compact`) and surface them in the session detail panel.
+- Filter Codex startup-context blobs (AGENTS.md/INSTRUCTIONS/environment_context) out of the prompt timeline and prompt counts.
+- Dedupe Claude Code token usage across resumed `.jsonl` files using `requestId` + message `id`, so replayed assistant turns are not double-billed.
+- Label Codex sub-agent sessions as "Codex subagent" instead of folding them into "Codex app".
+- Show the running RepoSpend version in the dashboard footer.
+- Publish a GitHub release with the matching `CHANGELOG.md` section whenever a `v*.*.*` tag is pushed.
+
 ## 0.0.4
 
 - Automatically retry Codex SQLite access after attempting to rebuild `better-sqlite3` when an `npx` or local install has a Node native module ABI mismatch.

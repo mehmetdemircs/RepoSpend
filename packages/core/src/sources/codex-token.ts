@@ -110,8 +110,8 @@ function finalizeTokenAccumulator(accumulator: CodexTokenAccumulator): void {
       { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0 },
     );
     applyFinalUsage(accumulator, total);
-    accumulator.tokenAggregationMethod = "direct_usage";
-    accumulator.tokenConfidence = "medium";
+    accumulator.tokenAggregationMethod = "delta_sum";
+    accumulator.tokenConfidence = "high";
     return;
   }
 
@@ -124,6 +124,15 @@ function extractRecordTokens(record: unknown): ExtractedTokenUsage | undefined {
   const object = record as Record<string, unknown>;
   const payload = firstObject(object.payload);
   const payloadInfo = firstObject(payload?.info);
+
+  // Prefer per-turn `last_token_usage`. Codex resets `total_token_usage` on
+  // context compaction, so max-of-cumulative under-counts tokens billed before
+  // each reset; summing per-turn deltas captures every billed API call.
+  const codexLastUsage = firstObject(payloadInfo?.last_token_usage);
+  if (codexLastUsage) {
+    return tokenUsageFromObject(codexLastUsage, false);
+  }
+
   const codexTotalUsage = firstObject(payloadInfo?.total_token_usage);
   if (codexTotalUsage) {
     return tokenUsageFromObject(codexTotalUsage, true);

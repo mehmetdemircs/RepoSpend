@@ -30,8 +30,9 @@ export interface AgentFrictionAnalysis {
 
 export function analyzeAgentFriction(records: unknown[], totalTokens: number): AgentFrictionAnalysis {
   const analysis = emptyAgentFrictionAnalysis();
+  const messages: AgentMessage[] = [];
   for (const record of records) {
-    applyActionMetadata(analysis, record);
+    applyActionMetadata(analysis, record, messages);
   }
   finalizeCommandIssues(analysis, totalTokens);
   return analysis;
@@ -59,14 +60,16 @@ function emptyAgentFrictionAnalysis(): AgentFrictionAnalysis {
   };
 }
 
-function applyActionMetadata(analysis: AgentFrictionAnalysis, record: unknown): void {
+type AgentMessage = { role: "user" | "assistant"; text: string; timestamp?: string | undefined };
+
+function applyActionMetadata(analysis: AgentFrictionAnalysis, record: unknown, messages: AgentMessage[]): void {
   if (!record || typeof record !== "object") return;
   const object = record as Record<string, unknown>;
   const payload = firstObject(object.payload) ?? object;
   const type = stringValue(object.type) ?? stringValue(payload.type);
   const role = stringValue(payload.role);
-  if (payload.type === "user_message" || role === "user") analysis.userPromptCount += 1;
-  if (payload.type === "agent_message" || role === "assistant") analysis.assistantMessageCount += 1;
+  const messageRole: AgentMessage["role"] | undefined = payload.type === "user_message" || role === "user" ? "user" : payload.type === "agent_message" || role === "assistant" ? "assistant" : undefined;
+  if (messageRole) applyMessageCount(analysis, messages, messageRole, payload, object);
 
   const text = JSON.stringify(record).toLowerCase();
   const isTool = type?.includes("tool") || type?.includes("function_call") || text.includes("\"tool_call\"") || text.includes("\"function_call\"");
@@ -263,4 +266,70 @@ function firstObject(...values: unknown[]): Record<string, unknown> | undefined 
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function applyMessageCount(analysis: AgentFrictionAnalysis, messages: AgentMessage[], role: AgentMessage["role"], payload: Record<string, unknown>, object: Record<string, unknown>): void {
+  const message = extractMessageText(payload) ?? extractMessageText(object);
+  if (!message) return;
+  const item = {
+    role,
+    text: compactText(message),
+    timestamp: dateValue(payload.timestamp) ?? dateValue(object.timestamp) ?? dateValue(payload.created_at) ?? dateValue(object.created_at),
+  };
+  if (!item.text || isCodexStartupContext(item.text) || hasNearbyDuplicateMessage(messages, item)) return;
+  messages.push(item);
+  if (role === "user") analysis.userPromptCount += 1;
+  if (role === "assistant") analysis.assistantMessageCount += 1;
+}
+
+function extractMessageText(record: Record<string, unknown>): string | undefined {
+  for (const key of ["text", "message", "content", "input"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value;
+    if (Array.isArray(value)) {
+      const parts = value
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (item && typeof item === "object") {
+            const object = item as Record<string, unknown>;
+            return stringValue(object.text) ?? stringValue(object.content);
+          }
+          return undefined;
+        })
+        .filter((item): item is string => Boolean(item?.trim()));
+      if (parts.length) return parts.join("\n");
+    }
+  }
+  return undefined;
+}
+
+function compactText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function isCodexStartupContext(text: string): boolean {
+  return text.includes("<environment_context>") && (text.includes("# AGENTS.md instructions") || text.includes("<INSTRUCTIONS>"));
+}
+
+function hasNearbyDuplicateMessage(items: AgentMessage[], item: AgentMessage): boolean {
+  return items.some((existing) => {
+    if (existing.role !== item.role || existing.text !== item.text) return false;
+    if (!existing.timestamp || !item.timestamp) return true;
+    const existingTime = new Date(existing.timestamp).getTime();
+    const itemTime = new Date(item.timestamp).getTime();
+    if (!Number.isFinite(existingTime) || !Number.isFinite(itemTime)) return false;
+    return Math.abs(existingTime - itemTime) <= 5_000;
+  });
+}
+
+function dateValue(value: unknown): string | undefined {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return undefined;
+    return new Date(value > 10_000_000_000 ? value : value * 1000).toISOString();
+  }
+  if (typeof value === "string") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+  return undefined;
 }

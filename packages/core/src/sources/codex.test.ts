@@ -156,14 +156,94 @@ describe("Codex adapter", () => {
     expect(result.sessions[0]?.detectedSurface).toBe("vscode_extension");
     expect(result.sessions[0]?.surfaceConfidence).toBe("high");
     expect(result.sessions[0]?.messageCount).toBe(2);
-    expect(result.sessions[0]?.userPromptCount).toBe(2);
-    expect(result.sessions[0]?.assistantMessageCount).toBe(2);
+    expect(result.sessions[0]?.userPromptCount).toBe(1);
+    expect(result.sessions[0]?.assistantMessageCount).toBe(1);
+    expect(result.sessions[0]?.promptTimeline).toEqual([
+      { role: "user", text: "hello", timestamp: "2026-05-18T10:00:00.000Z" },
+      { role: "assistant", text: "hi", timestamp: "2026-05-18T10:00:02.000Z" },
+    ]);
     expect(result.sessions[0]?.rawEventCount).toBe(7);
     expect(result.sessions[0]?.parseStatus).toBe("ok");
     expect(result.sessions[0]?.sessionOutcome).toBe("research_only");
     expect(result.stats.sessionFileCount).toBe(1);
     expect(result.stats.sessionsImported).toBe(1);
     expect(result.stats.parseFailureCount).toBe(0);
+  });
+
+  it("keeps Codex startup context out of the prompt timeline", () => {
+    const codexHome = makeTempDir();
+    const repo = makeTempDir();
+    fs.mkdirSync(path.join(repo, ".git"));
+    const sessionsDir = path.join(codexHome, "sessions", "2026", "05", "18");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const rolloutPath = path.join(sessionsDir, "rollout-startup-context.jsonl");
+    fs.writeFileSync(
+      rolloutPath,
+      [
+        JSON.stringify({
+          timestamp: "2026-05-18T10:00:00.000Z",
+          type: "event_msg",
+          payload: {
+            type: "user_message",
+            message: "# AGENTS.md instructions for /repo <INSTRUCTIONS>Use RTK</INSTRUCTIONS> <environment_context><cwd>/repo</cwd></environment_context>",
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-18T10:00:01.000Z",
+          type: "event_msg",
+          payload: {
+            type: "user_message",
+            message: "show me the repo summary",
+          },
+        }),
+      ].join("\n"),
+    );
+
+    const db = new Database(path.join(codexHome, "state_5.sqlite"));
+    db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT, created_at INTEGER, updated_at INTEGER, cwd TEXT, title TEXT, model_provider TEXT, model TEXT, tokens_used INTEGER, source TEXT, thread_source TEXT)");
+    db.prepare("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run("startup-context", rolloutPath, 1_779_099_600, 1_779_099_660, repo, "Startup context", "openai", "known-model", 0, "vscode", "user");
+    db.close();
+
+    const result = scanCodex({ codexHome, pricing: {} });
+
+    expect(result.sessions[0]?.promptTimeline).toEqual([{ role: "user", text: "show me the repo summary", timestamp: "2026-05-18T10:00:01.000Z" }]);
+    expect(result.sessions[0]?.userPromptCount).toBe(1);
+  });
+
+  it("labels Codex subagent sessions separately from the Codex app", () => {
+    const codexHome = makeTempDir();
+    const repo = makeTempDir();
+    fs.mkdirSync(path.join(repo, ".git"));
+    const sessionsDir = path.join(codexHome, "sessions", "2026", "05", "18");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const rolloutPath = path.join(sessionsDir, "rollout-subagent.jsonl");
+    fs.writeFileSync(
+      rolloutPath,
+      JSON.stringify({
+        timestamp: "2026-05-18T10:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            total_token_usage: {
+              input_tokens: 100,
+              output_tokens: 20,
+              total_tokens: 120,
+            },
+          },
+        },
+      }),
+    );
+
+    const db = new Database(path.join(codexHome, "state_5.sqlite"));
+    db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT, created_at INTEGER, updated_at INTEGER, cwd TEXT, title TEXT, model_provider TEXT, model TEXT, tokens_used INTEGER, source TEXT, thread_source TEXT)");
+    db.prepare("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run("subagent-session", rolloutPath, 1_779_099_600, 1_779_099_660, repo, "Subagent", "openai", "known-model", 120, "{\"subagent\":\"review\"}", "subagent");
+    db.close();
+
+    const result = scanCodex({ codexHome, pricing: {} });
+
+    expect(result.sessions[0]?.sourceApp).toBe("Codex subagent");
+    expect(result.sessions[0]?.detectedSurface).toBe("codex_exec");
   });
 
   it("does not add direct usage on top of cumulative token snapshots", () => {

@@ -27,6 +27,7 @@ export function createServer(options: ServerOptions = {}) {
     const rtkGain = demoMode ? readDemoRtkGain() : await readRtkGain();
     return {
       ...data,
+      appVersion: readPackageVersion(),
       summary: { ...data.summary, skippedZeroTokenSessions: data.skippedZeroTokenSessions },
       pricing: {
         info: pricingInfo,

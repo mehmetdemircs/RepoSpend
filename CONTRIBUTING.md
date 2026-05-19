@@ -28,4 +28,4 @@ pnpm build
 
 ## Adding An Adapter
 
-Add adapter code under `packages/adapters`. Convert source-specific data into the shared normalized model in `packages/types`, then expose it through the server data layer.
+Add adapter code under `packages/core/src/sources`. Convert source-specific data into the shared normalized model in `packages/types`, then expose it through the server data layer.

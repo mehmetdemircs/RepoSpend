@@ -294,7 +294,7 @@ function App() {
           <span className="status-dot" />
           <div>
             <div>Read-only</div>
-            <span>local sources</span>
+            <span>{data?.appVersion ? `v${data.appVersion} · local sources` : "local sources"}</span>
           </div>
           <button className="icon-button" onClick={() => window.location.reload()} title="Refresh" type="button">
             <RefreshCw className="h-4 w-4" aria-hidden />
@@ -2115,12 +2115,22 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
                 <MiniStat label="Assistant replies" value={<CountValue value={session.assistantMessageCount ?? 0} noun="reply" />} />
                 <MiniStat label="Tool calls" value={<CountValue value={session.toolCallCount ?? 0} noun="tool call" />} />
                 <MiniStat label="Command issues" value={<CountValue value={importantCommandFailures(session)} noun="issue" />} />
+                <MiniStat
+                  label="Compactions"
+                  value={<CompactionSummary compaction={session.compaction} />}
+                  help={compactionHelpText(session.compaction)}
+                />
                 <MiniStat label="Outcome" value={<OutcomeBadge outcome={session.sessionOutcome} />} />
               </div>
             </SessionDetailCard>
             <SessionDetailCard title="Token breakdown">
               <TokenBreakdownGrid session={session} />
             </SessionDetailCard>
+            {session.compaction && session.compaction.count > 0 ? (
+              <SessionDetailCard className="session-card-wide" title="Compaction events">
+                <CompactionEventList compaction={session.compaction} />
+              </SessionDetailCard>
+            ) : null}
           </div>
         ) : null}
 
@@ -4071,6 +4081,49 @@ function prioritizeBadges(labels: string[]): string[] {
     const bIndex = priority.indexOf(b);
     return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex) || a.localeCompare(b);
   });
+}
+
+function CompactionSummary({ compaction }: { compaction: Session["compaction"] }) {
+  if (!compaction || compaction.count === 0) {
+    return <span className="text-slate-500">None</span>;
+  }
+  const parts: string[] = [];
+  if (compaction.autoCount > 0) parts.push(`${compaction.autoCount} auto`);
+  if (compaction.manualCount > 0) parts.push(`${compaction.manualCount} manual`);
+  return (
+    <span>
+      {compaction.count}
+      {parts.length ? <span className="ml-1 text-xs font-normal text-slate-500">({parts.join(", ")})</span> : null}
+    </span>
+  );
+}
+
+function compactionHelpText(compaction: Session["compaction"]): React.ReactNode {
+  if (!compaction || compaction.count === 0) {
+    return <span className="ml-1 text-xs text-slate-400" title="No context compactions were observed in this session.">ℹ</span>;
+  }
+  const title = `${compaction.count} compaction event${compaction.count === 1 ? "" : "s"} — ${compaction.autoCount} auto, ${compaction.manualCount} manual. Auto compactions are triggered when the context window fills up; manual compactions are user-initiated via /compact.`;
+  return <span className="ml-1 text-xs text-slate-400" title={title}>ℹ</span>;
+}
+
+function CompactionEventList({ compaction }: { compaction: NonNullable<Session["compaction"]> }) {
+  if (!compaction.events.length) {
+    return (
+      <p className="detail-muted">
+        {compaction.count} compaction{compaction.count === 1 ? "" : "s"} ({compaction.autoCount} auto, {compaction.manualCount} manual). No timestamps were recorded for individual events.
+      </p>
+    );
+  }
+  return (
+    <ol className="space-y-2 text-sm">
+      {compaction.events.map((event, index) => (
+        <li className="flex items-center justify-between gap-3 border border-line bg-white px-3 py-2" key={`${event.timestamp ?? "no-ts"}-${index}`}>
+          <span className="font-mono text-xs text-slate-600">{event.timestamp ? formatDateTime(event.timestamp) : `Event ${index + 1}`}</span>
+          <Badge label={event.trigger === "manual" ? "Manual (/compact)" : "Auto"} />
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function MiniStat({ label, value, help }: { label: string; value: React.ReactNode; help?: React.ReactNode }) {
