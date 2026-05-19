@@ -1,13 +1,13 @@
 {
   "name": "repospend",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Local-first dashboard for tracking Codex and AI coding token usage by repo, session, model, and day.",
   "license": "Apache-2.0",
   "type": "module",
   "private": false,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mehmetdemircs/RepoSpend.git"
+    "url": "https://github.com/mehmetdemircs/RepoSpend"
   },
   "bugs": {
     "url": "https://github.com/mehmetdemircs/RepoSpend/issues"
