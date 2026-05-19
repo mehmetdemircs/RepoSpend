@@ -12,7 +12,7 @@ coding tokens.
 It runs locally, reads your Codex files read-only, and does not upload prompts or
 telemetry.
 
-`0.0.1` is an early Codex-first release.
+RepoSpend is currently an early Codex-first release.
 
 ## Why RepoSpend?
 
@@ -37,7 +37,7 @@ That makes it easier to answer questions like:
 - Are command failures or repeated tool issues adding friction?
 - Which models and days are driving the total?
 
-## Run It
+## Quick Start
 
 You can run RepoSpend without installing it globally:
 
@@ -58,6 +58,18 @@ prints the dashboard URL. By default it runs at
 
 RepoSpend requires Node.js `20` or newer. It uses `better-sqlite3`, so npm may
 install a native SQLite package for your platform.
+
+## What It Shows
+
+RepoSpend helps you break down local Codex usage by:
+
+- repo
+- session
+- day and hour
+- model
+- app/source, where detectable
+- token type
+- estimated API-equivalent cost
 
 ## Commands
 
@@ -104,7 +116,7 @@ RepoSpend stores its own settings here:
 The Settings page includes a reset action for RepoSpend-owned files under
 `~/.repospend/`. It does not delete or edit anything under `~/.codex`.
 
-## About Cost
+## Cost Estimates, Not Invoices
 
 RepoSpend shows **API-equivalent cost**.
 
@@ -149,6 +161,27 @@ pnpm build
 `pnpm dev` starts the API on
 [http://127.0.0.1:4318](http://127.0.0.1:4318) and the dashboard on
 [http://127.0.0.1:2005](http://127.0.0.1:2005), with `/api` proxied locally.
+
+## Publishing
+
+Most users should run RepoSpend with:
+
+```bash
+npx repospend
+```
+
+Maintainers publish by bumping the package version and pushing the resulting Git
+tag:
+
+```bash
+pnpm version patch
+git push --follow-tags
+```
+
+The npm package `repospend` must have npm Trusted Publishing configured for the
+GitHub repository `mehmetdemircs/RepoSpend` and workflow file
+`.github/workflows/publish.yml` (workflow filename `publish.yml` in npm
+settings). No `NPM_TOKEN` is required for that workflow.
 
 ## Current Limits
 

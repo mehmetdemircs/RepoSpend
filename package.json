@@ -1,7 +1,7 @@
 {
   "name": "repospend",
   "version": "0.0.1",
-  "description": "Local-first AI usage and cost dashboard grouped by Git repository.",
+  "description": "Local-first dashboard for tracking Codex and AI coding token usage by repo, session, model, and day.",
   "license": "Apache-2.0",
   "type": "module",
   "private": false,
@@ -40,11 +40,16 @@
   },
   "keywords": [
     "codex",
-    "usage",
-    "cost",
+    "openai-codex",
+    "ai-coding",
+    "developer-tools",
+    "token-usage",
+    "cost-tracking",
+    "local-first",
+    "cli",
     "dashboard",
-    "sqlite",
-    "local-first"
+    "typescript",
+    "sqlite"
   ],
   "engines": {
     "node": ">=20"
