@@ -1,6 +1,8 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import type { CommandCategory, CommandIssueClassification, CommandIssueImpact, CommandIssueSample, CommandIssueSeverity, NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
 import { calculateCostUsd, type PricingTable } from "../pricing.js";
@@ -21,6 +23,8 @@ interface CodexThreadRow {
   source?: unknown;
   thread_source?: unknown;
 }
+
+let nativeSqliteRebuildAttempted = false;
 
 interface SessionTokenBreakdown extends CodexTokenAggregation {
   messageCount: number;
@@ -139,7 +143,7 @@ export function scanCodex(options: CodexAdapterOptions): CodexScanResult {
 function readThreads(statePath: string, sessionFiles: Map<string, string>, options: CodexAdapterOptions, warnings: string[]): NormalizedUsage[] {
   let db: Database.Database | undefined;
   try {
-    db = new Database(statePath, { readonly: true, fileMustExist: true });
+    db = openCodexStateDatabase(statePath, warnings);
     const tableNames = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
     if (!tableNames.some((table) => table.name === "threads")) {
       warnings.push("Codex SQLite state does not contain a threads table.");
@@ -161,6 +165,80 @@ function readThreads(statePath: string, sessionFiles: Map<string, string>, optio
   } finally {
     db?.close();
   }
+}
+
+function openCodexStateDatabase(statePath: string, warnings: string[]): Database.Database {
+  try {
+    return new Database(statePath, { readonly: true, fileMustExist: true });
+  } catch (error) {
+    if (isNativeSqliteMismatch(error) && attemptNativeSqliteRebuild(warnings)) {
+      return new Database(statePath, { readonly: true, fileMustExist: true });
+    }
+    throw error;
+  }
+}
+
+function attemptNativeSqliteRebuild(warnings: string[]): boolean {
+  if (nativeSqliteRebuildAttempted || process.env.REPOSPEND_SKIP_NATIVE_REBUILD === "1") return false;
+  nativeSqliteRebuildAttempted = true;
+
+  const packageRoot = findRepoSpendPackageRoot();
+  if (!packageRoot) {
+    warnings.push("Codex SQLite native module mismatch detected, but RepoSpend could not locate its package root for an automatic rebuild.");
+    return false;
+  }
+
+  const packageManager = fs.existsSync(path.join(packageRoot, "pnpm-lock.yaml")) ? "pnpm" : "npm";
+  const result = spawnSync(packageManager, ["rebuild", "better-sqlite3"], {
+    cwd: packageRoot,
+    encoding: "utf8",
+    stdio: "pipe",
+    timeout: 120_000,
+  });
+  if (result.status === 0) return true;
+
+  const detail = [result.stderr, result.stdout].filter(Boolean).join("\n").split("\n").map((line) => line.trim()).filter(Boolean).slice(-3).join(" ");
+  warnings.push(`Codex SQLite native module mismatch detected. RepoSpend tried to rebuild better-sqlite3 automatically with ${packageManager}, but it failed${exitLabel(result.status)}.${detail ? ` ${detail}` : ""}`);
+  return false;
+}
+
+function findRepoSpendPackageRoot(): string | undefined {
+  const starts = [
+    process.argv[1] ? path.dirname(fs.realpathSync(process.argv[1])) : undefined,
+    path.dirname(fileURLToPath(import.meta.url)),
+    process.cwd(),
+  ].filter((item): item is string => Boolean(item));
+  for (const start of starts) {
+    const root = findPackageRootNamedRepoSpend(start);
+    if (root) return root;
+  }
+  return undefined;
+}
+
+function findPackageRootNamedRepoSpend(start: string): string | undefined {
+  let current = path.resolve(start);
+  while (true) {
+    const packagePath = path.join(current, "package.json");
+    if (fs.existsSync(packagePath)) {
+      try {
+        const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8")) as { name?: unknown };
+        if (packageJson.name === "repospend") return current;
+      } catch {
+        // Keep walking; a malformed package.json should not stop a scan.
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+function isNativeSqliteMismatch(error: unknown): boolean {
+  return errorMessage(error).includes("NODE_MODULE_VERSION");
+}
+
+function exitLabel(status: number | null): string {
+  return status === null ? "" : ` with exit code ${status}`;
 }
 
 function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<string, string>, options: CodexAdapterOptions): NormalizedUsage {

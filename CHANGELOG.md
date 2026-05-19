@@ -2,6 +2,10 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.0.4
+
+- Automatically retry Codex SQLite access after attempting to rebuild `better-sqlite3` when an `npx` or local install has a Node native module ABI mismatch.
+
 ## 0.0.3
 
 - Add initial Claude Code support for local JSONL session transcripts, including projects, timestamps, models, token usage when available, and source status.
