@@ -14,9 +14,9 @@ export interface DashboardSnapshotInput {
 }
 
 export function buildDashboardSnapshot(input: DashboardSnapshotInput): DashboardSnapshot {
-  const allSessions = input.sessions.filter((session) => session.totalTokens > 0);
+  const allSessions = input.sessions.filter(isDashboardVisibleSession);
   const filteredSessions = filterUsage(input.sessions, input.filters ?? {});
-  const sessions = filteredSessions.filter((session) => session.totalTokens > 0);
+  const sessions = filteredSessions.filter(isDashboardVisibleSession);
   const summary = summarize(sessions);
   const repos = buildRepoRollups(sessions);
   const sourceApps = groupBySourceApp(sessions);
@@ -46,4 +46,8 @@ export function buildDashboardSnapshot(input: DashboardSnapshotInput): Dashboard
     sourceApps,
     health: buildUsageHealth({ sessions, summary, repos, sourceApps, scan }),
   };
+}
+
+function isDashboardVisibleSession(session: NormalizedUsage): boolean {
+  return session.totalTokens > 0 || session.sourceClient === "claude";
 }

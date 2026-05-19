@@ -1,4 +1,4 @@
-export type SourceClient = "codex" | "claude-code" | "cursor" | "opencode" | "gemini-cli" | "unknown";
+export type SourceClient = "codex" | "claude" | "cursor" | "opencode" | "gemini-cli" | "unknown";
 export type TokenAggregationMethod = "final_snapshot" | "delta_sum" | "direct_usage" | "estimated" | "unknown";
 export type TokenConfidence = "high" | "medium" | "low";
 export type CommandIssueClassification = "blocking_failure" | "warning" | "harmless_nonzero" | "exploratory_miss" | "unknown";
@@ -42,7 +42,7 @@ export interface SessionIdentity {
   rawEventCount?: number | undefined;
   parseStatus?: "ok" | "partial" | "failed" | undefined;
   parseErrors?: string[] | undefined;
-  detectedSurface?: "terminal_cli" | "vscode_extension" | "codex_exec" | "codex_app_cloud" | "unknown" | undefined;
+  detectedSurface?: "terminal_cli" | "vscode_extension" | "local_agent" | "codex_exec" | "codex_app_cloud" | "unknown" | undefined;
   surfaceConfidence?: "high" | "medium" | "low" | undefined;
   surfaceReason?: string | undefined;
   promptTimeline?: PromptTimelineItem[] | undefined;
@@ -50,8 +50,12 @@ export interface SessionIdentity {
 }
 
 export interface TokenAggregation {
+  /** Total input tokens reported for the session, including cached/read and cache-write input when the source reports those separately. */
   inputTokens: number;
+  /** Input tokens served from cache. This is a subset of inputTokens when known. */
   cachedInputTokens: number;
+  /** Input tokens written to cache. This is a subset of inputTokens when known. */
+  cacheCreationInputTokens?: number | undefined;
   outputTokens: number;
   reasoningTokens: number;
   reasoningOutputTokens: number;
@@ -224,15 +228,26 @@ export interface UsageHealth {
 }
 
 export interface DashboardSourceStats {
+  sourceId?: SourceClient;
+  sourceLabel?: string;
+  homePath?: string;
   codexHome?: string;
+  claudeHome?: string;
   statePath?: string;
   sessionsPath?: string;
+  projectsPath?: string;
+  historyPath?: string;
   stateExists?: boolean;
   sessionsExists?: boolean;
+  projectsExists?: boolean;
+  historyExists?: boolean;
   sessionFileCount: number;
   sessionsImported?: number;
   parseFailureCount?: number;
   unreadableFileCount?: number;
+  malformedFileCount?: number;
+  projectDirCount?: number;
+  historyEntryCount?: number;
   lastScannedAt: string;
 }
 
@@ -267,6 +282,7 @@ export interface DashboardSnapshot {
 export interface ModelPricing {
   inputPerMillion: number;
   cachedInputPerMillion?: number;
+  cacheCreationInputPerMillion?: number;
   outputPerMillion: number;
   reasoningOutputPerMillion?: number;
   note?: string;
@@ -275,6 +291,7 @@ export interface ModelPricing {
 export interface PricingInfo {
   sourceName: string;
   sourceUrl: string;
+  sourceUrls?: Array<{ label: string; url: string }> | undefined;
   unit: string;
   updatedAt: string;
   note: string;

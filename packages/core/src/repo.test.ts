@@ -75,6 +75,47 @@ describe("pricing and grouping", () => {
     expect(calculateCostUsd(usage({ model: "mystery" }), {})).toBeUndefined();
   });
 
+  it("uses Claude family pricing for dated model ids when exact pricing is empty", () => {
+    const cost = calculateCostUsd(
+      {
+        model: "claude-haiku-4-5-20251001",
+        inputTokens: 1_000_000,
+        cachedInputTokens: 0,
+        outputTokens: 100_000,
+        reasoningTokens: 0,
+      },
+      {
+        "claude-haiku-4-5": { inputPerMillion: 1, cachedInputPerMillion: 0.1, outputPerMillion: 5 },
+        "claude-haiku-4-5-20251001": { inputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0 },
+      },
+    );
+
+    expect(cost).toBe(1.5);
+  });
+
+  it("treats input tokens as total input when cache write and cache read tokens are split out", () => {
+    const cost = calculateCostUsd(
+      {
+        model: "claude-sonnet-4-5",
+        inputTokens: 1_300_000,
+        cachedInputTokens: 200_000,
+        cacheCreationInputTokens: 100_000,
+        outputTokens: 300_000,
+        reasoningTokens: 0,
+      },
+      {
+        "claude-sonnet-4-5": {
+          inputPerMillion: 3,
+          cacheCreationInputPerMillion: 3.75,
+          cachedInputPerMillion: 0.3,
+          outputPerMillion: 15,
+        },
+      },
+    );
+
+    expect(cost).toBe(7.935);
+  });
+
   it("groups by day, hour, and model", () => {
     const sessions = [
       usage({ id: "a", startedAt: "2026-05-18T10:15:00.000Z", model: "gpt-5", totalTokens: 100 }),

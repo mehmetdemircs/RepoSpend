@@ -116,6 +116,7 @@ export function toCsv(sessions: NormalizedUsage[]): string {
     "provider",
     "inputTokens",
     "cachedInputTokens",
+    "cacheCreationInputTokens",
     "outputTokens",
     "reasoningTokens",
     "reasoningOutputTokens",

@@ -1,13 +1,14 @@
 {
   "name": "repospend",
-  "version": "0.0.2",
-  "description": "Local-first dashboard for tracking Codex and AI coding token usage by repo, session, model, and day.",
+  "version": "0.0.3",
+  "description": "Local-first dashboard for tracking AI coding token usage by repo, source, session, model, and day.",
   "license": "Apache-2.0",
+  "author": "Mehmet Mustafa Demir",
   "type": "module",
   "private": false,
   "repository": {
     "type": "git",
-    "url": "https://github.com/mehmetdemircs/RepoSpend"
+    "url": "git+https://github.com/mehmetdemircs/RepoSpend.git"
   },
   "bugs": {
     "url": "https://github.com/mehmetdemircs/RepoSpend/issues"
@@ -20,6 +21,9 @@
     "dist",
     "web-dist",
     "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "docs/PUBLISHING.md",
     "LICENSE"
   ],
   "publishConfig": {
@@ -41,6 +45,7 @@
   "keywords": [
     "codex",
     "openai-codex",
+    "claude",
     "ai-coding",
     "developer-tools",
     "token-usage",

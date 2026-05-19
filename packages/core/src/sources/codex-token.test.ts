@@ -39,6 +39,18 @@ describe("Codex token normalization", () => {
     expect(aggregation.tokenAggregationMethod).toBe("direct_usage");
     expect(aggregation.tokenConfidence).toBe("medium");
   });
+
+  it("does not add cached input a second time when total tokens are absent", () => {
+    const aggregation = aggregateTokens([
+      { usage: { input_tokens: 100, cached_input_tokens: 25, output_tokens: 30 } },
+      { usage: { input_tokens: 50, cached_input_tokens: 10, output_tokens: 20 } },
+    ]);
+
+    expect(aggregation.inputTokens).toBe(150);
+    expect(aggregation.cachedInputTokens).toBe(35);
+    expect(aggregation.outputTokens).toBe(50);
+    expect(aggregation.totalTokens).toBe(200);
+  });
 });
 
 function tokenCount(input: number, cached: number, outputWithReasoning: number, reasoning: number, total: number) {

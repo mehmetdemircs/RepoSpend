@@ -64,6 +64,9 @@ export interface CodexScanResult {
 }
 
 export interface CodexScanStats {
+  sourceId: "codex";
+  sourceLabel: "Codex";
+  homePath: string;
   codexHome: string;
   statePath: string;
   sessionsPath: string;
@@ -116,6 +119,9 @@ export function scanCodex(options: CodexAdapterOptions): CodexScanResult {
     },
     sessions,
     stats: {
+      sourceId: "codex",
+      sourceLabel: "Codex",
+      homePath: codexHome,
       codexHome,
       statePath,
       sessionsPath,
@@ -167,7 +173,7 @@ function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<str
   const cachedInputTokens = sessionBreakdown.cachedInputTokens;
   const outputTokens = sessionBreakdown.outputTokens;
   const reasoningTokens = sessionBreakdown.reasoningTokens;
-  const totalTokens = sessionBreakdown.totalTokens || dbTokens || inputTokens + cachedInputTokens + outputTokens + reasoningTokens;
+  const totalTokens = sessionBreakdown.totalTokens || dbTokens || inputTokens + outputTokens + reasoningTokens;
   const hasPricedBreakdown = inputTokens + cachedInputTokens + outputTokens + reasoningTokens > 0;
   const warnings = [...repo.warnings, ...sessionBreakdown.warnings];
   const threadSource = stringValue(row.thread_source) ?? sessionBreakdown.threadSource;
@@ -574,12 +580,12 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function codexSourceAppLabel(source: string | undefined, threadSource: string | undefined): string {
-  if (threadSource === "subagent") return "Codex subagent";
+  if (threadSource === "subagent") return "Codex app";
   if (!source) return "Codex";
   if (source === "vscode" || source === "codex_vscode" || source === "codex-vscode") return "VS Code";
   if (source === "cli" || source === "terminal" || source === "codex-tui") return "Terminal";
   if (source === "codex_app" || source === "codex-app") return "Codex app";
-  if (source.trim().startsWith("{")) return threadSource === "subagent" ? "Codex subagent" : "Codex";
+  if (source.trim().startsWith("{")) return threadSource === "subagent" ? "Codex app" : "Codex";
   return source
     .replace(/^codex[_-]/, "")
     .split(/[_-]/)

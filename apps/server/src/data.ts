@@ -1,12 +1,12 @@
 import fs from "node:fs";
-import { buildDashboardSnapshot, loadConfig, loadConfigWithWarnings, loadPricingTable, repospendHome, resolvePricingPath, savePricingTable, scanCodex, toCsv, type PricingTable } from "@repospend/core";
+import { buildDashboardSnapshot, loadConfig, loadConfigWithWarnings, loadPricingTable, repospendHome, resolvePricingPath, savePricingTable, scanUsageSources, toCsv, type PricingTable } from "@repospend/core";
 import type { DashboardSnapshot, NormalizedUsage, UsageFilters } from "@repospend/types";
 
 export type DashboardData = DashboardSnapshot;
 
 interface RawUsageData {
-  sources: ReturnType<typeof scanCodex>["source"][];
-  sourceStats: ReturnType<typeof scanCodex>["stats"][];
+  sources: ReturnType<typeof scanUsageSources>["sources"];
+  sourceStats: ReturnType<typeof scanUsageSources>["sourceStats"];
   sessions: NormalizedUsage[];
 }
 
@@ -30,11 +30,11 @@ function readRawUsageData(): RawUsageData {
 
   const { config, warnings: configWarnings } = loadConfigWithWarnings();
   const pricing = loadPricingTable(resolvePricingPath(config));
-  const codex = scanCodex({ config, pricing });
+  const scan = scanUsageSources({ config, pricing });
   const data = {
-    sources: [{ ...codex.source, warnings: [...codex.source.warnings, ...configWarnings] }],
-    sourceStats: [codex.stats],
-    sessions: codex.sessions,
+    sources: scan.sources.map((source) => ({ ...source, warnings: [...source.warnings, ...configWarnings] })),
+    sourceStats: scan.sourceStats,
+    sessions: scan.sessions,
   };
   scanCache = { cwd, data, expiresAt: Date.now() + scanCacheTtlMs };
   return data;

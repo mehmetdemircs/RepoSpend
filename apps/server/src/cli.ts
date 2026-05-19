@@ -1,33 +1,36 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { groupByDay, groupByHour, groupByModel, groupByRepo, groupBySourceApp, toCsv } from "@repospend/core";
-import { exportJson, readDashboardData } from "./data.js";
+import { readDashboardData } from "./data.js";
 import { startServer } from "./server.js";
 
 const [command = "serve", ...args] = process.argv.slice(2);
 
 try {
-  if (command === "serve") {
+  if (command === "--help" || command === "-h" || command === "help") {
+    printHelp();
+  } else if (command === "serve") {
     const { url } = await startServer({ port: Number(process.env.REPOSPEND_PORT ?? 2005), serveWeb: true });
     console.log(`RepoSpend dashboard: ${url}`);
     openBrowser(url);
   } else if (command === "scan") {
-    const data = readDashboardData();
+    const data = readDashboardData(cliFilters(args));
     console.log(JSON.stringify({ sources: data.sources, sessionCount: data.sessions.length, summary: data.summary }, null, 2));
   } else if (command === "by-repo") {
-    printGroups(groupByRepo(readDashboardData().sessions));
+    printGroups(groupByRepo(readDashboardData(cliFilters(args)).sessions));
   } else if (command === "by-day") {
-    printGroups(groupByDay(readDashboardData().sessions));
+    printGroups(groupByDay(readDashboardData(cliFilters(args)).sessions));
   } else if (command === "by-hour") {
-    printGroups(groupByHour(readDashboardData().sessions));
+    printGroups(groupByHour(readDashboardData(cliFilters(args)).sessions));
   } else if (command === "by-model") {
-    printGroups(groupByModel(readDashboardData().sessions));
+    printGroups(groupByModel(readDashboardData(cliFilters(args)).sessions));
   } else if (command === "by-app") {
-    printGroups(groupBySourceApp(readDashboardData().sessions));
+    printGroups(groupBySourceApp(readDashboardData(cliFilters(args)).sessions));
   } else if (command === "export") {
     const format = valueAfter(args, "--format") ?? "json";
-    const sessions = readDashboardData().sessions;
-    console.log(format === "csv" ? toCsv(sessions) : exportJson());
+    const filters = cliFilters(args);
+    const sessions = readDashboardData(filters).sessions;
+    console.log(format === "csv" ? toCsv(sessions) : JSON.stringify(sessions, null, 2));
   } else {
     console.error(`Unknown command: ${command}`);
     printHelp();
@@ -51,7 +54,7 @@ function openBrowser(url: string): void {
 
 function printGroups(groups: ReturnType<typeof groupByRepo>): void {
   if (!groups.length) {
-    console.log("No usage found. Scanned ~/.codex/state_5.sqlite and ~/.codex/sessions.");
+    console.log("No usage found. Scanned Codex and Claude Code local data paths.");
     return;
   }
 
@@ -62,6 +65,12 @@ function printGroups(groups: ReturnType<typeof groupByRepo>): void {
     sessions: group.sessionCount,
   }));
   console.table(rows);
+}
+
+function cliFilters(args: string[]) {
+  const source = valueAfter(args, "--source");
+  if (!source || source === "all") return {};
+  return { source };
 }
 
 function valueAfter(args: string[], flag: string): string | undefined {
@@ -79,5 +88,8 @@ function printHelp(): void {
   repospend by-model
   repospend by-app
   repospend export --format json
-  repospend export --format csv`);
+  repospend export --format csv
+
+Options:
+  --source all|codex|claude`);
 }

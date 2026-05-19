@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest an improvement or new capability for RepoSpend.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem-use-case
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what is difficult today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: Describe the change you would like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives-considered
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or other approaches have you tried or considered?
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra-context
+    attributes:
+      label: Extra context or screenshots
+      description: Add any examples, screenshots, links, or details that would help explain the request.
+    validations:
+      required: false

@@ -80,5 +80,6 @@ function currency(value: number, minimumFractionDigits: number, maximumFractionD
 function pluralize(noun: string, value: number): string {
   if (value === 1) return noun;
   if (noun.endsWith("s")) return noun;
+  if (noun.endsWith("y") && !/[aeiou]y$/i.test(noun)) return `${noun.slice(0, -1)}ies`;
   return `${noun}s`;
 }

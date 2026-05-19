@@ -6,6 +6,7 @@ import Fastify from "fastify";
 import { pricingInfo } from "@repospend/core";
 import type { DashboardResponse } from "@repospend/types";
 import { clearRepoSpendLocalData, exportCsv, exportJson, parseFilters, readDashboardData, readPricingData, writePricingData } from "./data.js";
+import { demoModeEnabled, readDemoDashboardData, readDemoRtkGain } from "./demo-data.js";
 import { readRtkGain } from "./rtk.js";
 
 export interface ServerOptions {
@@ -20,8 +21,10 @@ export function createServer(options: ServerOptions = {}) {
   app.get("/api/health", async () => ({ ok: true, app: "RepoSpend", version: readPackageVersion() }));
 
   app.get("/api/dashboard", async (request): Promise<DashboardResponse> => {
-    const data = readDashboardData(parseFilters(request.query as Record<string, unknown>));
-    const rtkGain = await readRtkGain();
+    const filters = parseFilters(request.query as Record<string, unknown>);
+    const demoMode = demoModeEnabled();
+    const data = demoMode ? readDemoDashboardData(filters) : readDashboardData(filters);
+    const rtkGain = demoMode ? readDemoRtkGain() : await readRtkGain();
     return {
       ...data,
       summary: { ...data.summary, skippedZeroTokenSessions: data.skippedZeroTokenSessions },
@@ -108,20 +111,22 @@ function validatePricingBody(body: unknown) {
     throw new Error("Expected JSON body with a models object.");
   }
 
-  const validated: Record<string, { inputPerMillion: number; cachedInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string }> = {};
+  const validated: Record<string, { inputPerMillion: number; cachedInputPerMillion?: number; cacheCreationInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string }> = {};
   for (const [model, value] of Object.entries(models as Record<string, unknown>)) {
     if (!model.trim() || !value || typeof value !== "object" || Array.isArray(value)) continue;
     const row = value as Record<string, unknown>;
     const inputPerMillion = finiteNumber(row.inputPerMillion);
     const outputPerMillion = finiteNumber(row.outputPerMillion);
     if (inputPerMillion === undefined || outputPerMillion === undefined) continue;
-    const modelPricing: { inputPerMillion: number; cachedInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string } = {
+    const modelPricing: { inputPerMillion: number; cachedInputPerMillion?: number; cacheCreationInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string } = {
       inputPerMillion,
       outputPerMillion,
     };
     const cachedInputPerMillion = finiteNumber(row.cachedInputPerMillion);
+    const cacheCreationInputPerMillion = finiteNumber(row.cacheCreationInputPerMillion);
     const reasoningOutputPerMillion = finiteNumber(row.reasoningOutputPerMillion);
     if (cachedInputPerMillion !== undefined) modelPricing.cachedInputPerMillion = cachedInputPerMillion;
+    if (cacheCreationInputPerMillion !== undefined) modelPricing.cacheCreationInputPerMillion = cacheCreationInputPerMillion;
     if (reasoningOutputPerMillion !== undefined) modelPricing.reasoningOutputPerMillion = reasoningOutputPerMillion;
     if (typeof row.note === "string") modelPricing.note = row.note;
     validated[model] = modelPricing;

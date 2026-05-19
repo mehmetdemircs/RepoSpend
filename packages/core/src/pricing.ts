@@ -6,6 +6,7 @@ import type { NormalizedUsage, RepoSpendConfig } from "@repospend/types";
 export interface ModelPricing {
   inputPerMillion: number;
   cachedInputPerMillion?: number;
+  cacheCreationInputPerMillion?: number;
   outputPerMillion: number;
   reasoningOutputPerMillion?: number;
   note?: string;
@@ -14,11 +15,15 @@ export interface ModelPricing {
 export type PricingTable = Record<string, ModelPricing>;
 
 export const pricingInfo = {
-  sourceName: "OpenAI API pricing",
+  sourceName: "Bundled OpenAI and Claude API pricing",
   sourceUrl: "https://developers.openai.com/api/docs/pricing",
+  sourceUrls: [
+    { label: "OpenAI pricing reference", url: "https://developers.openai.com/api/docs/pricing" },
+    { label: "Claude pricing reference", url: "https://platform.claude.com/docs/en/about-claude/pricing" },
+  ],
   unit: "USD per 1M tokens",
   updatedAt: "2026-05-18",
-  note: "RepoSpend estimates API-equivalent cost from local token counts and public API-style Standard short-context pricing. This is not your actual ChatGPT/Codex bill; subscriptions, credits, provider terms, long-context pricing, regional processing, or other billing factors can make your real cost different.",
+  note: "RepoSpend estimates API-equivalent cost from local token counts and public API-style Standard pricing. This is not your actual bill; subscriptions, credits, provider terms, cache behavior, regional processing, or other billing factors can make your real cost different.",
 };
 
 export const defaultPricing: PricingTable = {
@@ -42,6 +47,16 @@ export const defaultPricing: PricingTable = {
   "gpt-5-pro": { inputPerMillion: 15, outputPerMillion: 120, reasoningOutputPerMillion: 120 },
   "gpt-5-mini": { inputPerMillion: 0.25, cachedInputPerMillion: 0.025, outputPerMillion: 2, reasoningOutputPerMillion: 2 },
   "gpt-5-nano": { inputPerMillion: 0.05, cachedInputPerMillion: 0.005, outputPerMillion: 0.4, reasoningOutputPerMillion: 0.4 },
+  "claude-opus-4-7": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+  "claude-opus-4-6": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+  "claude-opus-4-5": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+  "claude-opus-4-1": { inputPerMillion: 15, cacheCreationInputPerMillion: 18.75, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
+  "claude-opus-4": { inputPerMillion: 15, cacheCreationInputPerMillion: 18.75, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
+  "claude-sonnet-4-6": { inputPerMillion: 3, cacheCreationInputPerMillion: 3.75, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
+  "claude-sonnet-4-5": { inputPerMillion: 3, cacheCreationInputPerMillion: 3.75, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
+  "claude-sonnet-4": { inputPerMillion: 3, cacheCreationInputPerMillion: 3.75, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
+  "claude-haiku-4-5": { inputPerMillion: 1, cacheCreationInputPerMillion: 1.25, cachedInputPerMillion: 0.1, outputPerMillion: 5 },
+  "claude-3-5-haiku": { inputPerMillion: 0.8, cacheCreationInputPerMillion: 1, cachedInputPerMillion: 0.08, outputPerMillion: 4 },
 };
 
 export function loadPricingTable(pricingPath?: string): PricingTable {
@@ -70,21 +85,55 @@ export function repospendHome(): string {
   return process.env.REPOSPEND_HOME || path.join(os.homedir(), ".repospend");
 }
 
-export function calculateCostUsd(usage: Pick<NormalizedUsage, "model" | "inputTokens" | "cachedInputTokens" | "outputTokens" | "reasoningTokens">, pricing: PricingTable): number | undefined {
+export function calculateCostUsd(usage: Pick<NormalizedUsage, "model" | "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens" | "outputTokens" | "reasoningTokens">, pricing: PricingTable): number | undefined {
   if (!usage.model) {
     return undefined;
   }
-  const modelPricing = pricing[usage.model] ?? pricing[usage.model.toLowerCase()];
+  const modelPricing = findModelPricing(usage.model, pricing);
   if (!modelPricing) {
     return undefined;
   }
-  const billableInput = Math.max(usage.inputTokens - usage.cachedInputTokens, 0);
+  const cacheCreationInput = usage.cacheCreationInputTokens ?? 0;
+  // Normalized inputTokens are total input tokens; cache reads/writes are split out so each can use its own rate.
+  const billableInput = Math.max(usage.inputTokens - usage.cachedInputTokens - cacheCreationInput, 0);
   const cachedRate = modelPricing.cachedInputPerMillion ?? modelPricing.inputPerMillion;
+  const cacheCreationRate = modelPricing.cacheCreationInputPerMillion ?? modelPricing.inputPerMillion;
   const reasoningRate = modelPricing.reasoningOutputPerMillion ?? modelPricing.outputPerMillion;
   const cost =
     (billableInput / 1_000_000) * modelPricing.inputPerMillion +
     (usage.cachedInputTokens / 1_000_000) * cachedRate +
+    (cacheCreationInput / 1_000_000) * cacheCreationRate +
     (usage.outputTokens / 1_000_000) * modelPricing.outputPerMillion +
     (usage.reasoningTokens / 1_000_000) * reasoningRate;
   return Number(cost.toFixed(6));
+}
+
+function findModelPricing(model: string, pricing: PricingTable): ModelPricing | undefined {
+  const lower = model.toLowerCase();
+  const exactPricing = pricing[model] ?? pricing[lower];
+  if (isUsablePricing(exactPricing)) return exactPricing;
+  const familyPricing = claudeFamilyPricing(lower, pricing);
+  if (isUsablePricing(familyPricing)) return familyPricing;
+  return undefined;
+}
+
+function claudeFamilyPricing(model: string, pricing: PricingTable): ModelPricing | undefined {
+  const families = [
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-opus-4-5",
+    "claude-opus-4-1",
+    "claude-opus-4",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5",
+    "claude-sonnet-4",
+    "claude-haiku-4-5",
+    "claude-3-5-haiku",
+  ];
+  const family = families.find((candidate) => model === candidate || model.startsWith(`${candidate}-`));
+  return family ? pricing[family] : undefined;
+}
+
+function isUsablePricing(pricing: ModelPricing | undefined): pricing is ModelPricing {
+  return typeof pricing?.inputPerMillion === "number" && pricing.inputPerMillion > 0 && typeof pricing.outputPerMillion === "number" && pricing.outputPerMillion > 0;
 }

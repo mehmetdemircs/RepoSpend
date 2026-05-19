@@ -43,7 +43,7 @@ describe("dashboard snapshot", () => {
       sessions: [
         usage({ id: "a", repoName: "A", repoRoot: "/repo/a", sourceApp: "VS Code", model: "gpt-5" }),
         usage({ id: "b", repoName: "B", repoRoot: "/repo/b", sourceApp: "Terminal", model: "gpt-5" }),
-        usage({ id: "c", repoName: "C", repoRoot: "/repo/c", sourceApp: "Codex subagent", model: "gpt-4" }),
+        usage({ id: "c", repoName: "C", repoRoot: "/repo/c", sourceApp: "Codex app", model: "gpt-4" }),
       ],
       filters: { repo: ["A", "B"], sourceApp: ["VS Code", "Terminal"], model: ["gpt-5"] },
     });
