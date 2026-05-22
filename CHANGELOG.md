@@ -2,6 +2,18 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.0.7
+
+- Bump RepoSpend package versions to 0.0.7.
+- Add experimental Cursor support with read-only discovery for local JSONL transcripts and SQLite/vscdb storage, keeping sessions visible when token or cost data is unavailable.
+- Include Cursor in source filters, dashboard source health, README data-source documentation, and CLI help.
+- Track known vs. unknown-cost sessions in grouped breakdowns so mixed Cursor or Claude data does not hide partial cost coverage.
+- Improve Claude Code aggregation by merging duplicate streaming usage rows with per-field maxima, deduplicating resumed usage after that merge, and splitting multi-day/model sessions into activity-day segments.
+- Improve Codex token aggregation by skipping duplicate or stale `last_token_usage` snapshots while preserving post-compaction token deltas.
+- Refresh the dashboard IA and UI copy around "AI providers", "apps / surfaces", repo-or-folder grouping, quick actions, filter summaries, and Cursor usage links.
+- Improve the local scan loading state with elapsed timing, staged scan context, source-level hints, and previous-scan context while refreshes are running.
+- Ignore local `.codex/` files.
+
 ## 0.0.6
 
 - Improve Codex session metadata recovery from rollout logs, including standalone Codex Desktop sessions and imported Claude model metadata.

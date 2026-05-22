@@ -68,6 +68,32 @@ describe("Codex token normalization", () => {
     expect(aggregation.outputTokens).toBe(50);
     expect(aggregation.totalTokens).toBe(200);
   });
+
+  it("skips duplicate last_token_usage rows when cumulative totals did not advance", () => {
+    const aggregation = aggregateTokens([
+      lastAndTotal({ input: 100, cached: 20, output: 40, reasoning: 10, total: 150 }, { input: 100, cached: 20, output: 40, reasoning: 10, total: 150 }),
+      lastAndTotal({ input: 100, cached: 20, output: 40, reasoning: 10, total: 150 }, { input: 100, cached: 20, output: 40, reasoning: 10, total: 150 }),
+      lastAndTotal({ input: 50, cached: 10, output: 20, reasoning: 5, total: 75 }, { input: 150, cached: 30, output: 60, reasoning: 15, total: 225 }),
+    ]);
+
+    expect(aggregation.inputTokens).toBe(150);
+    expect(aggregation.cachedInputTokens).toBe(30);
+    expect(aggregation.outputTokens).toBe(60);
+    expect(aggregation.reasoningTokens).toBe(15);
+    expect(aggregation.warnings).toContain("duplicate_or_stale_token_snapshots_skipped");
+  });
+
+  it("keeps post-compaction last_token_usage when cumulative totals reset hard", () => {
+    const aggregation = aggregateTokens([
+      lastAndTotal({ input: 100, cached: 20, output: 40, reasoning: 10, total: 150 }, { input: 1_000, cached: 900, output: 100, reasoning: 20, total: 1_120 }),
+      lastAndTotal({ input: 30, cached: 5, output: 10, reasoning: 2, total: 42 }, { input: 30, cached: 5, output: 10, reasoning: 2, total: 42 }),
+    ]);
+
+    expect(aggregation.inputTokens).toBe(130);
+    expect(aggregation.cachedInputTokens).toBe(25);
+    expect(aggregation.outputTokens).toBe(50);
+    expect(aggregation.reasoningTokens).toBe(12);
+  });
 });
 
 function tokenCount(input: number, cached: number, outputWithReasoning: number, reasoning: number, total: number) {

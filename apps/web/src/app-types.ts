@@ -74,7 +74,18 @@ export type InsightItem = HealthSignal;
 export type PickerIcon = "source" | "app" | "repo" | "model";
 export type PickerOption = { value: string; label: string; icon?: PickerIcon; usage?: number; verified?: boolean };
 export type BreakdownTab = "providers" | "apps";
-export type BreakdownRow = { id: string; label: string; sessionCount: number; totalTokens: number; estimatedCostUsd: number | undefined; missingTokenSessions: number; iconLabel?: string; source?: Session["sourceClient"] };
+export type BreakdownRow = {
+  id: string;
+  label: string;
+  sessionCount: number;
+  totalTokens: number;
+  estimatedCostUsd: number | undefined;
+  knownCostSessions: number;
+  unknownCostSessions: number;
+  missingTokenSessions: number;
+  iconLabel?: string;
+  source?: Session["sourceClient"];
+};
 export type MetricBreakdownRow = { label: string; value: ReactNode; detail?: string };
 export type PopoverPosition = { top: number; left: number };
 export type TokenStats = {

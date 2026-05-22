@@ -75,6 +75,8 @@ function groupBy(sessions: NormalizedUsage[], keyFn: (session: NormalizedUsage) 
       id,
       label: labelFn(session),
       estimatedCostUsd: undefined,
+      knownCostSessions: 0,
+      unknownCostSessions: 0,
       inputTokens: 0,
       cachedInputTokens: 0,
       outputTokens: 0,
@@ -95,6 +97,9 @@ function groupBy(sessions: NormalizedUsage[], keyFn: (session: NormalizedUsage) 
     group.warnings = unique([...group.warnings, ...session.warnings]);
     if (session.estimatedCostUsd !== undefined) {
       group.estimatedCostUsd = roundCurrency((group.estimatedCostUsd ?? 0) + session.estimatedCostUsd);
+      group.knownCostSessions += 1;
+    } else {
+      group.unknownCostSessions += 1;
     }
     groups.set(id, group);
   }

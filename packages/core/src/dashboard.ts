@@ -49,5 +49,5 @@ export function buildDashboardSnapshot(input: DashboardSnapshotInput): Dashboard
 }
 
 function isDashboardVisibleSession(session: NormalizedUsage): boolean {
-  return session.totalTokens > 0 || session.sourceClient === "claude";
+  return session.totalTokens > 0 || session.sourceClient === "claude" || session.sourceClient === "cursor";
 }

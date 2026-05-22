@@ -140,6 +140,20 @@ describe("pricing and grouping", () => {
     expect(apps.find((app) => app.id === "VS Code")?.totalTokens).toBe(400);
     expect(apps.find((app) => app.id === "Terminal")?.sessionCount).toBe(1);
   });
+
+  it("tracks known and unknown cost sessions in groups", () => {
+    const sessions = [
+      usage({ id: "known", sourceApp: "Cursor", estimatedCostUsd: 0.25, totalTokens: 100 }),
+      usage({ id: "unknown", sourceApp: "Cursor", estimatedCostUsd: undefined, totalTokens: 0, warnings: ["missing_token_breakdown", "unknown_cost"] }),
+    ];
+
+    const cursor = groupBySourceApp(sessions).find((group) => group.id === "Cursor");
+
+    expect(cursor?.estimatedCostUsd).toBe(0.25);
+    expect(cursor?.knownCostSessions).toBe(1);
+    expect(cursor?.unknownCostSessions).toBe(1);
+    expect(cursor?.warnings).toContain("unknown_cost");
+  });
 });
 
 function makeRepo(name = "repo"): string {

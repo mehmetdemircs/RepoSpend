@@ -6,24 +6,50 @@
 [![node](https://img.shields.io/node/v/repospend)](https://www.npmjs.com/package/repospend)
 [![CI](https://github.com/mehmetdemircs/RepoSpend/actions/workflows/ci.yml/badge.svg)](https://github.com/mehmetdemircs/RepoSpend/actions/workflows/ci.yml)
 
-RepoSpend is a local-first dashboard for seeing which repositories are using the
-most AI coding tokens.
+RepoSpend shows where your AI coding tool usage is going across Codex, Claude Code,
+Cursor, and RTK. It is local, private, and repo-first.
 
-It reads supported local Codex and Claude Code files in read-only mode, groups
-sessions by Git repo, and shows token usage, cost estimates, models, sessions,
-and agent friction.
+It reads supported local usage files in read-only mode and groups sessions by Git
+repo.
 
 No login. No telemetry. No prompt uploads.
-
-## Quick Start
-
-You can run RepoSpend without installing it globally:
 
 ```bash
 npx repospend
 ```
 
-Then open the local dashboard URL printed in your terminal.
+RepoSpend opens a local dashboard, usually at
+[http://localhost:2005](http://localhost:2005).
+
+## Preview
+
+![RepoSpend overview dashboard with fictional Middle-earth usage data](docs/screenshots/dashboard-overview.png)
+
+Screenshots use fictional Middle-earth demo data. The Lord of the Rings themed
+repo names, sessions, prompts, token counts, and costs are intentional; no private
+repository data is shown.
+
+## Why RepoSpend?
+
+AI coding tools are powerful, but it is hard to see where the usage goes.
+
+RepoSpend helps answer:
+
+- Which repo is using the most tokens?
+- Which sessions were unusually expensive?
+- Which model or tool generated the spend?
+- Where did the agent get stuck retrying commands?
+- How much would this usage roughly cost at API-style rates?
+
+Everything stays local.
+
+## Quick Start
+
+Run without installing globally:
+
+```bash
+npx repospend
+```
 
 Or install it once:
 
@@ -36,29 +62,50 @@ RepoSpend starts a local dashboard, binds to localhost, opens your browser, and
 prints the dashboard URL. By default it runs at
 [http://localhost:2005](http://localhost:2005).
 
-RepoSpend requires Node.js `20` or newer. It uses `better-sqlite3`, so npm may
-install a native SQLite package for your platform.
+## Supported Tools
 
-## Good For
+| Tool | Status | Notes |
+|---|---|---|
+| Codex | Most complete support | Tokens, models, sessions, repo grouping, command friction |
+| Claude Code | Initial support | Sessions, projects, models, timestamps, tokens when available |
+| Cursor | Experimental | Local JSONL and SQLite/vscdb discovery; tokens/cost only when local data includes them |
+| RTK | Optional/local | Shown only when local RTK data exists |
 
-- finding which repo is burning the most AI coding tokens
-- reviewing expensive or unusual coding-agent sessions
-- comparing Codex and Claude Code usage locally
-- spotting repeated command failures and agent friction
-- exporting usage data for your own analysis
+RepoSpend started as a Codex-first release. Claude Code and Cursor support are
+newer and depend on what those tools persist locally.
+
+## Requirements
+
+- Node.js `20` or newer
+- macOS, Linux, or Windows
+- Local Codex, Claude Code, Cursor, or RTK data, depending on what you want to inspect
+
+RepoSpend uses `better-sqlite3`, so npm may install a native SQLite package for
+your platform.
+
+## What It Shows
+
+RepoSpend helps you break down local AI coding usage by:
+
+- repo
+- session
+- day and hour
+- model
+- source/tool and app/surface, where detectable
+- token type
+- estimated API-equivalent cost
+
+If Codex records work from both of these paths:
+
+```text
+/Users/elrond/dev/RivendellRecords
+/Users/elrond/dev/RivendellRecords/apps/web
+```
+
+RepoSpend walks up to the Git root and shows them together as one
+`RivendellRecords` project.
 
 ## Screenshots
-
-Screenshots use fictional Middle-earth demo data. The Lord of the Rings themed
-repo names, sessions, prompts, token counts, and costs are intentional; no private
-repository data is shown.
-
-### Overview
-
-![RepoSpend overview dashboard with fictional Middle-earth usage data](docs/screenshots/dashboard-overview.png)
-
-The main dashboard summarizes AI coding tokens, API-equivalent cost, top repos,
-cache reuse, file edits, and command issue rate.
 
 ### Repositories
 
@@ -95,49 +142,17 @@ commands, highlights, and issues to inspect.
 Agent Friction separates blocking command failures from harmless shell exits so
 high-token troubleshooting is easier to review.
 
-## What It Shows
-
-RepoSpend helps you break down local AI coding usage by:
-
-- repo
-- session
-- day and hour
-- model
-- source/tool and app/surface, where detectable
-- token type
-- estimated API-equivalent cost
-
-If Codex records work from both of these paths:
-
-```text
-/Users/elrond/dev/RivendellRecords
-/Users/elrond/dev/RivendellRecords/apps/web
-```
-
-RepoSpend walks up to the Git root and shows them together as one
-`RivendellRecords` project.
-
-## Supported Tools
-
-| Tool | Status | Notes |
-|---|---|---|
-| Codex | Most complete support | Tokens, models, sessions, repo grouping, command friction |
-| Claude Code | Initial support | Sessions, projects, models, timestamps, tokens when available |
-| RTK | Optional/local | Shown only when local RTK data exists |
-
-RepoSpend started as a Codex-first release. Claude Code support is newer and
-depends on what your local Claude Code files include.
-
 ## Privacy
 
-RepoSpend is local-first:
+RepoSpend is local-first. Everything the dashboard shows comes from files already
+on your machine.
 
-- no login
-- no telemetry
-- no prompt uploads
-- no changes to Codex or Claude Code files
-
-Everything the dashboard shows comes from files already on your machine.
+- No login or account required.
+- No telemetry.
+- No prompt or transcript uploads.
+- It does not modify Codex, Claude Code, Cursor, or RTK files.
+- It does not claim to match your subscription bill exactly.
+- It does not read Codex Desktop server-side sessions that are not stored locally.
 
 ## Cost Estimates, Not Invoices
 
@@ -152,39 +167,29 @@ usage, account-level terms, provider changes, or other billing details. If you u
 Codex or Claude Code through a subscription, read the number as "what this token
 usage would roughly cost at API-style rates."
 
-Claude Code cost may show as unknown when local files do not include token counts
-or a model name. RepoSpend shows those sessions with unknown tokens/cost rather
-than guessing.
+Codex support is the most complete today. Claude Code and Cursor support depend
+on what those tools store locally, so some sessions may show unknown tokens or
+cost.
 
-### Why RepoSpend's token totals can look lower than `ccusage`
+### Token Accounting
 
-If you compare RepoSpend to `ccusage` you may see matching costs but different
-"total tokens", especially for Codex where cache reads dominate. This is
-expected.
+RepoSpend uses normalized model-work totals:
 
-RepoSpend treats `cached_input_tokens` as a **subset of** `input_tokens`, which
-is how the OpenAI and Anthropic APIs document the field. The "total tokens"
-number reflects the tokens the model actually processed. `ccusage` adds cached
-tokens as a separate line item in its "Total Tokens" column, which inflates the
-total but does not change billing.
+```text
+totalTokens = inputTokens + outputTokens + reasoningTokens
+```
 
-The dollar cost is the source of truth and should agree between the two tools
-within rounding. If costs diverge, that is a real discrepancy worth
-investigating; token-count divergence on its own usually is not.
+Cache reads and cache writes are kept as input sub-buckets and priced once. This
+means RepoSpend token totals may look lower than tools that display cache
+reads/writes as separate addable token columns.
 
-### Codex Desktop on Windows
-
-RepoSpend captures Codex **CLI** usage on Windows from `~/.codex/`. The Codex
-**Desktop app** (installed as the MSIX package
-`OpenAI.Codex_<id>` under `%LOCALAPPDATA%\Packages\`) does not persist session
-transcripts or per-turn token usage to disk. Only Electron caches and debug
-logs are stored locally. Real session data lives server-side. Neither RepoSpend
-nor `ccusage` can report on Codex Desktop usage from local files alone.
+For the detailed accounting model and comparison with `ccusage` and Tokscale,
+see [docs/token-accounting.md](docs/token-accounting.md).
 
 ## What It Reads
 
-RepoSpend only reads local files. It does not edit Codex, Claude Code, or RTK
-data.
+RepoSpend only reads local files. It does not edit Codex, Claude Code, Cursor, or
+RTK data.
 
 Codex data:
 
@@ -208,6 +213,26 @@ reliable token/model data.
 
 Claude Code transcript files can contain prompt text, tool output, and file
 contents. RepoSpend keeps all scanning local.
+
+Cursor data (experimental):
+
+```text
+~/.cursor/
+~/.cursor/chats/
+~/.cursor/projects/
+~/.cursor/projects/*/agent-transcripts/
+~/Library/Application Support/Cursor/User/globalStorage/state.vscdb
+~/Library/Application Support/Cursor/User/workspaceStorage/
+~/.config/Cursor/User/globalStorage/state.vscdb
+~/.config/Cursor/User/workspaceStorage/
+%APPDATA%\Cursor\User\globalStorage\state.vscdb
+%APPDATA%\Cursor\User\workspaceStorage\
+```
+
+RepoSpend prioritizes Cursor JSONL transcripts, then searches local SQLite,
+`.db`, and `.vscdb` files for chat/composer/agent-like JSON blobs. Unknown or
+locked Cursor databases are skipped with warnings. Prompt and response text is
+never uploaded.
 
 RepoSpend-owned settings:
 
@@ -246,6 +271,7 @@ Most commands also accept a simple source filter:
 ```bash
 repospend by-repo --source codex
 repospend by-repo --source claude
+repospend by-repo --source cursor
 repospend by-repo --source all
 ```
 
@@ -260,11 +286,34 @@ browser.
   token usage are shown when present in local JSONL files.
 - Claude Code sessions without local token details are shown with unknown
   tokens/cost.
+- Cursor support is experimental: local transcript/session discovery is
+  best-effort, and Cursor may omit token/cost details or change local schemas.
 - Cost estimates do not represent subscription billing, credits, regional
   pricing, or account-specific terms.
-- Budget alerts are not active yet.
+- Budget alerts are not available yet.
 - Some older sessions may not include full token, command, or prompt details.
 - RTK analytics appear only when local `rtk` data is available.
+- On Windows, RepoSpend captures Codex **CLI** usage from `~/.codex/`. The Codex
+  **Desktop app** does not persist session transcripts or per-turn token usage to
+  disk; real session data lives server-side.
+
+## Troubleshooting Cursor Import
+
+Cursor local files vary by version and surface. To inspect what exists locally:
+
+```bash
+find ~/.cursor -type f | grep -E "jsonl|sqlite|db|vscdb|chat|transcript"
+ls -la "$HOME/Library/Application Support/Cursor/User/globalStorage"
+ls -la "$HOME/Library/Application Support/Cursor/User/workspaceStorage"
+```
+
+On Linux, replace the `Library/Application Support` paths with
+`$HOME/.config/Cursor/User/...`. On Windows, check
+`%APPDATA%\Cursor\User\globalStorage` and `%APPDATA%\Cursor\User\workspaceStorage`.
+
+If Cursor sessions import with unknown tokens or cost, that usually means the
+local files did not include exact usage data. RepoSpend keeps the session visible
+and avoids guessing.
 
 ## Develop
 

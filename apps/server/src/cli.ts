@@ -54,7 +54,7 @@ function openBrowser(url: string): void {
 
 function printGroups(groups: ReturnType<typeof groupByRepo>): void {
   if (!groups.length) {
-    console.log("No usage found. Scanned Codex and Claude Code local data paths.");
+    console.log("No usage found. Scanned Codex, Claude Code, and Cursor local data paths.");
     return;
   }
 
@@ -91,5 +91,5 @@ function printHelp(): void {
   repospend export --format csv
 
 Options:
-  --source all|codex|claude`);
+  --source all|codex|claude|cursor`);
 }

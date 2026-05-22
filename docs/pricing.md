@@ -12,6 +12,21 @@ Each model can define:
 - output tokens
 - reasoning output tokens
 
+RepoSpend prices each bucket once. `inputTokens` is normalized as total input,
+including cache reads and cache writes when those are present, so the pricing
+formula first subtracts cache sub-buckets from billable input and then applies
+their cache-specific rates. This is why RepoSpend token totals can be lower than
+tools that add cache reads/writes as separate "total token" columns while still
+producing comparable API-equivalent cost.
+
+Reasoning output is also priced once. For Codex records where raw
+`output_tokens` includes `reasoning_output_tokens`, RepoSpend subtracts reasoning
+from visible output before storing and pricing both buckets. If a comparison tool
+shows output inclusive of reasoning and also prices reasoning separately, its
+cost will be higher because reasoning is counted twice.
+
+See [token-accounting.md](token-accounting.md) for the detailed comparison model.
+
 If a model is not present in the pricing table, RepoSpend still displays token totals and marks cost as unknown. Unknown pricing does not stop scans, dashboard responses, CLI output, or exports.
 
 If Codex only exposes a raw token total for an older session, RepoSpend also leaves cost unknown. It does not infer an input/output split because that would make the estimate look more precise than the local data supports.

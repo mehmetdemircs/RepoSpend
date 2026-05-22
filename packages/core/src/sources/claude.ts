@@ -31,6 +31,12 @@ interface ClaudeTokenTotals {
   usageCount: number;
 }
 
+interface ClaudeUsageEvent {
+  timestamp: string | undefined;
+  model: string | undefined;
+  usage: Record<string, unknown>;
+}
+
 interface ClaudeSessionBreakdown extends ClaudeTokenTotals {
   id: string | undefined;
   title: string | undefined;
@@ -54,6 +60,7 @@ interface ClaudeSessionBreakdown extends ClaudeTokenTotals {
   parseErrors: string[];
   promptTimeline: PromptTimelineItem[];
   warnings: string[];
+  usageEvents: ClaudeUsageEvent[];
 }
 
 export interface ClaudeAdapterOptions {
@@ -93,20 +100,21 @@ interface ClaudeSessionFile {
   projectsPath: string;
 }
 
+interface ClaudeUsageSelection {
+  usageByOccurrence: Map<string, Record<string, unknown>>;
+}
+
 export function scanClaude(options: ClaudeAdapterOptions): ClaudeScanResult {
   const claudeHome = options.claudeHome ?? defaultClaudeHome();
   const historyPath = path.join(claudeHome, "history.jsonl");
   const warnings: string[] = [];
   const discovery = discoverClaudeSessionFiles(claudeHome, warnings, Boolean(options.claudeHome));
   const historyExists = fs.existsSync(historyPath);
-  // Dedup usage across files: when a Claude Code session is resumed, prior
-  // assistant messages are replayed into the new .jsonl with their original
-  // `message.id` + `requestId`. Counting them again would inflate tokens/cost.
-  const seenUsageKeys = new Set<string>();
   const orderedFiles = discovery.files
     .map((file) => ({ file, mtimeMs: safeMtimeMs(file.filePath) }))
     .sort((a, b) => a.mtimeMs - b.mtimeMs);
-  const sessions = orderedFiles.map(({ file }, index) => claudeFileToUsage(file, index, options, seenUsageKeys));
+  const usageSelection = selectClaudeUsageOccurrences(orderedFiles.map(({ file }) => file));
+  const sessions = orderedFiles.flatMap(({ file }, index) => claudeFileToUsages(file, index, options, usageSelection));
   const historyEntryCount = countHistoryEntries(historyPath);
   const parseFailureCount = sessions.filter((session) => session.parseStatus === "failed" || (session.parseErrors?.length ?? 0) > 0).length;
   const unreadableFileCount = sessions.filter((session) => session.parseErrors?.some((error) => error.startsWith("unable_to_read_session_file:"))).length;
@@ -224,8 +232,13 @@ function walk(root: string, maxDepth: number, onFile: (path: string) => void, de
   }
 }
 
-function claudeFileToUsage(file: ClaudeSessionFile, index: number, options: ClaudeAdapterOptions, seenUsageKeys: Set<string>): NormalizedUsage {
-  const breakdown = readClaudeBreakdown(file.filePath, seenUsageKeys);
+function claudeFileToUsages(file: ClaudeSessionFile, index: number, options: ClaudeAdapterOptions, usageSelection: ClaudeUsageSelection): NormalizedUsage[] {
+  const breakdown = readClaudeBreakdown(file.filePath, usageSelection);
+  const segments = segmentClaudeBreakdownByDayAndModel(breakdown);
+  return segments.map(({ breakdown: segment, suffix }) => claudeBreakdownToUsage(file, index, options, segment, suffix));
+}
+
+function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options: ClaudeAdapterOptions, breakdown: ClaudeSessionBreakdown, idSuffix = ""): NormalizedUsage {
   const id = breakdown.id ?? (path.basename(file.filePath).replace(/\.jsonl$/i, "") || `claude-session-${index}`);
   const fallbackCwd = inferProjectPath(file.projectDir, file.projectsPath);
   const cwd = breakdown.cwd ?? fallbackCwd;
@@ -235,7 +248,7 @@ function claudeFileToUsage(file: ClaudeSessionFile, index: number, options: Clau
   if (!breakdown.cwd) warnings.push("repo_inferred_from_claude_project_dir");
   const hasTokenBreakdown = breakdown.totalTokens > 0 && breakdown.usageCount > 0;
   const usage: NormalizedUsage = {
-    id,
+    id: `${id}${idSuffix}`,
     sourceClient: "claude",
     sourceApp: claudeSourceAppLabel(entrypoint),
     sourceAppRaw: entrypoint,
@@ -302,7 +315,7 @@ function inferClaudeEntrypointFromPath(filePath: string): string | undefined {
   return filePath.split(path.sep).includes("local-agent-mode-sessions") ? "local-agent" : undefined;
 }
 
-function readClaudeBreakdown(filePath: string, seenUsageKeys: Set<string>): ClaudeSessionBreakdown {
+function readClaudeBreakdown(filePath: string, usageSelection: ClaudeUsageSelection): ClaudeSessionBreakdown {
   const breakdown = emptyBreakdown();
   try {
     const text = fs.readFileSync(filePath, "utf8");
@@ -310,8 +323,8 @@ function readClaudeBreakdown(filePath: string, seenUsageKeys: Set<string>): Clau
     breakdown.rawEventCount = parse.records.length;
     breakdown.parseErrors = parse.errors;
     breakdown.parseStatus = parse.errors.length ? (parse.records.length ? "partial" : "failed") : "ok";
-    for (const record of parse.records) {
-      applyClaudeRecord(breakdown, record, seenUsageKeys);
+    for (const [recordIndex, record] of parse.records.entries()) {
+      applyClaudeRecord(breakdown, record, usageSelection, occurrenceKey(filePath, recordIndex));
     }
     breakdown.totalTokens = breakdown.inputTokens + breakdown.outputTokens;
   } catch (error) {
@@ -323,7 +336,7 @@ function readClaudeBreakdown(filePath: string, seenUsageKeys: Set<string>): Clau
   return breakdown;
 }
 
-function applyClaudeRecord(breakdown: ClaudeSessionBreakdown, record: ClaudeRecord, seenUsageKeys: Set<string>): void {
+function applyClaudeRecord(breakdown: ClaudeSessionBreakdown, record: ClaudeRecord, usageSelection: ClaudeUsageSelection, usageOccurrenceKey: string): void {
   const timestamp = dateValue(record.timestamp);
   if (timestamp) {
     breakdown.startedAt = minDate(breakdown.startedAt, timestamp);
@@ -348,8 +361,10 @@ function applyClaudeRecord(breakdown: ClaudeSessionBreakdown, record: ClaudeReco
     const usageTokens = usage ? usageTotal(usage) : 0;
     const model = normalizeClaudeModel(message.model);
     if (model && (usageTokens > 0 || !breakdown.model)) breakdown.model = model;
-    if (usage && usageTokens > 0 && !alreadySeenUsage(record, message, seenUsageKeys)) {
-      applyUsage(breakdown, usage);
+    const selectedUsage = usageTokens > 0 ? usageSelection.usageByOccurrence.get(usageOccurrenceKey) : undefined;
+    if (selectedUsage) {
+      applyUsage(breakdown, selectedUsage);
+      breakdown.usageEvents.push({ timestamp, model, usage: selectedUsage });
     }
     applyContentSignals(breakdown, message.content);
   }
@@ -357,14 +372,71 @@ function applyClaudeRecord(breakdown: ClaudeSessionBreakdown, record: ClaudeReco
   if (looksFailedToolResult(record.toolUseResult)) breakdown.failedToolCallCount += 1;
 }
 
-function alreadySeenUsage(record: ClaudeRecord, message: Record<string, unknown>, seenUsageKeys: Set<string>): boolean {
+function selectClaudeUsageOccurrences(files: ClaudeSessionFile[]): ClaudeUsageSelection {
+  const usageByOccurrence = new Map<string, Record<string, unknown>>();
+  const selectedByDedupKey = new Map<string, { occurrence: string; usage: Record<string, unknown> }>();
+
+  for (const file of files) {
+    let parse: { records: ClaudeRecord[] };
+    try {
+      parse = parseJsonLines(fs.readFileSync(file.filePath, "utf8"));
+    } catch {
+      continue;
+    }
+
+    for (const [recordIndex, record] of parse.records.entries()) {
+      const message = firstObject(record.message);
+      const usage = firstObject(message?.usage);
+      if (!message || !usage || usageTotal(usage) <= 0) continue;
+
+      const occurrence = occurrenceKey(file.filePath, recordIndex);
+      const dedupKey = usageDedupKey(record, message);
+      if (!dedupKey) {
+        usageByOccurrence.set(occurrence, usage);
+        continue;
+      }
+
+      const selected = selectedByDedupKey.get(dedupKey);
+      if (selected) {
+        mergeUsageMax(selected.usage, usage);
+      } else {
+        selectedByDedupKey.set(dedupKey, { occurrence, usage: cloneUsage(usage) });
+      }
+    }
+  }
+
+  for (const selected of selectedByDedupKey.values()) {
+    usageByOccurrence.set(selected.occurrence, selected.usage);
+  }
+
+  return { usageByOccurrence };
+}
+
+function usageDedupKey(record: ClaudeRecord, message: Record<string, unknown>): string | undefined {
   const messageId = stringValue(message.id);
   const requestId = stringValue(record.requestId);
-  if (!messageId || !requestId) return false;
-  const key = `${requestId}:${messageId}`;
-  if (seenUsageKeys.has(key)) return true;
-  seenUsageKeys.add(key);
-  return false;
+  if (!messageId || !requestId) return undefined;
+  return `${requestId}:${messageId}`;
+}
+
+function occurrenceKey(filePath: string, recordIndex: number): string {
+  return `${path.resolve(filePath)}:${recordIndex}`;
+}
+
+function cloneUsage(usage: Record<string, unknown>): Record<string, unknown> {
+  return {
+    input_tokens: numberValue(usage.input_tokens),
+    cache_read_input_tokens: numberValue(usage.cache_read_input_tokens),
+    cache_creation_input_tokens: numberValue(usage.cache_creation_input_tokens),
+    output_tokens: numberValue(usage.output_tokens),
+  };
+}
+
+function mergeUsageMax(target: Record<string, unknown>, usage: Record<string, unknown>): void {
+  target.input_tokens = Math.max(numberValue(target.input_tokens), numberValue(usage.input_tokens));
+  target.cache_read_input_tokens = Math.max(numberValue(target.cache_read_input_tokens), numberValue(usage.cache_read_input_tokens));
+  target.cache_creation_input_tokens = Math.max(numberValue(target.cache_creation_input_tokens), numberValue(usage.cache_creation_input_tokens));
+  target.output_tokens = Math.max(numberValue(target.output_tokens), numberValue(usage.output_tokens));
 }
 
 function applyUsage(breakdown: ClaudeSessionBreakdown, usage: Record<string, unknown>): void {
@@ -377,6 +449,63 @@ function applyUsage(breakdown: ClaudeSessionBreakdown, usage: Record<string, unk
   breakdown.cacheCreationInputTokens += cacheCreation;
   breakdown.outputTokens += output;
   breakdown.usageCount += 1;
+}
+
+function segmentClaudeBreakdownByDayAndModel(breakdown: ClaudeSessionBreakdown): Array<{ breakdown: ClaudeSessionBreakdown; suffix: string }> {
+  const events = breakdown.usageEvents.filter((event) => event.timestamp);
+  const keys = new Set(events.map((event) => segmentKey(event.timestamp, event.model)));
+  if (keys.size <= 1) return [{ breakdown, suffix: "" }];
+
+  const groups = new Map<string, { day: string; model: string | undefined; events: ClaudeUsageEvent[] }>();
+  for (const event of events) {
+    const key = segmentKey(event.timestamp, event.model);
+    const day = dateKey(event.timestamp);
+    const existing = groups.get(key) ?? { day, model: event.model, events: [] };
+    existing.events.push(event);
+    groups.set(key, existing);
+  }
+
+  return [...groups.values()]
+    .sort((a, b) => a.day.localeCompare(b.day) || (a.model ?? "").localeCompare(b.model ?? ""))
+    .map((group) => {
+      const segment = cloneBreakdownMetadata(breakdown);
+      segment.model = group.model ?? breakdown.model;
+      segment.startedAt = group.events.map((event) => event.timestamp).filter(Boolean).sort()[0];
+      segment.endedAt = group.events.map((event) => event.timestamp).filter(Boolean).sort().at(-1);
+      // Day/model segments are built from usage-bearing assistant turns; do not duplicate user prompts across split segments.
+      segment.assistantMessageCount = group.events.length;
+      segment.messageCount = group.events.length;
+      segment.rawEventCount = group.events.length;
+      for (const event of group.events) {
+        applyUsage(segment, event.usage);
+        segment.usageEvents.push(event);
+      }
+      segment.totalTokens = segment.inputTokens + segment.outputTokens;
+      return { breakdown: segment, suffix: `#${group.day}${group.model ? `#${group.model}` : ""}` };
+    });
+}
+
+function cloneBreakdownMetadata(breakdown: ClaudeSessionBreakdown): ClaudeSessionBreakdown {
+  return {
+    ...emptyBreakdown(),
+    id: breakdown.id,
+    title: breakdown.title,
+    cwd: breakdown.cwd,
+    gitBranch: breakdown.gitBranch,
+    entrypoint: breakdown.entrypoint,
+    version: breakdown.version,
+    parseStatus: breakdown.parseStatus,
+    parseErrors: [...breakdown.parseErrors],
+    warnings: [...breakdown.warnings, "claude_session_split_by_activity_day"],
+  };
+}
+
+function segmentKey(timestamp: string | undefined, model: string | undefined): string {
+  return `${dateKey(timestamp)}\0${model ?? ""}`;
+}
+
+function dateKey(timestamp: string | undefined): string {
+  return timestamp?.slice(0, 10) ?? "unknown-date";
 }
 
 function usageTotal(usage: Record<string, unknown>): number {
@@ -446,6 +575,7 @@ function emptyBreakdown(): ClaudeSessionBreakdown {
     parseErrors: [],
     promptTimeline: [],
     warnings: [],
+    usageEvents: [],
   };
 }
 

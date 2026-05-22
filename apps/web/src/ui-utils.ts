@@ -19,13 +19,19 @@ export function toggleFilterValue(values: string[], value: string): string[] {
 
 export function buildSourcePickerOptions(sources: Source[], sessions: Session[], selected: string[], sortMode: FilterSortMode): PickerOption[] {
   const usage = new Map<string, number>();
-  for (const session of sessions) usage.set(session.sourceClient, (usage.get(session.sourceClient) ?? 0) + session.totalTokens);
-  const options: PickerOption[] = sources.map((source) => ({
-    value: source.id,
-    label: source.label,
-    icon: "source" as const,
-    usage: usage.get(source.id) ?? 0,
-  }));
+  const sessionCounts = new Map<string, number>();
+  for (const session of sessions) {
+    usage.set(session.sourceClient, (usage.get(session.sourceClient) ?? 0) + session.totalTokens);
+    sessionCounts.set(session.sourceClient, (sessionCounts.get(session.sourceClient) ?? 0) + 1);
+  }
+  const options: PickerOption[] = sources
+    .filter((source) => (sessionCounts.get(source.id) ?? 0) > 0 || selected.includes(source.id))
+    .map((source) => ({
+      value: source.id,
+      label: source.label,
+      icon: "source" as const,
+      usage: usage.get(source.id) ?? 0,
+    }));
   for (const value of selected) {
     if (!options.some((option) => option.value === value)) {
       options.push({ value, label: value, icon: "source", usage: usage.get(value) ?? 0 });
@@ -198,6 +204,8 @@ export function groupUsageForChart(groups: UsageGroup[], metric: MetricKey, limi
     id: "__other",
     label: `Other (${hidden.length})`,
     estimatedCostUsd: knownCost.length ? roundCurrency(knownCost.reduce((sum, group) => sum + (group.estimatedCostUsd ?? 0), 0)) : undefined,
+    knownCostSessions: hidden.reduce((sum, group) => sum + group.knownCostSessions, 0),
+    unknownCostSessions: hidden.reduce((sum, group) => sum + group.unknownCostSessions, 0),
     inputTokens: hidden.reduce((sum, group) => sum + group.inputTokens, 0),
     cachedInputTokens: hidden.reduce((sum, group) => sum + group.cachedInputTokens, 0),
     outputTokens: hidden.reduce((sum, group) => sum + group.outputTokens, 0),

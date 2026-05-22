@@ -249,6 +249,103 @@ describe("Claude Code adapter", () => {
     expect(result.sessions[0]?.tokenSnapshotCount).toBe(1);
   });
 
+  it("merges duplicate Claude streaming usage rows with per-field max", () => {
+    const claudeHome = makeTempDir();
+    const projectDir = path.join(claudeHome, "projects", "-tmp-streaming");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "streaming.jsonl"),
+      [
+        JSON.stringify({
+          type: "assistant",
+          sessionId: "streaming",
+          timestamp: "2026-05-18T10:00:00.000Z",
+          requestId: "req_001",
+          message: { role: "assistant", id: "msg_001", model: "claude-sonnet-4-5", usage: { input_tokens: 10, cache_read_input_tokens: 20, output_tokens: 31 } },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          sessionId: "streaming",
+          timestamp: "2026-05-18T10:00:01.000Z",
+          requestId: "req_001",
+          message: { role: "assistant", id: "msg_001", model: "claude-sonnet-4-5", usage: { input_tokens: 50, cache_read_input_tokens: 40, output_tokens: 300 } },
+        }),
+      ].join("\n"),
+    );
+
+    const result = scanClaude({ claudeHome, pricing: { "claude-sonnet-4-5": { inputPerMillion: 3, cachedInputPerMillion: 0.3, outputPerMillion: 15 } } });
+
+    expect(result.sessions[0]?.inputTokens).toBe(90);
+    expect(result.sessions[0]?.cachedInputTokens).toBe(40);
+    expect(result.sessions[0]?.outputTokens).toBe(300);
+    expect(result.sessions[0]?.totalTokens).toBe(390);
+    expect(result.sessions[0]?.tokenSnapshotCount).toBe(1);
+  });
+
+  it("deduplicates resumed Claude usage across files after merging max token fields", () => {
+    const claudeHome = makeTempDir();
+    const projectDir = path.join(claudeHome, "projects", "-tmp-resumed");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "original.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "original",
+        timestamp: "2026-05-18T10:00:00.000Z",
+        requestId: "req_001",
+        message: { role: "assistant", id: "msg_001", model: "claude-sonnet-4-5", usage: { input_tokens: 10, cache_read_input_tokens: 20, output_tokens: 31 } },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "resumed.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "resumed",
+        timestamp: "2026-05-18T10:01:00.000Z",
+        requestId: "req_001",
+        message: { role: "assistant", id: "msg_001", model: "claude-sonnet-4-5", usage: { input_tokens: 10, cache_read_input_tokens: 20, output_tokens: 300 } },
+      }),
+    );
+
+    const result = scanClaude({ claudeHome, pricing: { "claude-sonnet-4-5": { inputPerMillion: 3, cachedInputPerMillion: 0.3, outputPerMillion: 15 } } });
+
+    expect(result.sessions).toHaveLength(2);
+    expect(result.sessions.reduce((total, session) => total + session.outputTokens, 0)).toBe(300);
+    expect(result.sessions.reduce((total, session) => total + session.tokenSnapshotCount, 0)).toBe(1);
+  });
+
+  it("splits multi-day Claude usage into activity-day segments for date parity", () => {
+    const claudeHome = makeTempDir();
+    const projectDir = path.join(claudeHome, "projects", "-tmp-multi-day");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "multi-day.jsonl"),
+      [
+        JSON.stringify({
+          type: "assistant",
+          sessionId: "multi-day",
+          timestamp: "2026-05-14T23:59:00.000Z",
+          requestId: "req_001",
+          message: { role: "assistant", id: "msg_001", model: "claude-sonnet-4-5", usage: { input_tokens: 10, cache_read_input_tokens: 20, output_tokens: 30 } },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          sessionId: "multi-day",
+          timestamp: "2026-05-15T00:01:00.000Z",
+          requestId: "req_002",
+          message: { role: "assistant", id: "msg_002", model: "claude-sonnet-4-5", usage: { input_tokens: 40, cache_read_input_tokens: 50, output_tokens: 60 } },
+        }),
+      ].join("\n"),
+    );
+
+    const result = scanClaude({ claudeHome, pricing: { "claude-sonnet-4-5": { inputPerMillion: 3, cachedInputPerMillion: 0.3, outputPerMillion: 15 } } });
+
+    expect(result.sessions).toHaveLength(2);
+    expect(result.sessions.map((session) => session.startedAt?.slice(0, 10))).toEqual(["2026-05-14", "2026-05-15"]);
+    expect(result.sessions.map((session) => session.totalTokens)).toEqual([60, 150]);
+    expect(result.sessions.every((session) => session.warnings.includes("claude_session_split_by_activity_day"))).toBe(true);
+  });
+
   it("counts Claude history entries but does not import history-only sessions", () => {
     const claudeHome = makeTempDir();
     fs.mkdirSync(path.join(claudeHome, "projects"), { recursive: true });

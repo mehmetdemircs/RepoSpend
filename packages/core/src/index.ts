@@ -9,5 +9,6 @@ export * from "./repo-rollup.js";
 export * from "./sources/codex.js";
 export * from "./sources/codex-token.js";
 export * from "./sources/claude.js";
+export * from "./sources/cursor.js";
 export * from "./sources/index.js";
 export * from "./usage-health.js";

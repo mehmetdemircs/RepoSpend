@@ -21,6 +21,7 @@ interface ExtractedTokenUsage {
   reasoningTokens: number;
   totalTokens: number;
   cumulative: boolean;
+  cumulativeSnapshot?: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot"> | undefined;
 }
 
 export type CodexTokenRecord = unknown;
@@ -99,7 +100,8 @@ function finalizeTokenAccumulator(accumulator: CodexTokenAccumulator): void {
 
   const direct = accumulator.directTokenUsages.filter((usage) => isValidTokenUsage(usage));
   if (direct.length > 0) {
-    const total = direct.reduce(
+    const filteredDirect = filterDuplicateDirectUsages(direct);
+    const total = filteredDirect.reduce(
       (sum, usage) => ({
         inputTokens: sum.inputTokens + usage.inputTokens,
         cachedInputTokens: sum.cachedInputTokens + usage.cachedInputTokens,
@@ -112,6 +114,8 @@ function finalizeTokenAccumulator(accumulator: CodexTokenAccumulator): void {
     applyFinalUsage(accumulator, total);
     accumulator.tokenAggregationMethod = "delta_sum";
     accumulator.tokenConfidence = "high";
+    const skipped = direct.length - filteredDirect.length;
+    if (skipped > 0) accumulator.warnings.push("duplicate_or_stale_token_snapshots_skipped");
     return;
   }
 
@@ -130,7 +134,10 @@ function extractRecordTokens(record: unknown): ExtractedTokenUsage | undefined {
   // each reset; summing per-turn deltas captures every billed API call.
   const codexLastUsage = firstObject(payloadInfo?.last_token_usage);
   if (codexLastUsage) {
-    return tokenUsageFromObject(codexLastUsage, false);
+    const usage = tokenUsageFromObject(codexLastUsage, false);
+    const cumulativeSnapshot = firstObject(payloadInfo?.total_token_usage);
+    const cumulativeUsage = cumulativeSnapshot ? tokenUsageFromObject(cumulativeSnapshot, true) : undefined;
+    return usage ? { ...usage, cumulativeSnapshot: cumulativeUsage ? stripSnapshot(cumulativeUsage) : undefined } : undefined;
   }
 
   const codexTotalUsage = firstObject(payloadInfo?.total_token_usage);
@@ -141,6 +148,56 @@ function extractRecordTokens(record: unknown): ExtractedTokenUsage | undefined {
   const response = firstObject(object.response);
   const usage = firstObject(object.usage, object.token_usage, object.tokens, response?.usage, payload?.usage, payload?.token_usage, payload?.tokens);
   return tokenUsageFromObject(usage ?? object, false);
+}
+
+function filterDuplicateDirectUsages(usages: ExtractedTokenUsage[]): ExtractedTokenUsage[] {
+  const filtered: ExtractedTokenUsage[] = [];
+  let previous: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot"> | undefined;
+  for (const usage of usages) {
+    const snapshot = usage.cumulativeSnapshot;
+    if (snapshot && previous) {
+      if (sameTokenUsage(snapshot, previous)) continue;
+      if (!isMonotonicFrom(snapshot, previous) && looksLikeStaleRegression(snapshot, previous, usage)) continue;
+    }
+    filtered.push(usage);
+    if (snapshot) previous = snapshot;
+  }
+  return filtered;
+}
+
+function sameTokenUsage(a: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot">, b: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot">): boolean {
+  return a.inputTokens === b.inputTokens && a.cachedInputTokens === b.cachedInputTokens && a.outputTokens === b.outputTokens && a.reasoningTokens === b.reasoningTokens && a.totalTokens === b.totalTokens;
+}
+
+function isMonotonicFrom(current: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot">, previous: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot">): boolean {
+  return current.inputTokens >= previous.inputTokens && current.cachedInputTokens >= previous.cachedInputTokens && current.outputTokens >= previous.outputTokens && current.reasoningTokens >= previous.reasoningTokens;
+}
+
+function looksLikeStaleRegression(
+  current: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot">,
+  previous: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot">,
+  last: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot">,
+): boolean {
+  const previousTotal = tokenBucketTotal(previous);
+  const currentTotal = tokenBucketTotal(current);
+  const lastTotal = tokenBucketTotal(last);
+  if (previousTotal <= 0 || currentTotal <= 0 || lastTotal <= 0) return false;
+  // A near-previous cumulative total is usually a rebroadcast; the 75% clause catches stale snapshots whose tiny last-token delta would otherwise double-count a mostly repeated turn.
+  return currentTotal * 100 >= previousTotal * 98 || (currentTotal * 4 >= previousTotal * 3 && currentTotal + lastTotal * 2 >= previousTotal);
+}
+
+function tokenBucketTotal(usage: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot">): number {
+  return usage.inputTokens + usage.cachedInputTokens + usage.outputTokens + usage.reasoningTokens;
+}
+
+function stripSnapshot(usage: ExtractedTokenUsage): Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot"> {
+  return {
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    outputTokens: usage.outputTokens,
+    reasoningTokens: usage.reasoningTokens,
+    totalTokens: usage.totalTokens,
+  };
 }
 
 function tokenUsageFromObject(target: Record<string, unknown>, cumulative: boolean): ExtractedTokenUsage | undefined {

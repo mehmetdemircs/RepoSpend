@@ -47,6 +47,7 @@ export interface SessionIdentity {
   surfaceReason?: string | undefined;
   promptTimeline?: PromptTimelineItem[] | undefined;
   sessionOutcome?: "completed" | "partial" | "failed" | "research_only" | "no_code_change" | "setup_debugging" | "unknown" | undefined;
+  sourceMetadata?: Record<string, unknown> | undefined;
 }
 
 export interface TokenAggregation {
@@ -152,6 +153,8 @@ export interface UsageGroup {
   id: string;
   label: string;
   estimatedCostUsd: number | undefined;
+  knownCostSessions: number;
+  unknownCostSessions: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -257,10 +260,15 @@ export interface DashboardSourceStats {
   sessionsPath?: string;
   projectsPath?: string;
   historyPath?: string;
+  cursorHome?: string;
+  globalStoragePath?: string;
+  workspaceStoragePath?: string;
   stateExists?: boolean;
   sessionsExists?: boolean;
   projectsExists?: boolean;
   historyExists?: boolean;
+  databaseFileCount?: number;
+  skippedFileCount?: number;
   sessionFileCount: number;
   sessionsImported?: number;
   parseFailureCount?: number;

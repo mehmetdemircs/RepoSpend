@@ -4,12 +4,12 @@ RepoSpend is a local-first AI coding usage dashboard. The product promise is rep
 
 ## Current Release
 
-- Version: `0.0.5`
+- Version: `0.0.7`
 - Scope: early debug release
-- Source clients: Codex and initial Claude Code support
+- Source clients: Codex, Claude Code, and experimental Cursor support
 - Server: localhost-only local Fastify API
 - Dashboard: React/Vite/Tailwind dark analytics UI
-- Storage: reads Codex from `~/.codex` and Claude Code from local Claude paths; stores RepoSpend-owned local settings under `~/.repospend`
+- Storage: reads Codex from `~/.codex`, Claude Code from local Claude paths, and experimental Cursor data from local Cursor paths; stores RepoSpend-owned local settings under `~/.repospend`
 - License: Apache-2.0
 
 ## Main Navigation

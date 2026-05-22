@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { ArrowDownUp, Bot, Boxes, Calculator, ChartNoAxesCombined, CircleDollarSign, Code2, Columns3, Command, Copy, Database, Download, ExternalLink, Filter, Folder, GitBranch, Info, LayoutDashboard, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Server, Settings, Terminal, TriangleAlert, X } from "lucide-react";
+import { AppWindow, ArrowDownUp, Blocks, Bot, BrainCircuit, Calculator, ChartNoAxesCombined, CircleDollarSign, Code2, Columns3, Command, Copy, Cpu, Database, Download, ExternalLink, Filter, FolderGit2, FolderOpen, Github, GitBranch, Info, LayoutDashboard, LayoutPanelTop, MonitorCog, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings, Sparkles, SquareTerminal, Terminal, TriangleAlert, X } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -105,12 +105,24 @@ const viewMeta: Record<ViewKey, { title: string; subtitle: string }> = {
   dashboard: { title: "Overview", subtitle: "Your local AI coding activity at a glance" },
   sessions: { title: "Sessions", subtitle: "Inspect metadata, surfaces, outcomes, commands, and parse status" },
   sessionDetail: { title: "Session Detail", subtitle: "One local AI coding session, with signals and token shape" },
-  repos: { title: "Repos", subtitle: "Compare local AI coding usage, API-equivalent cost, productivity, and warnings by Git repository" },
-  repoDetail: { title: "Repo Detail", subtitle: "Focused repository usage, sessions, warnings, and command signals" },
+  repos: { title: "Repos / folders", subtitle: "Compare local AI coding usage, API-equivalent cost, productivity, and warnings by Git repo or inferred folder" },
+  repoDetail: { title: "Repo / folder detail", subtitle: "Focused repo or folder usage, sessions, warnings, and command signals" },
   commands: { title: "Agent Friction", subtitle: "Command signals that separate blocking issues from harmless shell exits" },
   insights: { title: "Usage Health", subtitle: "What looks good, what needs attention, and why" },
   rtk: { title: "RTK Insights", subtitle: "Token savings from RTK command proxy" },
   settings: { title: "Settings", subtitle: "Local pricing and dashboard configuration" },
+};
+
+const viewIcons: Record<ViewKey, React.ReactElement> = {
+  dashboard: <LayoutDashboard />,
+  sessions: <Terminal />,
+  sessionDetail: <Terminal />,
+  repos: <FolderGit2 />,
+  repoDetail: <FolderGit2 />,
+  commands: <TriangleAlert />,
+  insights: <Info />,
+  rtk: <Command />,
+  settings: <Settings />,
 };
 
 function App() {
@@ -146,9 +158,11 @@ function App() {
   }, [displaySettings.splitSourceApps, filters]);
   const filterOptionsQuery = React.useMemo(() => {
     const params = new URLSearchParams();
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
     if (displaySettings.splitSourceApps) params.set("splitSourceApps", "true");
     return params.toString();
-  }, [displaySettings.splitSourceApps]);
+  }, [displaySettings.splitSourceApps, filters.from, filters.to]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -186,6 +200,29 @@ function App() {
       setSelectedRepo(null);
     }
   }, [data, filterOptionsData, selectedRepo]);
+
+  React.useEffect(() => {
+    if (!filterOptionsData) return;
+    const availableSources = new Set<string>(filterOptionsData.sessions.map((session) => session.sourceClient));
+    const availableSourceApps = new Set(filterOptionsData.sourceApps.map((app) => app.label));
+    const availableRepos = new Set(filterOptionsData.repos.flatMap((repo) => [repo.id, repo.label]));
+    const availableModels = new Set(filterOptionsData.models.map((model) => model.label));
+    const nextFilters = {
+      ...filters,
+      source: filters.source.filter((source) => availableSources.has(source)),
+      sourceApp: filters.sourceApp.filter((app) => availableSourceApps.has(app)),
+      repo: filters.repo.filter((repo) => availableRepos.has(repo)),
+      model: filters.model.filter((model) => availableModels.has(model)),
+    };
+    if (
+      nextFilters.source.length !== filters.source.length
+      || nextFilters.sourceApp.length !== filters.sourceApp.length
+      || nextFilters.repo.length !== filters.repo.length
+      || nextFilters.model.length !== filters.model.length
+    ) {
+      setFilters(nextFilters);
+    }
+  }, [filterOptionsData, filters]);
 
   React.useEffect(() => {
     const handlePopState = () => {
@@ -240,10 +277,11 @@ function App() {
   }, []);
 
   const optionSource = filterOptionsData ?? data;
-  const sourceOptions = buildSourcePickerOptions(optionSource?.sources ?? data?.sources ?? [], optionSource?.sessions ?? data?.sessions ?? [], filters.source, filterSortMode);
-  const repoOptions = buildGroupPickerOptions(optionSource?.repos ?? [], filters.repo, filterSortMode, "repo");
-  const modelOptions = buildGroupPickerOptions(optionSource?.models ?? [], filters.model, filterSortMode, "model");
-  const appOptions = buildGroupPickerOptions(optionSource?.sourceApps ?? [], filters.sourceApp, filterSortMode, "app");
+  const pickerSortMode: FilterSortMode = "usage";
+  const sourceOptions = buildSourcePickerOptions(optionSource?.sources ?? data?.sources ?? [], optionSource?.sessions ?? data?.sessions ?? [], filters.source, pickerSortMode);
+  const repoOptions = buildGroupPickerOptions(optionSource?.repos ?? [], filters.repo, pickerSortMode, "repo");
+  const modelOptions = buildGroupPickerOptions(optionSource?.models ?? [], filters.model, pickerSortMode, "model");
+  const appOptions = buildGroupPickerOptions(optionSource?.sourceApps ?? [], filters.sourceApp, pickerSortMode, "app");
 
   const navigateToView = React.useCallback((view: ViewKey) => setActiveView(view), []);
   const openSession = React.useCallback((sessionId: string) => {
@@ -284,19 +322,22 @@ function App() {
 
         <nav className="sidebar-nav" aria-label="Primary">
           <NavButton icon={<LayoutDashboard />} label="Overview" active={activeView === "dashboard"} onClick={() => navigateToView("dashboard")} />
-          <NavButton icon={<Folder />} label="Repos" active={activeView === "repos" || activeView === "repoDetail"} onClick={() => navigateToView("repos")} />
+          <NavButton icon={<FolderGit2 />} label="Repos / folders" active={activeView === "repos" || activeView === "repoDetail"} onClick={() => navigateToView("repos")} />
           <NavButton icon={<Terminal />} label="Sessions" active={activeView === "sessions" || activeView === "sessionDetail"} onClick={() => navigateToView("sessions")} />
-          <NavButton icon={<TriangleAlert />} label="Agent Friction" active={activeView === "commands"} onClick={() => navigateToView("commands")} />
-          <NavButton icon={<Info />} label="Insights" active={activeView === "insights"} onClick={() => navigateToView("insights")} />
+          <NavButton icon={<TriangleAlert />} label="Agent Friction" active={activeView === "commands"} onClick={() => navigateToView("commands")} badge={data && data.summary.importantCommandFailures > 0 ? compactNumber(data.summary.importantCommandFailures) : undefined} />
+          <NavButton icon={<Info />} label="Insights" active={activeView === "insights"} onClick={() => navigateToView("insights")} badge={data && data.health.attentionCount > 0 ? compactNumber(data.health.attentionCount) : undefined} />
           <NavButton icon={<Command />} label="RTK" active={activeView === "rtk"} onClick={() => navigateToView("rtk")} />
           <NavButton icon={<Settings />} label="Settings" active={activeView === "settings"} onClick={() => navigateToView("settings")} />
         </nav>
 
         <div className="sidebar-section">
           <div className="sidebar-label">Quick links</div>
-          <QuickLink href="https://chatgpt.com/codex/cloud/settings/analytics#usage" label="Codex usage" />
-          <QuickLink href="https://claude.ai/settings/usage" label="Claude usage" />
-          <QuickLink href="https://github.com/mehmetdemircs/RepoSpend" label="GitHub repo" />
+          <div className="quick-links">
+            <QuickLink href="https://chatgpt.com/codex/cloud/settings/analytics#usage" label="Codex usage" icon={<CodexIcon />} tone="codex" />
+            <QuickLink href="https://claude.ai/settings/usage" label="Claude usage" icon={<ClaudeIcon />} tone="claude" />
+            <QuickLink href="https://cursor.com/dashboard/usage" label="Cursor usage" icon={<Code2 className="h-4 w-4" aria-hidden />} tone="cursor" />
+            <QuickLink href="https://github.com/mehmetdemircs/RepoSpend" label="GitHub repo" icon={<Github className="h-4 w-4" aria-hidden />} tone="github" />
+          </div>
         </div>
 
         <div className="sidebar-status">
@@ -305,14 +346,32 @@ function App() {
             <div>Read-only</div>
             <span>{data?.appVersion ? `v${data.appVersion} · local sources` : "local sources"}</span>
           </div>
-          <button className="icon-button" onClick={() => window.location.reload()} title="Refresh" type="button">
+          <button className="icon-button" onClick={() => window.location.reload()} title="Refresh" aria-label="Refresh local scan" type="button">
             <RefreshCw className="h-4 w-4" aria-hidden />
           </button>
         </div>
       </aside>
 
       <section className="content-shell">
-        <PageHeader view={activeView} />
+        <PageHeader
+          view={activeView}
+          data={data}
+          filters={filters}
+          rangePreset={rangePreset}
+          sources={sourceOptions}
+          sourceApps={appOptions}
+          repos={repoOptions}
+          models={modelOptions}
+          onRefresh={() => window.location.reload()}
+          onResetFilters={() => {
+            setRangePreset("last7");
+            setFilters({ source: [], sourceApp: [], repo: [], model: [], ...presetRange("last7") });
+            if (activeView === "repoDetail") {
+              setSelectedRepo(null);
+              setActiveView("repos");
+            }
+          }}
+        />
         {activeView === "dashboard" || activeView === "sessions" || activeView === "repos" || activeView === "repoDetail" || activeView === "commands" || activeView === "insights" ? (
           <FiltersBar
             filters={filters}
@@ -333,7 +392,7 @@ function App() {
             }}
           />
         ) : null}
-        {!error && loading ? <LoadingState compact={Boolean(data)} /> : null}
+        {!error && loading ? <LoadingState compact={Boolean(data)} data={data} /> : null}
 
         {error ? <ErrorState message={error} /> : null}
         {!error && activeView === "dashboard" && !loading && data && data.sessions.length === 0 ? (
@@ -410,6 +469,7 @@ function App() {
         {!error && data && data.sessions.length > 0 && activeView === "dashboard" ? (
           <div className="mt-4 space-y-4">
             <OverviewKpis data={data} onOpenRepo={openRepo} />
+            <TopActionsCard data={data} onNavigate={navigateToView} onOpenRepo={openRepo} onOpenSession={openSession} />
             <SecondaryMetrics summary={data.summary} />
             <SourceBreakdownPanel data={data} />
 
@@ -546,19 +606,19 @@ function FiltersBar({
   const displayedFilters = repoNavigationMode && selectedRepo ? { ...filters, repo: [selectedRepo] } : filters;
   if (repoNavigationMode && selectedRepo) {
     return (
-      <div className="panel repo-compact-filters">
+      <div className="panel repo-compact-filters filter-panel">
         <div className="repo-compact-filter-row">
           <DateRangePicker value={rangePreset} onChange={updatePreset} />
-          <FilterPillPicker icon={<Server />} iconKind="source" label="Source" values={filters.source} onChange={(value) => toggleFilter("source", value)} options={sources} />
-          <FilterPillPicker icon={<Terminal />} iconKind="app" label="App" values={filters.sourceApp} onChange={(value) => toggleFilter("sourceApp", value)} options={sourceApps} collapsedLimit={8} />
-          <FilterPillPicker icon={<Filter />} iconKind="model" label="Model" values={filters.model} onChange={(value) => toggleFilter("model", value)} options={models} collapsedLimit={10} />
+          <FilterPillPicker icon={<Bot />} iconKind="source" label="AI providers" values={filters.source} onChange={(value) => toggleFilter("source", value)} options={sources} />
+          <FilterPillPicker icon={<LayoutPanelTop />} iconKind="app" label="Apps / surfaces" values={filters.sourceApp} onChange={(value) => toggleFilter("sourceApp", value)} options={sourceApps} collapsedLimit={8} />
+          <FilterPillPicker icon={<BrainCircuit />} iconKind="model" label="Model" values={filters.model} onChange={(value) => toggleFilter("model", value)} options={models} collapsedLimit={10} />
           <details className="repo-more-filters">
             <summary>
               <Settings className="h-4 w-4" aria-hidden />
               More filters
             </summary>
             <div className="repo-more-filter-body">
-              <FilterPillPicker icon={<Boxes />} iconKind="repo" label="Scoped repo" values={[selectedRepo]} onChange={(value) => toggleFilter("repo", value)} options={repos} />
+              <FilterPillPicker icon={<FolderGit2 />} iconKind="repo" label="Scoped repo / folder" values={[selectedRepo]} onChange={(value) => toggleFilter("repo", value)} options={repos} />
               {rangePreset === "custom" ? (
                 <div className="repo-custom-dates">
                   <DateInput label="From" value={dateInputValue(filters.from)} onChange={(value) => setFilters({ ...filters, from: value })} />
@@ -595,12 +655,12 @@ function FiltersBar({
     );
   }
   return (
-    <div className="panel p-3">
+    <div className="panel p-3 filter-panel">
       <div className="filter-grid">
-        <FilterPillPicker icon={<Server />} iconKind="source" label="Source" values={filters.source} onChange={(value) => toggleFilter("source", value)} options={sources} />
-        <FilterPillPicker icon={<Terminal />} iconKind="app" label="App" values={filters.sourceApp} onChange={(value) => toggleFilter("sourceApp", value)} options={sourceApps} collapsedLimit={8} />
-        <FilterPillPicker icon={<Boxes />} iconKind="repo" label="Repo" values={repoNavigationMode && selectedRepo ? [selectedRepo] : filters.repo} onChange={(value) => toggleFilter("repo", value)} options={repos} collapsedLimit={12} />
-        <FilterPillPicker icon={<Filter />} iconKind="model" label="Model" values={filters.model} onChange={(value) => toggleFilter("model", value)} options={models} collapsedLimit={10} />
+        <FilterPillPicker icon={<Bot />} iconKind="source" label="AI providers" values={filters.source} onChange={(value) => toggleFilter("source", value)} options={sources} />
+        <FilterPillPicker icon={<LayoutPanelTop />} iconKind="app" label="Apps / surfaces" values={filters.sourceApp} onChange={(value) => toggleFilter("sourceApp", value)} options={sourceApps} collapsedLimit={8} />
+        <FilterPillPicker icon={<FolderGit2 />} iconKind="repo" label="Repos / folders" values={repoNavigationMode && selectedRepo ? [selectedRepo] : filters.repo} onChange={(value) => toggleFilter("repo", value)} options={repos} collapsedLimit={12} />
+        <FilterPillPicker icon={<BrainCircuit />} iconKind="model" label="Model" values={filters.model} onChange={(value) => toggleFilter("model", value)} options={models} collapsedLimit={10} />
         <DateRangePicker value={rangePreset} onChange={updatePreset} />
       </div>
       {rangePreset === "custom" ? (
@@ -635,27 +695,66 @@ function FiltersBar({
   );
 }
 
-function PageHeader({ view }: { view: ViewKey }) {
+function PageHeader({
+  view,
+  data,
+  filters,
+  rangePreset,
+  sources,
+  sourceApps,
+  repos,
+  models,
+  onRefresh,
+  onResetFilters,
+}: {
+  view: ViewKey;
+  data: ApiData | null;
+  filters: Filters;
+  rangePreset: RangePreset;
+  sources: PickerOption[];
+  sourceApps: PickerOption[];
+  repos: PickerOption[];
+  models: PickerOption[];
+  onRefresh: () => void;
+  onResetFilters: () => void;
+}) {
   const meta = viewMeta[view];
+  const headerFilters = activeFilterSummary(filters, rangePreset, { sources, sourceApps, repos, models });
+  const hasFilters = hasActiveFilters(filters, rangePreset);
   return (
     <header className="page-header">
-      <div>
-        <h2>{meta.title}</h2>
-        <p>{meta.subtitle}</p>
+      <div className="page-title-lockup">
+        <span className="page-title-icon">{React.cloneElement(viewIcons[view], { className: "h-5 w-5", "aria-hidden": true })}</span>
+        <div>
+          <h2>{meta.title}</h2>
+          <p>{meta.subtitle}</p>
+          <div className="header-filter-strip" aria-label="Current dashboard filters">
+            <span className="header-filter-chip strong">{headerFilters.date}</span>
+            <span className={`header-filter-chip ${hasFilters ? "attention" : ""}`}>{headerFilters.countLabel}</span>
+            {headerFilters.preview.map((label) => <span className="header-filter-chip" key={label}>{label}</span>)}
+            {hasFilters ? <button className="text-button header-filter-reset" type="button" onClick={onResetFilters}>Reset</button> : null}
+          </div>
+        </div>
       </div>
-      <div className="page-header-badge">
-        <span className="status-dot" />
-        Local-first · no telemetry
+      <div className="page-header-actions">
+        <div className="page-header-badge" title={data?.scan.lastScannedAt ? `Last scanned ${formatDateTime(data.scan.lastScannedAt)}` : "Waiting for first scan"}>
+          <span className="status-dot" />
+          {data?.scan.lastScannedAt ? `Last scan ${formatDateTime(data.scan.lastScannedAt)}` : "Local-first · no telemetry"}
+        </div>
+        <button className="icon-button" onClick={onRefresh} title="Refresh local scan" aria-label="Refresh local scan" type="button">
+          <RefreshCw className="h-4 w-4" aria-hidden />
+        </button>
       </div>
     </header>
   );
 }
 
-function NavButton({ icon, label, active, onClick }: { icon: React.ReactElement; label: string; active: boolean; onClick: () => void }) {
+function NavButton({ icon, label, active, onClick, badge }: { icon: React.ReactElement; label: string; active: boolean; onClick: () => void; badge?: string | undefined }) {
   return (
     <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick} type="button">
       {React.cloneElement(icon, { className: "h-4 w-4" })}
       <span>{label}</span>
+      {badge ? <strong className="nav-badge">{badge}</strong> : null}
     </button>
   );
 }
@@ -786,7 +885,7 @@ function OverviewKpis({ data, onOpenRepo }: { data: ApiData; onOpenRepo: (repoId
         <MetricHelpPopover
           title="Total tokens"
           mainValue={tokens(summary.totalTokens)}
-          body="Total token usage loaded from local source sessions in the current dashboard filter."
+          body="Total token usage loaded from local AI provider sessions in the current dashboard filter."
           note="RepoSpend avoids overcounting cumulative Codex token checkpoints by using the final valid checkpoint per session where available."
           breakdown={[
             { label: "Input", value: tokens(summary.inputTokens) },
@@ -806,10 +905,10 @@ function OverviewKpis({ data, onOpenRepo }: { data: ApiData; onOpenRepo: (repoId
       help: <CostBreakdownPopover value={summary.estimatedCostUsd} breakdown={summary} />,
     },
     {
-      label: "Top Repo",
-      value: topRepo ? <button className="kpi-link" type="button" onClick={() => onOpenRepo(topRepo.id)}>{topRepo.label}</button> : "No repo",
-      detail: topRepo ? <span><TokenValue value={topRepo.totalTokens} /> · <CostValue value={topRepo.estimatedCostUsd} /></span> : "No repository usage in this view",
-      icon: <Folder />,
+      label: "Top repo / folder",
+      value: topRepo ? <button className="kpi-link" type="button" onClick={() => onOpenRepo(topRepo.id)}>{topRepo.label}</button> : "No repo or folder",
+      detail: topRepo ? <span><TokenValue value={topRepo.totalTokens} /> · <CostValue value={topRepo.estimatedCostUsd} /></span> : "No repo or folder usage in this view",
+      icon: <FolderGit2 />,
       strong: true,
     },
     {
@@ -862,6 +961,41 @@ function OverviewKpis({ data, onOpenRepo }: { data: ApiData; onOpenRepo: (repoId
   );
 }
 
+function TopActionsCard({ data, onNavigate, onOpenRepo, onOpenSession }: { data: ApiData; onNavigate: (view: ViewKey) => void; onOpenRepo: (repoId: string) => void; onOpenSession: (sessionId: string) => void }) {
+  const actions = topDashboardActions(data);
+  if (!actions.length) return null;
+  return (
+    <section className="panel top-actions-card">
+      <div className="panel-heading">
+        <div>
+          <h2>Top Actions</h2>
+          <p className="text-sm text-slate-600">Fastest next checks for the current filters.</p>
+        </div>
+      </div>
+      <div className="top-actions-list">
+        {actions.map((action) => (
+          <button
+            className="top-action-row"
+            key={action.label}
+            type="button"
+            onClick={() => {
+              if (action.sessionId) onOpenSession(action.sessionId);
+              else if (action.repoId) onOpenRepo(action.repoId);
+              else onNavigate(action.view);
+            }}
+          >
+            <span className={`top-action-icon top-action-${action.tone}`}>{React.cloneElement(action.icon, { className: "h-4 w-4", "aria-hidden": true })}</span>
+            <span>
+              <strong>{action.label}</strong>
+              <small>{action.detail}</small>
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function SecondaryMetrics({ summary }: { summary: Summary }) {
   return (
     <div className="secondary-metric-grid">
@@ -893,17 +1027,17 @@ function SecondaryMetrics({ summary }: { summary: Summary }) {
 
 function SourceBreakdownPanel({ data }: { data: ApiData }) {
   const [tab, setTab] = React.useState<BreakdownTab>("providers");
-  const rows = usageBreakdownRows(data, tab).filter((row) => row.totalTokens > 0 || row.estimatedCostUsd !== undefined);
+  const rows = usageBreakdownRows(data, tab).filter((row) => row.sessionCount > 0 || row.totalTokens > 0 || row.estimatedCostUsd !== undefined);
   const tabs: Array<{ value: BreakdownTab; label: string }> = [
     { value: "providers", label: "AI providers" },
-    { value: "apps", label: "Apps" },
+    { value: "apps", label: "Apps / surfaces" },
   ];
   return (
     <section className="panel source-breakdown-panel">
       <div className="panel-heading breakdown-heading">
         <div className="breakdown-heading-text">
           <h2>{tabs.find((item) => item.value === tab)?.label ?? "AI providers"}</h2>
-          <p className="text-sm text-slate-600">Sources scanned: {data.sources.map((source) => source.label).join(", ")}</p>
+          <p className="text-sm text-slate-600">Providers scanned: {data.sources.map((source) => source.label).join(", ")}</p>
         </div>
         <div className="breakdown-tabs" role="tablist" aria-label="Usage breakdown">
           {tabs.map((item) => (
@@ -919,7 +1053,7 @@ function SourceBreakdownPanel({ data }: { data: ApiData }) {
             {row.source ? <SourceBadge source={row.source} label={row.label} /> : <AppLabel app={row.iconLabel ?? row.label} surface={row.id as Session["detectedSurface"]} />}
             <MiniStat label="Sessions" value={<CountValue value={row.sessionCount} noun="session" />} />
             <MiniStat label="Tokens" value={<TokenValue value={row.totalTokens} />} />
-            <MiniStat label="API-equivalent cost" value={<CostValue value={row.estimatedCostUsd} />} />
+            <MiniStat label="API-equivalent cost" value={<CostValue value={row.estimatedCostUsd} label={breakdownCostLabel(row)} />} />
             <MiniStat label="Missing token data" value={<CountValue value={row.missingTokenSessions} noun="session" />} />
           </div>
         ))}
@@ -933,7 +1067,7 @@ function SourceBreakdownPanel({ data }: { data: ApiData }) {
 }
 
 function DataHealthCard({ data, onOpenSettings }: { data: ApiData; onOpenSettings: () => void }) {
-  const sourceLabels = data.sources.filter((source) => source.available).map((source) => source.label).join(", ") || "No active sources";
+  const sourceLabels = data.sources.filter((source) => source.available).map((source) => source.label).join(", ") || "No active providers";
   return (
     <section className="panel data-health-card">
       <div className="data-health-main">
@@ -948,10 +1082,10 @@ function DataHealthCard({ data, onOpenSettings }: { data: ApiData; onOpenSetting
       </div>
       <div className="data-health-grid">
         <MiniStat label="Sessions scanned" value={<CountValue value={data.scan.sessionFileCount} noun="file" />} />
-        <MiniStat label="Repos discovered" value={<CountValue value={data.scan.repoCount} noun="repo" />} />
+        <MiniStat label="Repos / folders discovered" value={<CountValue value={data.scan.repoCount} noun="item" />} />
         <MiniStat label="Parser issues" value={data.scan.parseFailureCount ? <CountValue value={data.scan.parseFailureCount} noun="issue" /> : "No parser issues found"} />
         <MiniStat label="Last scan" value={formatDateTime(data.scan.lastScannedAt)} />
-        <MiniStat label="Source" value={sourceLabels} />
+        <MiniStat label="AI providers" value={sourceLabels} />
       </div>
     </section>
   );
@@ -966,7 +1100,7 @@ function TokenAccuracyCard({ data, compact = false }: { data: ApiData; compact?:
           <Database className="mt-1 h-5 w-5 text-teal" aria-hidden />
           <div>
             <h2>Token Counting</h2>
-            <p>Using source-specific token records without summing repeated cumulative checkpoints.</p>
+            <p>Using provider-specific token records without summing repeated cumulative checkpoints.</p>
             {!compact ? (
               <p className="mt-1 text-xs text-slate-500">
                 Codex token_count events may be cumulative. RepoSpend avoids overcounting by using the final valid checkpoint per session when cumulative checkpoints are detected.
@@ -1040,15 +1174,15 @@ function TopRepositoriesSection({ data, onOpenRepos, onOpenRepo, pageSize }: { d
       <div className="panel-heading">
         <div>
           <div className="flex items-center gap-2">
-            <Folder className="h-4 w-4 text-teal" aria-hidden />
-            <h2>Top Repositories</h2>
+            <FolderGit2 className="h-4 w-4 text-teal" aria-hidden />
+            <h2>Top repos / folders</h2>
           </div>
-          <p className="text-sm text-slate-600">Repo-level usage is the main RepoSpend view: tokens, API-equivalent cost, sessions, edits, command friction, and token intensity.</p>
+          <p className="text-sm text-slate-600">Repo/folder-level usage is the main RepoSpend view: tokens, API-equivalent cost, sessions, edits, command friction, and token intensity.</p>
         </div>
-        <button className="button" type="button" onClick={onOpenRepos}>Open Repos</button>
+        <button className="button" type="button" onClick={onOpenRepos}>Open repos / folders</button>
       </div>
       <div className="p-4">
-        {rows.length ? <RepoTable repos={rows} onSelect={onOpenRepo} selectedRepo={null} compact pageSize={Math.min(pageSize, 10)} /> : <p className="text-sm text-slate-600">No repositories matched this filter.</p>}
+        {rows.length ? <RepoTable repos={rows} onSelect={onOpenRepo} selectedRepo={null} compact pageSize={Math.min(pageSize, 10)} /> : <p className="text-sm text-slate-600">No repos or folders matched this filter.</p>}
       </div>
     </section>
   );
@@ -1586,10 +1720,10 @@ function RepoTable({
   const pager = usePagination(sortedRepos, pageSize);
   return (
     <div className="table-wrap">
-      <table className={compact ? "compact-table" : undefined}>
+      <table className={compact ? "compact-table repo-table" : "repo-table"}>
         <thead>
           <tr>
-            <SortableTh label="Repo" column="repo" sort={sort} setSort={setSort} />
+            <SortableTh label="Repo / folder" column="repo" sort={sort} setSort={setSort} />
             <SortableTh label="API-equivalent cost" column="cost" sort={sort} setSort={setSort} />
             <SortableTh label="Total tokens" column="tokens" sort={sort} setSort={setSort} />
             <SortableTh label="Sessions" column="sessions" sort={sort} setSort={setSort} />
@@ -1605,7 +1739,14 @@ function RepoTable({
         </thead>
         <tbody>
           {pager.items.map((repo) => (
-            <tr key={repo.id} onClick={() => onSelect(repo.id)} className={`clickable-row ${selectedRepo === repo.id ? "selected" : ""}`}>
+            <tr
+              key={repo.id}
+              onClick={() => onSelect(repo.id)}
+              onKeyDown={(event) => activateClickableRow(event, () => onSelect(repo.id))}
+              className={`clickable-row ${selectedRepo === repo.id ? "selected" : ""}`}
+              role="button"
+              tabIndex={0}
+            >
               <td className="font-medium"><RepoLabel name={repo.label} verified={repo.verified === true} /></td>
               <td><CostValue value={repo.estimatedCostUsd} breakdown={repo} /></td>
               <td><TokenValue value={repo.totalTokens} showUnit={false} /></td>
@@ -1649,8 +1790,8 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
   if (!repo) {
     return (
       <div className="panel p-5">
-        <h2 className="text-base font-semibold">Repo Detail</h2>
-        <p className="mt-2 text-sm text-slate-600">No repo selected. Select a repo to inspect token shape, warnings, and recent sessions.</p>
+        <h2 className="text-base font-semibold">Repo / folder detail</h2>
+        <p className="mt-2 text-sm text-slate-600">No repo or folder selected. Select one to inspect token shape, warnings, and recent sessions.</p>
       </div>
     );
   }
@@ -1682,7 +1823,7 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
           </p>
           <p className="repo-hero-warning">
             <TriangleAlert className="h-4 w-4" aria-hidden />
-            Top warning: {topWarning ? readableWarning(topWarning) : "No major repo warning detected in this filtered view."}
+            Top warning: {topWarning ? readableWarning(topWarning) : "No major repo/folder warning detected in this filtered view."}
           </p>
           <p className="repo-cost-note">Estimated API-equivalent cost. This is not your actual subscription bill.</p>
         </div>
@@ -1694,7 +1835,7 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
         </div>
       </section>
 
-      <div className="repo-detail-tabs" role="tablist" aria-label="Repository detail sections">
+      <div className="repo-detail-tabs" role="tablist" aria-label="Repo or folder detail sections">
         {tabs.map((tab) => (
           <button
             className={activeTab === tab.key ? "active" : ""}
@@ -1738,7 +1879,7 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
           <div className="panel-heading">
             <div>
               <h2>Sessions</h2>
-              <p className="text-sm text-slate-600">Sorted, searchable sessions for this repo. Cost outliers are highlighted.</p>
+              <p className="text-sm text-slate-600">Sorted, searchable sessions for this repo or folder. Cost outliers are highlighted.</p>
             </div>
             <div className="panel-actions">
               <SessionColumnPicker columns={visibleColumns} setColumns={setVisibleColumns} />
@@ -1815,7 +1956,7 @@ function RepoCostConcentrationCard({ concentration, sessions, onOpenSession }: {
         <MiniStat label="Top 3 sessions" value={<CostValue value={concentration.topThreeCost} />} />
         <MiniStat label="Top 3 share" value={<PercentValue value={concentration.topThreeShare} />} />
       </div>
-      {concentration.extreme ? <p className="warning-text mt-3">Cost concentration is very high. One session accounts for most of this repo’s estimated cost.</p> : null}
+      {concentration.extreme ? <p className="warning-text mt-3">Cost concentration is very high. One session accounts for most of this repo or folder’s estimated cost.</p> : null}
       <div className="repo-concentration-list">
         {concentration.topSessions.map((session) => {
           const width = maxCost > 0 && session.estimatedCostUsd !== undefined ? Math.max(4, (session.estimatedCostUsd / maxCost) * 100) : 0;
@@ -1827,7 +1968,7 @@ function RepoCostConcentrationCard({ concentration, sessions, onOpenSession }: {
             </button>
           );
         })}
-        {!sessions.length ? <p className="text-sm text-slate-600">No sessions matched this repo.</p> : null}
+        {!sessions.length ? <p className="text-sm text-slate-600">No sessions matched this repo or folder.</p> : null}
       </div>
     </div>
   );
@@ -1879,7 +2020,7 @@ function RepoWarningsCard({ warnings }: { warnings: string[] }) {
             <TriangleAlert className="h-4 w-4 text-amber" aria-hidden />
             <span>{readableWarning(warning)}</span>
           </div>
-        )) : <p className="p-4 text-sm text-slate-600">No repo warnings detected.</p>}
+        )) : <p className="p-4 text-sm text-slate-600">No repo/folder warnings detected.</p>}
       </div>
     </div>
   );
@@ -1893,11 +2034,11 @@ function RepoComparisonCard({ repo, allRepos }: { repo: RepoRow; allRepos: RepoR
   const share = totalCost > 0 && repo.estimatedCostUsd !== undefined ? repo.estimatedCostUsd / totalCost : 0;
   return (
     <div className="detail-card">
-      <h3>Compared to other repos</h3>
+      <h3>Compared to other repos / folders</h3>
       <div className="mt-3 grid gap-2 md:grid-cols-3">
         <MiniStat label="Cost rank" value={rank ? `#${rank} of ${allRepos.length}` : "Unknown"} />
         <MiniStat label="Share of filtered cost" value={<PercentValue value={share} />} />
-        <MiniStat label="Most expensive repo" value={ranked[0]?.label ?? "Unknown"} />
+        <MiniStat label="Most expensive repo / folder" value={ranked[0]?.label ?? "Unknown"} />
       </div>
     </div>
   );
@@ -1995,7 +2136,7 @@ function RepoFilesTab({ repo, sessions }: { repo: RepoRow; sessions: Session[] }
               <p>RepoSpend can count file reads and edits from local session metadata, but some source formats do not persist stable per-file paths. Source limitations and raw paths are listed in Metadata.</p>
             </details>
           </div>
-        ) : <p className="mt-3 text-sm text-slate-600">No file edits were detected for this repo in the current filtered view.</p>}
+        ) : <p className="mt-3 text-sm text-slate-600">No file edits were detected for this repo or folder in the current filtered view.</p>}
       </div>
     </div>
   );
@@ -2059,11 +2200,11 @@ function RepoMetadataTab({ repo, sessions, data }: { repo: RepoRow; sessions: Se
     <div className="repo-tab-body">
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="detail-card">
-          <h3>Repo grouping</h3>
+          <h3>Repo / folder grouping</h3>
           <div className="metadata-list mt-3">
-            <MetadataRow label="Repo" value={repo.label} />
-            <MetadataRow label="Repo root" value={shortPath(repo.id)} title={repo.id} />
-            <MetadataRow label="Grouping method" value="Git repository root when available; otherwise source-local fallback." />
+            <MetadataRow label="Repo / folder" value={repo.label} />
+            <MetadataRow label="Root path" value={shortPath(repo.id)} title={repo.id} />
+            <MetadataRow label="Grouping method" value="Git repo root when available; otherwise folder/path fallback." />
             <MetadataRow label="Sessions" value={count(repo.sessionCount, "session")} />
           </div>
         </div>
@@ -2083,8 +2224,8 @@ function RepoMetadataTab({ repo, sessions, data }: { repo: RepoRow; sessions: Se
         <div className="detail-card">
           <h3>Raw paths</h3>
           <div className="metadata-list mt-3">
-            {rawPaths.slice(0, 8).map((path) => <MetadataRow key={path} label="Repo path" value={shortPath(path)} title={path} />)}
-            {!rawPaths.length ? <MetadataRow label="Repo path" value="Unavailable" /> : null}
+            {rawPaths.slice(0, 8).map((path) => <MetadataRow key={path} label="Repo/folder path" value={shortPath(path)} title={path} />)}
+            {!rawPaths.length ? <MetadataRow label="Repo/folder path" value="Unavailable" /> : null}
           </div>
         </div>
         <div className="detail-card">
@@ -2126,8 +2267,8 @@ function SessionsTable({
       <table className="sessions-table">
         <thead>
           <tr>
-            {!compact ? <SortableTh label="Repo" column="repo" sort={sort} setSort={setSort} /> : null}
-            {!compact ? <SortableTh label="Source / App" column="app" sort={sort} setSort={setSort} /> : null}
+            {!compact ? <SortableTh label="Repo / folder" column="repo" sort={sort} setSort={setSort} /> : null}
+            {!compact ? <SortableTh label="Provider / app/surface" column="app" sort={sort} setSort={setSort} /> : null}
             <SortableTh label="Session" column="session" sort={sort} setSort={setSort} />
             <th>Outcome</th>
             <SortableTh label="Model" column="model" sort={sort} setSort={setSort} />
@@ -2155,13 +2296,16 @@ function SessionsTable({
             <tr
               key={session.id}
               onClick={() => onSelectSession?.(session.id)}
+              onKeyDown={onSelectSession ? (event) => activateClickableRow(event, () => onSelectSession(session.id)) : undefined}
               className={`${selectedSessionId === session.id ? "selected" : ""} ${isCostOutlier(session, costOutlierThreshold) ? "cost-outlier-row" : ""} ${onSelectSession ? "clickable-row" : ""}`}
+              role={onSelectSession ? "button" : undefined}
+              tabIndex={onSelectSession ? 0 : undefined}
             >
               {!compact ? <td><RepoLabel name={session.repoName} verified={sessionIsRepoVerified(session)} /></td> : null}
               {!compact ? <td><div className="source-app-cell"><SourceBadge source={session.sourceClient} /><AppLabel app={session.sourceApp} surface={session.detectedSurface} /></div></td> : null}
               <td className="max-w-72 truncate font-medium" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</td>
               <td><OutcomeBadge outcome={session.sessionOutcome} /></td>
-              <td>{session.model ?? "Unknown"}</td>
+              <td><ModelLabel model={session.model} /></td>
               <td>{session.startedAt ? session.startedAt.slice(0, 10) : "Unknown"}</td>
               <td>{formatDuration(session.durationMs)}</td>
               <td><CostValue value={session.estimatedCostUsd} session={session} /></td>
@@ -2264,7 +2408,7 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
         <MiniStat label="Estimated cost" value={<CostValue value={session.estimatedCostUsd} session={session} />} />
         <MiniStat label="Total tokens" value={<TokenValue value={session.totalTokens} />} />
         <MiniStat label="Duration" value={formatDuration(session.durationMs)} />
-        <MiniStat label="Model" value={session.model ?? "Unknown"} />
+        <MiniStat label="Model" value={<ModelLabel model={session.model} />} />
         <MiniStat label="File edits" value={<CountValue value={session.fileEditCount ?? 0} noun="edit" />} />
         <MiniStat label="Commands" value={<CountValue value={session.shellCommandCount ?? 0} noun="command" />} />
       </div>
@@ -2371,7 +2515,7 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
               <div className="session-mini-grid">
                 <MiniStat label="Files edited" value={<CountValue value={session.fileEditCount ?? 0} noun="edit" />} />
                 <MiniStat label="Files read" value={<CountValue value={session.fileReadCount ?? 0} noun="read" />} />
-                <MiniStat label="Repo" value={session.repoName} />
+                <MiniStat label="Repo / folder" value={session.repoName} />
                 <MiniStat label="Branch" value={session.gitBranch ?? "Unknown"} />
               </div>
             </SessionDetailCard>
@@ -2435,13 +2579,13 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
 
         {activeTab === "metadata" ? (
           <div className="session-tab-grid">
-            <SessionDetailCard title="Repo, branch, provider, source file">
+            <SessionDetailCard title="Repo / folder, branch, provider, source file">
               <div className="metadata-list">
-                <MetadataRow label="Repo" value={session.repoName} title={session.repoRoot} />
-                <MetadataRow label="Repo root" value={shortPath(session.repoRoot)} title={session.repoRoot} />
+                <MetadataRow label="Repo / folder" value={session.repoName} title={session.repoRoot} />
+                <MetadataRow label="Root path" value={shortPath(session.repoRoot)} title={session.repoRoot} />
                 <MetadataRow label="Branch" value={session.gitBranch ?? "Unknown"} />
                 <MetadataRow label="Provider" value={session.provider ?? "Unknown"} />
-                <MetadataRow label="Source" value={sourceLabel(session.sourceClient)} />
+                <MetadataRow label="AI provider" value={sourceLabel(session.sourceClient)} />
                 <MetadataRow label="App / surface" value={session.sourceApp || surfaceLabel(session.detectedSurface)} />
                 <MetadataRow label="Source file" value={shortPath(session.sourcePath)} title={session.sourcePath} />
               </div>
@@ -2581,7 +2725,7 @@ function SortableTh<T extends string>({
 }
 
 function EmptyState({ data }: { data: ApiData }) {
-  const sourceLabels = data.sources.map((source) => source.label).join(", ") || "Codex, Claude Code";
+  const sourceLabels = data.sources.map((source) => source.label).join(", ") || "Codex, Claude Code, Cursor";
   const sourcePaths = data.sources.flatMap((source) => source.paths);
   return (
     <div className="panel mt-4 p-6">
@@ -2589,10 +2733,18 @@ function EmptyState({ data }: { data: ApiData }) {
         <Search className="mt-1 h-5 w-5 text-amber" aria-hidden />
         <div>
           <h2 className="text-base font-semibold">RepoSpend could not find local usage sessions yet.</h2>
-          <p className="mt-1 text-sm text-slate-600">Sources scanned: {sourceLabels}. Run Codex or Claude Code locally, then refresh the scan. RepoSpend reads local files read-only and never mutates source data.</p>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <p className="mt-1 text-sm text-slate-600">Providers scanned: {sourceLabels}. Run Codex, Claude Code, or Cursor locally, then refresh the scan. RepoSpend reads local files read-only and never mutates source data.</p>
+          <div className="source-checklist mt-4">
             {data.sourceStats.map((source) => (
-              <MiniStat key={source.sourceId ?? source.homePath ?? source.sessionsPath} label={source.sourceLabel ?? "Source"} value={source.sessionsExists || source.projectsExists || source.stateExists ? "Found" : "Missing"} />
+              <div className="source-check-row" key={source.sourceId ?? source.homePath ?? source.sessionsPath ?? source.statePath ?? "source"}>
+                <div>
+                  <strong>{source.sourceLabel ?? "Source"}</strong>
+                  <span title={sourceHomePath(source)}>{shortPath(sourceHomePath(source))}</span>
+                </div>
+                <Badge label={sourcePrimaryDataFound(source) ? "Path found" : "Path missing"} />
+                <Badge label={(source.sessionsImported ?? 0) > 0 ? `${count(source.sessionsImported ?? 0, "session")} imported` : "No sessions imported"} />
+                <span className="source-check-fix">{sourceEmptyFix(source)}</span>
+              </div>
             ))}
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -2611,18 +2763,68 @@ function EmptyState({ data }: { data: ApiData }) {
   );
 }
 
-function LoadingState({ compact = false }: { compact?: boolean }) {
+function LoadingState({ compact = false, data }: { compact?: boolean; data?: ApiData | null }) {
+  const [elapsedMs, setElapsedMs] = React.useState(0);
+  const startedAtRef = React.useRef(Date.now());
+
+  React.useEffect(() => {
+    startedAtRef.current = Date.now();
+    setElapsedMs(0);
+    const timer = window.setInterval(() => setElapsedMs(Date.now() - startedAtRef.current), 1000);
+    return () => window.clearInterval(timer);
+  }, [compact]);
+
+  const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const stages = [
+    { label: "Discovering local source files", detail: "Codex, Claude Code, Cursor, and RTK paths" },
+    { label: "Parsing sessions and token checkpoints", detail: "Reading transcripts and local SQLite/vscdb data" },
+    { label: "Grouping by repo or inferred folder", detail: "Resolving cwd paths, models, warnings, and surfaces" },
+    { label: "Estimating API-equivalent cost", detail: "Applying local pricing and dashboard filters" },
+  ];
+  const activeStage = Math.min(stages.length - 1, Math.floor(elapsedSeconds / 5));
+  const sourceRows = [
+    { id: "codex", label: "Codex", detail: "CLI sessions and token checkpoints", count: data ? sourceImportedSessions(data, "codex") : 0 },
+    { id: "claude", label: "Claude Code", detail: "Project JSONL transcripts and history", count: data ? sourceImportedSessions(data, "claude") : 0 },
+    { id: "cursor", label: "Cursor", detail: "Experimental JSONL and SQLite/vscdb discovery", count: data ? sourceImportedSessions(data, "cursor") : 0 },
+    { id: "rtk", label: "RTK", detail: "Local token-savings report when available", count: data?.rtkGain?.available ? 1 : 0 },
+  ];
+
   return (
     <div className={`panel loading-state ${compact ? "loading-state-compact" : ""}`}>
       <div className="loading-state-inner">
         <RefreshCw className="loading-state-icon animate-spin" aria-hidden />
         <div>
-          <h2>{compact ? "Updating dashboard data" : "Loading local AI coding usage"}</h2>
+          <h2>{compact ? "Refreshing local scan" : "Loading local AI coding usage"}</h2>
           <p>
             {compact
-              ? "Refreshing local session totals for the current filters."
-              : "RepoSpend is scanning local Codex and Claude Code files, then grouping each session by Git repository."}
+              ? `Keeping the previous dashboard visible while RepoSpend rescans local files. ${elapsedSeconds}s elapsed.`
+              : `RepoSpend is scanning local files, then grouping each session by Git repo or inferred folder. ${elapsedSeconds}s elapsed.`}
           </p>
+          <div className="loading-source-grid" aria-label="Local scan sources">
+            {sourceRows.map((source) => (
+              <div className="loading-source-row" key={source.id}>
+                <span className={`loading-source-dot loading-source-dot-${source.id}`} />
+                <span>
+                  <strong>{source.label}</strong>
+                  <small>{data ? `${count(source.count, source.id === "rtk" ? "local report" : "previous session")} · ${source.detail}` : source.detail}</small>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="loading-stage-list" aria-label="Current scan stages">
+            {stages.map((stage, index) => (
+              <div className={`loading-stage-row ${index === activeStage ? "active" : ""}`} key={stage.label}>
+                <span>{index + 1}</span>
+                <div>
+                  <strong>{stage.label}</strong>
+                  <small>{stage.detail}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+          {elapsedSeconds >= 12 ? (
+            <p className="loading-state-note">Longer scans usually mean RepoSpend is reading a large local transcript set. Results will replace this view as soon as the scan finishes.</p>
+          ) : null}
         </div>
       </div>
     </div>
@@ -2637,17 +2839,18 @@ const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
   { id: "advanced", label: "Advanced" },
 ];
 
-const apiEquivalentCopy = "RepoSpend shows API-equivalent cost estimates. This is not your actual bill. Local Codex and Claude Code logs may include token counts, but they do not always include your real subscription, credit, cache, or provider billing details.";
+const apiEquivalentCopy = "RepoSpend shows API-equivalent cost estimates. This is not your actual bill. Local Codex, Claude Code, and Cursor logs may include token counts, but they do not always include your real subscription, credit, cache, or provider billing details.";
 
 function SettingsStatusBanner({ data }: { data: ApiData }) {
   const codex = sourceImportedSessions(data, "codex");
   const claude = sourceImportedSessions(data, "claude");
+  const cursor = sourceImportedSessions(data, "cursor");
   return (
     <div className="settings-status-banner">
       <div>
         <div className="settings-status-title">Local scan complete</div>
         <p>
-          {count(codex, "Codex session")}, {count(claude, "Claude session")}, {count(data.scan.parseFailureCount, "parse issue")}.
+          {count(codex, "Codex session")}, {count(claude, "Claude session")}, {count(cursor, "Cursor session")}, {count(data.scan.parseFailureCount, "parse issue")}.
         </p>
       </div>
       <button className="button" type="button" onClick={() => window.location.reload()}>
@@ -2796,7 +2999,7 @@ function SettingsPricingTab({
               <tr key={row.model}>
                 <td>
                   <div className="pricing-model-cell">
-                    <div className="font-medium">{row.model}</div>
+                  <div className="font-medium"><ModelLabel model={row.model} /></div>
                     <div className="pricing-model-meta">
                       {usedModels.has(row.model) ? `${count(usageCounts.get(row.model) ?? 0, "session")} in current scan` : "Unused in current scan"}
                       {row.inherited && row.sourceModel ? <span>Uses {row.sourceModel} pricing</span> : null}
@@ -2833,7 +3036,7 @@ function SettingsDataSourcesTab({ data }: { data: ApiData }) {
       <div className="settings-section-header">
         <div>
           <h2>Data sources</h2>
-          <p>RepoSpend reads Codex and Claude Code logs locally and read-only, then groups sessions by Git repository where possible.</p>
+          <p>RepoSpend reads Codex, Claude Code, and experimental Cursor local data read-only, then groups sessions by Git repo where possible and folder/path fallback otherwise.</p>
         </div>
       </div>
       <div className="source-card-grid">
@@ -2851,6 +3054,7 @@ function SettingsDataSourcesTab({ data }: { data: ApiData }) {
               <MiniStat label="Imported sessions" value={<CountValue value={source.sessionsImported ?? 0} noun="session" />} />
               <MiniStat label="Parse issues" value={source.parseFailureCount ? <CountValue value={source.parseFailureCount} noun="issue" /> : "None"} />
               <MiniStat label="Primary data" value={sourcePrimaryDataFound(source) ? "Found" : "Not found"} />
+              {source.sourceId === "cursor" ? <MiniStat label="SQLite/vscdb files" value={<CountValue value={source.databaseFileCount ?? 0} noun="file" />} /> : null}
               <MiniStat label="Read-only status" value="Read only" />
               <MiniStat label="Last scan" value={formatDateTime(source.lastScannedAt)} />
             </div>
@@ -2914,7 +3118,7 @@ function SettingsPrivacyTab() {
       <div className="privacy-grid">
         <InfoPanel title="Local-first" text="Scans run against files on this machine. RepoSpend does not upload prompts, session content, token counts, or pricing settings." />
         <InfoPanel title="No account required" text="There is no RepoSpend login and no cloud workspace to sync with." />
-        <InfoPanel title="Read-only source logs" text="RepoSpend reads local Codex and Claude Code logs but does not modify them." />
+        <InfoPanel title="Read-only source logs" text="RepoSpend reads local Codex, Claude Code, and Cursor files but does not modify them." />
       </div>
     </div>
   );
@@ -2974,8 +3178,8 @@ function SettingsAdvancedTab({
                 onChange={(event) => setDisplaySettings({ splitSourceApps: event.target.checked })}
               />
               <span className="settings-toggle-copy">
-                <strong>Split apps by source</strong>
-                <span>Shows VS Code and Terminal as separate entries for Codex and Claude Code instead of grouping them together.</span>
+                <strong>Split apps / surfaces by provider</strong>
+                <span>Shows VS Code and Terminal as separate entries for each AI provider instead of grouping them together.</span>
               </span>
             </label>
           </div>
@@ -3165,7 +3369,7 @@ function SessionsPage({ data, displaySettings, setDisplaySettings, onOpenSession
   ];
   return (
     <section className="mt-4 space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="page-summary-panel">
         <MiniStat label="Loaded sessions" value={<CountValue value={filteredSessions.length} noun="session" />} />
         <MiniStat label="Prompts" value={<CountValue value={data.summary.userPromptCount} noun="prompt" />} />
         <MiniStat label="Shell commands" value={<CountValue value={data.summary.shellCommandCount} noun="command" />} />
@@ -3179,6 +3383,10 @@ function SessionsPage({ data, displaySettings, setDisplaySettings, onOpenSession
             <p className="text-sm text-slate-600">Local metadata parsed from source threads and session files.</p>
           </div>
           <div className="panel-actions">
+            <button className="button" type="button" onClick={() => exportSessionsCsv(filteredSessions)}>
+              <Download className="h-4 w-4" aria-hidden />
+              Export CSV
+            </button>
             <SessionColumnPicker columns={visibleColumns} setColumns={setVisibleColumns} />
           </div>
         </div>
@@ -3205,6 +3413,7 @@ function SessionsPage({ data, displaySettings, setDisplaySettings, onOpenSession
               );
             })}
           </div>
+          <ResultsSummary shown={filteredSessions.length} total={data.sessions.length} itemLabel="sessions" />
         </div>
         {filteredSessions.length ? (
           <SessionsTable
@@ -3228,18 +3437,25 @@ function ReposPage({ data, onSelectRepo, selectedRepo, displaySettings, setDispl
   const topRepoShare = topRepo && data.summary.estimatedCostUsd ? (topRepo.estimatedCostUsd ?? 0) / data.summary.estimatedCostUsd : 0;
   return (
     <section className="mt-4 space-y-4">
-      <div className="secondary-metric-grid">
-        <MiniStat label="Repos discovered" value={<CountValue value={rows.length} noun="repo" />} />
-        <MiniStat label="Top estimated cost repo" value={topRepo ? topRepo.label : "None"} />
-        <MiniStat label="Top repo share" value={<PercentValue value={topRepoShare} />} />
-        <MiniStat label="Repos with command issues" value={<CountValue value={reposWithIssues} noun="repo" />} />
+      <div className="page-summary-panel">
+        <MiniStat label="Repos / folders discovered" value={<CountValue value={rows.length} noun="item" />} />
+        <MiniStat label="Top estimated cost repo / folder" value={topRepo ? topRepo.label : "None"} />
+        <MiniStat label="Top repo/folder share" value={<PercentValue value={topRepoShare} />} />
+        <MiniStat label="Repos / folders with command issues" value={<CountValue value={reposWithIssues} noun="item" />} />
         <MiniStat label="Unpriced token sessions" value={<CountValue value={missingPricingSessions} noun="session" />} />
       </div>
       <div className="panel overflow-hidden">
         <div className="panel-heading">
           <div>
-            <h2>Repositories</h2>
-            <p className="text-sm text-slate-600">Compare local AI coding usage by Git repository root. Nested working directories are merged into their parent repo.</p>
+            <h2>Repos / folders</h2>
+            <p className="text-sm text-slate-600">Compare local AI coding usage by confirmed Git repo root or inferred folder. Nested working directories are merged into their parent repo/folder when a Git root is available.</p>
+          </div>
+          <div className="panel-actions">
+            <button className="button" type="button" onClick={() => exportReposCsv(rows)}>
+              <Download className="h-4 w-4" aria-hidden />
+              Export CSV
+            </button>
+            <ResultsSummary shown={rows.length} total={rows.length} itemLabel="repos / folders" />
           </div>
         </div>
         <RepoTable
@@ -3259,7 +3475,7 @@ function RepoDetailPage({ data, selectedRepo, dateRangeLabel, pageSize, onBack, 
   const selected = selectedRepo ? rows.find((repo) => repo.id === selectedRepo) : undefined;
   return (
     <section className="mt-4 space-y-4">
-      <button className="text-button" type="button" onClick={onBack}>Back to repos</button>
+      <button className="text-button" type="button" onClick={onBack}>Back to repos / folders</button>
       <RepoDetail repo={selected} sessions={selected?.sessions ?? []} allRepos={rows} data={data} dateRangeLabel={dateRangeLabel} pageSize={pageSize} onOpenSession={onOpenSession} />
     </section>
   );
@@ -3296,20 +3512,20 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="page-summary-panel">
         <MiniStat label="Important failures" value={<CountValue value={data.summary.importantCommandFailures} noun="issue" />} />
         <MiniStat label="Repeated failure clusters" value={<CountValue value={data.summary.repeatedFailureClusters} noun="cluster" />} />
         <MiniStat label="Harmless non-zero exits" value={<CountValue value={data.summary.harmlessNonZeroEvents + data.summary.exploratoryMisses} noun="event" />} />
         <MiniStat label="Sessions needing review" value={<CountValue value={reviewSessions.length} noun="session" />} />
-        <MiniStat label="Top affected repo" value={topRepo ? topRepo.repoName : "None"} />
+        <MiniStat label="Top affected repo / folder" value={topRepo ? topRepo.repoName : "None"} />
       </div>
       <p className="text-xs text-slate-500">Total non-zero command events: {count(data.summary.nonZeroCommandEvents, "event")}.</p>
 
       <div className="panel overflow-hidden">
         <div className="panel-heading">
           <div>
-            <h2>Command Signals by Repo</h2>
-            <p className="text-sm text-slate-600">Repos where important command issues, harmless exits, or repeated clusters appear in the current filtered view.</p>
+            <h2>Command signals by repo / folder</h2>
+            <p className="text-sm text-slate-600">Repos or folders where important command issues, harmless exits, or repeated clusters appear in the current filtered view.</p>
           </div>
           <div className="panel-actions">
             <LimitSelect label="Rows" value={displaySettings.tablePageSize} options={pageSizeOptions} onChange={(value) => setDisplaySettings({ tablePageSize: value })} />
@@ -3320,7 +3536,7 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
             <table className="command-health-table">
               <thead>
                 <tr>
-                  <th>Repo</th>
+                  <th>Repo / folder</th>
                   <th>Important failures</th>
                   <th>Harmless non-zero exits</th>
                   <th>Repeated clusters</th>
@@ -3367,7 +3583,7 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
               <thead>
                 <tr>
                   <th>Session</th>
-                  <th>Repo</th>
+                  <th>Repo / folder</th>
                   <th>Outcome</th>
                   <th>Important failures</th>
                   <th>Harmless exits</th>
@@ -3406,7 +3622,7 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
               <thead>
                 <tr>
                   <th>Session</th>
-                  <th>Repo</th>
+                  <th>Repo / folder</th>
                   <th>Harmless exits</th>
                   <th>Exploratory misses</th>
                   <th>Total non-zero</th>
@@ -3495,9 +3711,9 @@ function ExpensiveSessionsTable({ sessions, pageSize, onOpenSession, onOpenRepo 
       <table className="expensive-table">
         <thead>
           <tr>
-            <SortableTh label="Repo" column="repo" sort={sort} setSort={setSort} />
+            <SortableTh label="Repo / folder" column="repo" sort={sort} setSort={setSort} />
             <SortableTh label="Session" column="session" sort={sort} setSort={setSort} />
-            <SortableTh label="Source / App" column="app" sort={sort} setSort={setSort} />
+            <SortableTh label="Provider / app/surface" column="app" sort={sort} setSort={setSort} />
             <th>Outcome</th>
             <SortableTh label="Model" column="model" sort={sort} setSort={setSort} />
             <SortableTh label="Started" column="started" sort={sort} setSort={setSort} />
@@ -3521,7 +3737,7 @@ function ExpensiveSessionsTable({ sessions, pageSize, onOpenSession, onOpenRepo 
               <td className="max-w-80 truncate font-medium" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</td>
               <td><div className="source-app-cell"><SourceBadge source={session.sourceClient} /><AppLabel app={session.sourceApp} surface={session.detectedSurface} /></div></td>
               <td><OutcomeBadge outcome={session.sessionOutcome} /></td>
-              <td>{session.model ?? "Unknown"}</td>
+              <td><ModelLabel model={session.model} /></td>
               <td>{session.startedAt ? session.startedAt.slice(0, 10) : "Unknown"}</td>
               <td>{formatDuration(session.durationMs)}</td>
               <td><CostValue value={session.estimatedCostUsd} session={session} /></td>
@@ -3544,7 +3760,7 @@ function InsightsPage({ data, onNavigate }: { data: ApiData; onNavigate: (view: 
   const attention = insights.filter((item) => item.tone === "attention");
   return (
     <section className="mt-4 space-y-4">
-      <div className="health-summary-row">
+      <div className="page-summary-panel">
         <MiniStat label="Healthy checks" value={<CountValue value={data.health.healthyCount} noun="check" />} />
         <MiniStat label="Needs attention" value={<CountValue value={data.health.attentionCount} noun="item" />} />
         <MiniStat label="Critical issues" value={<CountValue value={data.health.criticalCount} noun="issue" />} />
@@ -3603,8 +3819,26 @@ function InsightColumn({ title, empty, items, onNavigate }: { title: string; emp
 
 function ErrorState({ message }: { message: string }) {
   return (
-    <div className="mt-4 border border-rose/30 bg-rose/5 p-4 text-sm text-rose">
-      <strong>Unable to load RepoSpend data.</strong> {message}
+    <div className="panel error-state mt-4" role="alert">
+      <TriangleAlert className="mt-0.5 h-5 w-5" aria-hidden />
+      <div>
+        <strong>Unable to load RepoSpend data.</strong>
+        <p>{message}</p>
+        <button className="button mt-3" type="button" onClick={() => window.location.reload()}>
+          <RefreshCw className="h-4 w-4" aria-hidden />
+          Retry scan
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ResultsSummary({ shown, total, itemLabel }: { shown: number; total: number; itemLabel: string }) {
+  const filtered = shown !== total;
+  return (
+    <div className="results-summary" aria-live="polite">
+      <strong>{compactNumber(shown)}</strong>
+      <span>{filtered ? `of ${compactNumber(total)} ${itemLabel}` : itemLabel}</span>
     </div>
   );
 }
@@ -3616,6 +3850,25 @@ function EmptyPanel({ title, text }: { title: string; text: string }) {
       <p className="mt-1 text-sm text-slate-600">{text}</p>
     </div>
   );
+}
+
+function hasActiveFilters(filters: Filters, rangePreset: RangePreset): boolean {
+  return filters.source.length > 0 || filters.sourceApp.length > 0 || filters.repo.length > 0 || filters.model.length > 0 || rangePreset !== "last7";
+}
+
+function activeFilterSummary(filters: Filters, rangePreset: RangePreset, options: { sources: PickerOption[]; sourceApps: PickerOption[]; repos: PickerOption[]; models: PickerOption[] }): { date: string; countLabel: string; preview: string[] } {
+  const labels: string[] = [];
+  filters.source.forEach((value) => labels.push(options.sources.find((option) => option.value === value)?.label ?? value));
+  filters.sourceApp.forEach((value) => labels.push(options.sourceApps.find((option) => option.value === value)?.label ?? value));
+  filters.repo.forEach((value) => labels.push(options.repos.find((option) => option.value === value)?.label ?? value));
+  filters.model.forEach((value) => labels.push(options.models.find((option) => option.value === value)?.label ?? value));
+  const presetLabel = rangeOptions.find((option) => option.value === rangePreset)?.label ?? "Custom dates";
+  const date = rangePreset === "custom" ? `${dateInputValue(filters.from) || "Any start"} to ${dateInputValue(filters.to) || "now"}` : presetLabel;
+  return {
+    date,
+    countLabel: labels.length ? `${labels.length} filter${labels.length === 1 ? "" : "s"} active` : "No extra filters",
+    preview: labels.slice(0, 3),
+  };
 }
 
 function ChartPanel({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
@@ -3736,9 +3989,9 @@ function ActiveFiltersSummary({
   onResetAll: () => void;
 }) {
   const chips: Array<{ key: "source" | "sourceApp" | "repo" | "model"; label: string; value: string; displayValue: string }> = [];
-  filters.source.forEach((value) => chips.push({ key: "source", label: "Source", value, displayValue: sources.find((source) => source.value === value)?.label ?? value }));
-  filters.sourceApp.forEach((value) => chips.push({ key: "sourceApp", label: "App", value, displayValue: sourceApps.find((app) => app.value === value)?.label ?? value }));
-  filters.repo.forEach((value) => chips.push({ key: "repo", label: "Repo", value, displayValue: repos.find((repo) => repo.value === value)?.label ?? value }));
+  filters.source.forEach((value) => chips.push({ key: "source", label: "AI provider", value, displayValue: sources.find((source) => source.value === value)?.label ?? value }));
+  filters.sourceApp.forEach((value) => chips.push({ key: "sourceApp", label: "App / surface", value, displayValue: sourceApps.find((app) => app.value === value)?.label ?? value }));
+  filters.repo.forEach((value) => chips.push({ key: "repo", label: "Repo / folder", value, displayValue: repos.find((repo) => repo.value === value)?.label ?? value }));
   filters.model.forEach((value) => chips.push({ key: "model", label: "Model", value, displayValue: models.find((model) => model.value === value)?.label ?? value }));
   const hasCustomDate = rangePreset !== "last7";
   const hasAnyFilter = chips.length > 0 || hasCustomDate;
@@ -3755,7 +4008,7 @@ function ActiveFiltersSummary({
           <span aria-hidden>×</span>
         </button>
       ))}
-      {chips.length === 0 && !hasCustomDate ? <span className="active-filter-empty">No source, app, repo, or model filters applied.</span> : null}
+      {chips.length === 0 && !hasCustomDate ? <span className="active-filter-empty">No AI provider, app/surface, repo/folder, or model filters applied.</span> : null}
       {hasAnyFilter ? <button className="text-button active-filter-reset" type="button" onClick={onResetAll}>Reset filters</button> : null}
     </div>
   );
@@ -3868,7 +4121,7 @@ function AppLabel({ app, surface }: { app?: string; surface?: Session["detectedS
     : `App: ${label}.`;
   return (
     <span className="app-label" title={title}>
-      <AppIcon app={label} surface={surface} />
+      <SurfaceIcon app={label} surface={surface} />
       <span>{label}</span>
     </span>
   );
@@ -3877,9 +4130,19 @@ function AppLabel({ app, surface }: { app?: string; surface?: Session["detectedS
 function SourceBadge({ source, label }: { source: Session["sourceClient"]; label?: string }) {
   const display = label ?? sourceLabel(source);
   return (
-    <span className={`source-badge source-badge-${source}`} title={`Source: ${display}`}>
-      <AppIcon app={display} />
+    <span className={`source-badge source-badge-${source}`} title={`AI provider: ${display}`}>
+      <ProviderIcon provider={source} label={display} />
       <span>{display}</span>
+    </span>
+  );
+}
+
+function ModelLabel({ model }: { model?: string | undefined }) {
+  const label = model ?? "Unknown";
+  return (
+    <span className="inline-flex items-center gap-1">
+      <ModelIcon model={model} />
+      <span>{label}</span>
     </span>
   );
 }
@@ -3891,44 +4154,69 @@ function sessionIsRepoVerified(session: Session): boolean {
 function RepoLabel({ name, verified }: { name: string; verified: boolean }) {
   return (
     <span className="inline-flex items-center gap-1">
-      {verified ? <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Folder className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+      {verified ? <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <FolderOpen className="h-3.5 w-3.5 shrink-0" aria-hidden />}
       {name}
     </span>
   );
 }
 
 function PickerIconView({ kind, label, verified }: { kind: PickerIcon; label: string; verified?: boolean }) {
-  if (label === "All") return <Boxes className="h-4 w-4" aria-hidden />;
-  if (kind === "source") return <AppIcon app={label} />;
-  if (kind === "app") return <AppIcon app={label} />;
-  if (kind === "repo") return verified ? <GitBranch className="h-4 w-4" aria-hidden /> : <Folder className="h-4 w-4" aria-hidden />;
-  if (label.toLowerCase().includes("claude")) return <ClaudeIcon />;
-  if (label.toLowerCase().includes("gpt")) return <CodexIcon />;
+  if (label === "All") return <AllPickerIcon kind={kind} />;
+  if (kind === "source") return <ProviderIcon label={label} />;
+  if (kind === "app") return <SurfaceIcon app={label} />;
+  if (kind === "repo") return verified ? <GitBranch className="h-4 w-4" aria-hidden /> : <FolderOpen className="h-4 w-4" aria-hidden />;
+  return <ModelIcon model={label} />;
+}
+
+function AllPickerIcon({ kind }: { kind: PickerIcon }) {
+  if (kind === "source") return <Bot className="h-4 w-4" aria-hidden />;
+  if (kind === "app") return <LayoutPanelTop className="h-4 w-4" aria-hidden />;
+  if (kind === "repo") return <FolderGit2 className="h-4 w-4" aria-hidden />;
+  return <BrainCircuit className="h-4 w-4" aria-hidden />;
+}
+
+function ProviderIcon({ provider, label }: { provider?: Session["sourceClient"]; label?: string }) {
+  const kind = (label || provider || "").toLowerCase();
+  if (provider === "codex" || kind.includes("codex") || kind.includes("openai")) return <CodexIcon />;
+  if (provider === "claude" || kind.includes("claude") || kind.includes("anthropic")) return <ClaudeIcon />;
+  if (provider === "cursor" || kind.includes("cursor")) return <Code2 className="h-4 w-4" aria-hidden />;
+  if (provider === "gemini-cli" || kind.includes("gemini")) return <Sparkles className="h-4 w-4" aria-hidden />;
+  if (provider === "opencode" || kind.includes("opencode")) return <Code2 className="h-4 w-4" aria-hidden />;
   return <Bot className="h-4 w-4" aria-hidden />;
 }
 
-function AppIcon({ app, surface }: { app?: string; surface?: Session["detectedSurface"] }) {
+function SurfaceIcon({ app, surface }: { app?: string; surface?: Session["detectedSurface"] }) {
   const kind = (app || surface || "").toLowerCase();
   if (kind.includes("codex on vs code") || kind.includes("codex on vscode")) return <CompositeAppIcon source="codex" surface="vscode" />;
   if (kind.includes("codex on terminal") || kind.includes("codex on cli")) return <CompositeAppIcon source="codex" surface="terminal" />;
   if (kind.includes("claude code on vs code") || kind.includes("claude code on vscode")) return <CompositeAppIcon source="claude" surface="vscode" />;
   if (kind.includes("claude code on terminal") || kind.includes("claude code on cli")) return <CompositeAppIcon source="claude" surface="terminal" />;
-  if (kind.includes("desktop local agent") || kind.includes("desktop app") || surface === "local_agent") return <ClaudeDesktopIcon />;
+  if (kind.includes("cursor")) return <Code2 className="h-4 w-4" aria-hidden />;
+  if (kind.includes("desktop local agent") || kind.includes("desktop app") || surface === "local_agent") return <AppWindow className="h-4 w-4" aria-hidden />;
   if (kind.includes("claude")) return <ClaudeIcon />;
   if (kind.includes("vs code") || kind.includes("vscode") || surface === "vscode_extension") return <VsCodeIcon />;
   if (kind.includes("codex app") || kind.includes("subagent") || surface === "codex_app_cloud") return <CodexAppIcon />;
   if (kind.includes("codex") || kind.includes("agent")) return <CodexIcon />;
   if (kind.includes("exec") || surface === "codex_exec") return <Code2 className="h-4 w-4" aria-hidden />;
-  if (kind.includes("terminal") || kind.includes("cli") || surface === "terminal_cli") return <Terminal className="h-4 w-4" aria-hidden />;
-  if (!app) return <Boxes className="h-4 w-4" aria-hidden />;
-  return <Command className="h-4 w-4" aria-hidden />;
+  if (kind.includes("terminal") || kind.includes("cli") || surface === "terminal_cli") return <SquareTerminal className="h-4 w-4" aria-hidden />;
+  if (!app) return <Blocks className="h-4 w-4" aria-hidden />;
+  return <MonitorCog className="h-4 w-4" aria-hidden />;
+}
+
+function ModelIcon({ model }: { model?: string | undefined }) {
+  const kind = (model ?? "").toLowerCase();
+  if (kind.includes("claude") || kind.includes("opus") || kind.includes("sonnet") || kind.includes("haiku")) return <ClaudeIcon />;
+  if (kind.includes("gpt") || kind.includes("o1") || kind.includes("o3") || kind.includes("o4") || kind.includes("openai")) return <CodexIcon />;
+  if (kind.includes("gemini")) return <Sparkles className="h-4 w-4" aria-hidden />;
+  if (kind.includes("unknown") || !kind) return <Cpu className="h-4 w-4" aria-hidden />;
+  return <BrainCircuit className="h-4 w-4" aria-hidden />;
 }
 
 function CompositeAppIcon({ source, surface }: { source: "codex" | "claude"; surface: "vscode" | "terminal" }) {
   return (
     <span className={`combo-icon combo-icon-${source}-${surface}`} aria-hidden>
       <span className="combo-icon-main">
-        {surface === "vscode" ? <VsCodeIcon /> : <Terminal className="brand-icon terminal-combo-icon" aria-hidden />}
+        {surface === "vscode" ? <VsCodeIcon /> : <SquareTerminal className="brand-icon terminal-combo-icon" aria-hidden />}
       </span>
       <span className="combo-icon-corner">
         {source === "codex" ? <CodexIcon /> : <ClaudeIcon />}
@@ -3987,17 +4275,6 @@ function ClaudeIcon() {
   );
 }
 
-function ClaudeDesktopIcon() {
-  return (
-    <svg className="brand-icon claude-desktop-icon" viewBox="0 0 24 24" aria-hidden>
-      <rect x="3.2" y="4" width="17.6" height="12.4" rx="2.4" fill="currentColor" opacity="0.22" />
-      <path d="M6 6.9h12v6.6H6V6.9Z" fill="currentColor" opacity="0.42" />
-      <path d="M12 7.5 13.35 10.1l2.9-.55-1.95 2.05 1.95 2.05-2.9-.55L12 15.7l-1.35-2.6-2.9.55 1.95-2.05-1.95-2.05 2.9.55L12 7.5Z" fill="currentColor" />
-      <path d="M9.4 18.2h5.2l.55 1.8h-6.3l.55-1.8Z" fill="currentColor" opacity="0.74" />
-    </svg>
-  );
-}
-
 function DateInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="field">
@@ -4007,11 +4284,12 @@ function DateInput({ label, value, onChange }: { label: string; value: string; o
   );
 }
 
-function QuickLink({ href, label }: { href: string; label: string }) {
+function QuickLink({ href, label, icon, tone }: { href: string; label: string; icon: React.ReactNode; tone: "codex" | "claude" | "cursor" | "github" }) {
   return (
-    <a className="button" href={href} target="_blank" rel="noreferrer">
-      <ExternalLink className="h-4 w-4" aria-hidden />
-      <span>{label}</span>
+    <a className={`quick-link quick-link-${tone}`} href={href} target="_blank" rel="noreferrer" title={label}>
+      <span className="quick-link-icon" aria-hidden>{icon}</span>
+      <span className="quick-link-label">{label}</span>
+      <ExternalLink className="quick-link-external h-3.5 w-3.5" aria-hidden />
     </a>
   );
 }
@@ -4301,7 +4579,7 @@ function RepoWarningBadges({ warnings, commandIssueCount }: { warnings: string[]
 }
 
 function prioritizeBadges(labels: string[]): string[] {
-  const priority = ["Command issue", "Command issues detected", "High token", "No edits", "Unknown repo", "Repo unverified", "Unknown surface", "Files edited", "Partial", "Completed"];
+  const priority = ["Command issue", "Command issues detected", "High token", "No edits", "Unknown repo/folder", "Repo/folder unverified", "Unknown surface", "Files edited", "Partial", "Completed"];
   return [...new Set(labels)].sort((a, b) => {
     const aIndex = priority.indexOf(a);
     const bIndex = priority.indexOf(b);
@@ -4354,9 +4632,9 @@ function CompactionEventList({ compaction }: { compaction: NonNullable<Session["
 
 function MiniStat({ label, value, help }: { label: string; value: React.ReactNode; help?: React.ReactNode }) {
   return (
-    <div className="border border-line bg-white p-3">
+    <div className="mini-stat">
       <div className="mini-stat-label">{label}{help}</div>
-      <div className="mt-1 font-semibold">{value}</div>
+      <div className="mini-stat-value">{value}</div>
     </div>
   );
 }
@@ -4472,7 +4750,7 @@ function repoRows(data: ApiData): RepoRow[] {
     fileEditCount: repo.fileEditCount ?? 0,
     failedCommandCount: repo.failedCommandCount ?? 0,
     tokenRoiLabel: repo.tokenRoiLabel ?? "No edits",
-    tokenRoiTitle: repo.tokenRoiTitle ?? "Tokens per edit cannot be computed because no file edits were detected for this repo.",
+    tokenRoiTitle: repo.tokenRoiTitle ?? "Tokens per edit cannot be computed because no file edits were detected for this repo or folder.",
   }));
 }
 
@@ -4488,9 +4766,64 @@ function repoRowsFromGroup(repo: UsageGroup, sessions: Session[]): RepoRow {
     failedCommandCount,
     tokenRoiLabel: tokensPerEdit === undefined ? "No edits" : `${tokens(tokensPerEdit)} / edit`,
     tokenRoiTitle: tokensPerEdit === undefined
-      ? "Tokens per edit cannot be computed because no file edits were detected for this repo."
+      ? "Tokens per edit cannot be computed because no file edits were detected for this repo or folder."
       : "Tokens per edit estimates how much token volume was used for each detected file edit. Lower is usually more efficient.",
   };
+}
+
+function topDashboardActions(data: ApiData): Array<{ label: string; detail: string; icon: React.ReactElement; tone: "attention" | "good" | "neutral"; view: ViewKey; repoId?: string; sessionId?: string }> {
+  const actions: Array<{ label: string; detail: string; icon: React.ReactElement; tone: "attention" | "good" | "neutral"; view: ViewKey; repoId?: string; sessionId?: string }> = [];
+  const topIssueSession = [...data.sessions].sort((a, b) => importantCommandFailures(b) - importantCommandFailures(a) || b.totalTokens - a.totalTokens)[0];
+  const topRepo = repoRows(data)[0];
+  const unpriced = data.sessions.filter((session) => session.estimatedCostUsd === undefined && session.totalTokens > 0).length;
+  if (topIssueSession && importantCommandFailures(topIssueSession) > 0) {
+    actions.push({
+      label: "Review command friction",
+      detail: `${count(importantCommandFailures(topIssueSession), "issue")} in ${topIssueSession.repoName}`,
+      icon: <TriangleAlert />,
+      tone: "attention",
+      view: "commands",
+      sessionId: topIssueSession.id,
+    });
+  }
+  if (topRepo) {
+    actions.push({
+      label: "Inspect top repo / folder",
+      detail: `${topRepo.label} has ${tokens(topRepo.totalTokens)} and ${money(topRepo.estimatedCostUsd)} API-equivalent cost`,
+      icon: <FolderGit2 />,
+      tone: "neutral",
+      view: "repoDetail",
+      repoId: topRepo.id,
+    });
+  }
+  if (unpriced > 0) {
+    actions.push({
+      label: "Check pricing coverage",
+      detail: `${count(unpriced, "token-bearing session")} cannot show API-equivalent cost`,
+      icon: <CircleDollarSign />,
+      tone: "attention",
+      view: "settings",
+    });
+  }
+  if (actions.length < 3 && data.health.attentionCount > 0) {
+    actions.push({
+      label: "Open usage health",
+      detail: `${count(data.health.attentionCount, "attention item")} in the current filter`,
+      icon: <Info />,
+      tone: "attention",
+      view: "insights",
+    });
+  }
+  if (actions.length < 3) {
+    actions.push({
+      label: "Scan recent sessions",
+      detail: `${count(data.sessions.length, "session")} loaded for this filter`,
+      icon: <Terminal />,
+      tone: "good",
+      view: "sessions",
+    });
+  }
+  return actions.slice(0, 3);
 }
 
 function repoCostConcentration(repo: RepoRow, sessions: Session[]): RepoCostConcentration {
@@ -4595,7 +4928,7 @@ function repoDiagnosisSentence(repo: RepoRow, sessions: Session[], concentration
   const fileText = repo.fileEditCount > 0
     ? "File path analysis is limited because this log format may not include stable file paths"
     : "No file edits were detected in this filtered view";
-  if (!sessions.length) return "No sessions matched this repository in the current filters.";
+  if (!sessions.length) return "No sessions matched this repo or folder in the current filters.";
   return `${parts.join(" ")}. ${commandText}. ${fileText}.`;
 }
 
@@ -4608,7 +4941,7 @@ function tokenIntensityInterpretation(repo: RepoRow): string {
 }
 
 function repoCostDriverExplanation(repo: RepoRow, topModel: RepoModelSpend | undefined): string {
-  if (repo.estimatedCostUsd === undefined) return "API-equivalent cost is unavailable because this repo is missing pricing coverage or token splits.";
+  if (repo.estimatedCostUsd === undefined) return "API-equivalent cost is unavailable because this repo or folder is missing pricing coverage or token splits.";
   if (topModel && topModel.costShare >= 0.5) {
     return `${topModel.label} is the main cost driver at ${money(topModel.estimatedCostUsd)} across ${count(topModel.sessionCount, "session")}, representing ${percent(topModel.costShare)} of known repo cost.`;
   }
@@ -4670,7 +5003,7 @@ function sessionBadges(session: Session): string[] {
   if (importantCommandFailures(session) > 0) badges.push("Command issue");
   if (session.totalTokens >= 1_000_000) badges.push("High token");
   if ((session.fileEditCount ?? 0) === 0 && outcome !== "No edits") badges.push("No edits");
-  if (session.warnings.includes("repo_unverified_no_git_root")) badges.push("Unknown repo");
+  if (session.warnings.includes("repo_unverified_no_git_root")) badges.push("Unknown repo/folder");
   if ((session.detectedSurface ?? "unknown") === "unknown") badges.push("Unknown surface");
   if ((session.fileEditCount ?? 0) > 0) badges.push("Files edited");
   badges.push(outcome);
@@ -4681,9 +5014,9 @@ function sessionBadges(session: Session): string[] {
 
 function readableWarning(warning: string): string {
   const normalized = warning.toLowerCase();
-  if (normalized === "expensive_session_concentration") return "Cost concentration is very high. One session accounts for most of this repo’s estimated cost.";
-  if (normalized === "failed commands" || normalized === "command issues") return "Important command issues were detected in this repo.";
-  if (normalized === "repo_unverified_no_git_root") return "Repo grouping is unverified because no Git root was detected.";
+  if (normalized === "expensive_session_concentration") return "Cost concentration is very high. One session accounts for most of this repo or folder’s estimated cost.";
+  if (normalized === "failed commands" || normalized === "command issues") return "Important command issues were detected in this repo or folder.";
+  if (normalized === "repo_unverified_no_git_root") return "Repo/folder grouping is unverified because no Git root was detected.";
   if (normalized === "unknown_pricing") return "Some sessions cannot be priced because token splits or pricing coverage are missing.";
   if (normalized === "missing_token_breakdown") return "Some sessions are missing detailed token breakdowns.";
   if (normalized === "low_cache_rate") return "Cache reuse is low, so input tokens may be driving more estimated cost.";
@@ -4776,18 +5109,29 @@ function isUsableModelPricing(pricing: ModelPricing | undefined): pricing is Mod
   return positiveRate(pricing?.inputPerMillion) && positiveRate(pricing?.outputPerMillion);
 }
 
-function sourceImportedSessions(data: ApiData, sourceId: "codex" | "claude"): number {
+function sourceImportedSessions(data: ApiData, sourceId: "codex" | "claude" | "cursor"): number {
   return data.sourceStats
     .filter((source) => source.sourceId === sourceId)
     .reduce((sum, source) => sum + (source.sessionsImported ?? 0), 0);
 }
 
 function sourceHomePath(source: ApiData["sourceStats"][number]): string {
-  return source.homePath ?? source.codexHome ?? source.claudeHome ?? "Unknown";
+  return source.homePath ?? source.codexHome ?? source.claudeHome ?? source.cursorHome ?? "Unknown";
 }
 
 function sourcePrimaryDataFound(source: ApiData["sourceStats"][number]): boolean {
-  return Boolean(source.stateExists || source.sessionsExists || source.projectsExists || source.historyExists);
+  return Boolean(source.stateExists || source.sessionsExists || source.projectsExists || source.historyExists || (source.databaseFileCount ?? 0) > 0);
+}
+
+function sourceEmptyFix(source: ApiData["sourceStats"][number]): string {
+  if (!sourcePrimaryDataFound(source)) return "Install or run the local source once, then refresh.";
+  if ((source.sessionsImported ?? 0) === 0) {
+    if (source.sourceId === "cursor") return "Open Cursor chat or agent sessions locally, then rescan.";
+    if (source.sourceId === "claude") return "Run Claude Code in a repo with local history enabled, then rescan.";
+    return "Run Codex in a repo so local session files can be imported.";
+  }
+  if ((source.parseFailureCount ?? 0) > 0) return "Some files were skipped; check Settings for parse warnings.";
+  return "Ready.";
 }
 
 function sourceDetectedPaths(source: ApiData["sourceStats"][number], data: ApiData): string[] {
@@ -4796,10 +5140,13 @@ function sourceDetectedPaths(source: ApiData["sourceStats"][number], data: ApiDa
     source.homePath,
     source.codexHome,
     source.claudeHome,
+    source.cursorHome,
     source.statePath,
     source.sessionsPath,
     source.projectsPath,
     source.historyPath,
+    source.globalStoragePath,
+    source.workspaceStoragePath,
     ...statusPaths,
   ].filter((value): value is string => Boolean(value));
   return [...new Set(paths)];
@@ -4840,7 +5187,7 @@ function usageBySource(data: ApiData): BreakdownRow[] {
   const labels = new Map(data.sources.map((source) => [source.id, source.label]));
   const rows = new Map<string, BreakdownRow>();
   for (const source of data.sources) {
-    rows.set(source.id, { id: source.id, label: source.label, source: source.id, sessionCount: 0, totalTokens: 0, estimatedCostUsd: undefined, missingTokenSessions: 0 });
+    rows.set(source.id, { id: source.id, label: source.label, source: source.id, sessionCount: 0, totalTokens: 0, estimatedCostUsd: undefined, knownCostSessions: 0, unknownCostSessions: 0, missingTokenSessions: 0 });
   }
   for (const session of data.sessions) {
     const row = rows.get(session.sourceClient) ?? {
@@ -4850,12 +5197,19 @@ function usageBySource(data: ApiData): BreakdownRow[] {
       sessionCount: 0,
       totalTokens: 0,
       estimatedCostUsd: undefined,
+      knownCostSessions: 0,
+      unknownCostSessions: 0,
       missingTokenSessions: 0,
     };
     row.sessionCount += 1;
     row.totalTokens += session.totalTokens;
     row.missingTokenSessions += session.totalTokens > 0 ? 0 : 1;
-    if (session.estimatedCostUsd !== undefined) row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));
+    if (session.estimatedCostUsd !== undefined) {
+      row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));
+      row.knownCostSessions += 1;
+    } else {
+      row.unknownCostSessions += 1;
+    }
     rows.set(session.sourceClient, row);
   }
   return [...rows.values()];
@@ -4876,15 +5230,28 @@ function groupSessionsForBreakdown(sessions: Session[], keyFn: (session: Session
       sessionCount: 0,
       totalTokens: 0,
       estimatedCostUsd: undefined,
+      knownCostSessions: 0,
+      unknownCostSessions: 0,
       missingTokenSessions: 0,
     };
     row.sessionCount += 1;
     row.totalTokens += session.totalTokens;
     row.missingTokenSessions += session.totalTokens > 0 ? 0 : 1;
-    if (session.estimatedCostUsd !== undefined) row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));
+    if (session.estimatedCostUsd !== undefined) {
+      row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));
+      row.knownCostSessions += 1;
+    } else {
+      row.unknownCostSessions += 1;
+    }
     rows.set(id, row);
   }
   return [...rows.values()].sort((a, b) => b.totalTokens - a.totalTokens || a.label.localeCompare(b.label));
+}
+
+function breakdownCostLabel(row: BreakdownRow): string {
+  if (row.knownCostSessions === 0) return "Not priced";
+  const label = money(row.estimatedCostUsd);
+  return row.unknownCostSessions > 0 ? `Known ${label}` : label;
 }
 
 function topEntry(record: Record<string, number>): [string, number] | undefined {
@@ -5060,6 +5427,67 @@ function findSessionById(data: ApiData, sessionId: string | null): Session | und
   return data.sessions.find((session) => session.id === sessionId);
 }
 
+function exportSessionsCsv(sessions: Session[]): void {
+  const rows = sessions.map((session) => ({
+    repo: session.repoName,
+    repoRoot: session.repoRoot,
+    source: sourceLabel(session.sourceClient),
+    app: session.sourceApp ?? surfaceLabel(session.detectedSurface),
+    session: sessionDisplayTitle(session),
+    sessionId: session.id,
+    model: session.model ?? "Unknown",
+    startedAt: session.startedAt ?? "",
+    durationMs: session.durationMs ?? "",
+    estimatedCostUsd: session.estimatedCostUsd ?? "",
+    totalTokens: session.totalTokens,
+    inputTokens: session.inputTokens,
+    cachedInputTokens: session.cachedInputTokens,
+    outputTokens: session.outputTokens,
+    reasoningTokens: session.reasoningTokens,
+    messages: session.messageCount,
+    prompts: session.userPromptCount ?? 0,
+    commands: session.shellCommandCount ?? 0,
+    commandIssues: importantCommandFailures(session),
+    fileEdits: session.fileEditCount ?? 0,
+    outcome: session.sessionOutcome ?? "unknown",
+    tokenConfidence: session.tokenConfidence ?? "unknown",
+  }));
+  downloadText(`repospend-sessions-${new Date().toISOString().slice(0, 10)}.csv`, objectsToCsv(rows));
+}
+
+function exportReposCsv(repos: RepoRow[]): void {
+  const rows = repos.map((repo) => ({
+    repo: repo.label,
+    repoRoot: repo.id,
+    estimatedCostUsd: repo.estimatedCostUsd ?? "",
+    totalTokens: repo.totalTokens,
+    inputTokens: repo.inputTokens,
+    cachedInputTokens: repo.cachedInputTokens,
+    outputTokens: repo.outputTokens,
+    reasoningTokens: repo.reasoningTokens,
+    sessions: repo.sessionCount,
+    fileEdits: repo.fileEditCount,
+    commandIssues: repo.failedCommandCount,
+    tokenRoi: repo.tokenRoiLabel,
+    warnings: repo.warnings.join("; "),
+  }));
+  downloadText(`repospend-repos-${new Date().toISOString().slice(0, 10)}.csv`, objectsToCsv(rows));
+}
+
+function objectsToCsv(rows: Array<Record<string, string | number>>): string {
+  if (!rows.length) return "";
+  const headers = Object.keys(rows[0]!);
+  return [
+    headers.join(","),
+    ...rows.map((row) => headers.map((header) => csvCell(row[header] ?? "")).join(",")),
+  ].join("\n");
+}
+
+function csvCell(value: string | number): string {
+  const text = String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
 function parseTokenAmount(value?: string): number | undefined {
   if (!value) return undefined;
   const match = value.replaceAll(",", "").match(/([\d.]+)\s*([kmb])?/i);
@@ -5180,7 +5608,7 @@ function sessionPositiveSignals(session: Session): string[] {
   if (session.parseStatus === "ok") items.push("Local session log parsed cleanly.");
   if (session.tokenConfidence === "high") items.push("Token counting confidence is high.");
   if (session.inputTokens > 0 && session.cachedInputTokens / session.inputTokens >= 0.5) items.push("Cached input reuse was strong.");
-  if (session.repoRoot && !session.repoRoot.includes("unverified")) items.push("Session resolved to a repository.");
+  if (session.repoRoot && !session.repoRoot.includes("unverified")) items.push("Session resolved to a repo or folder.");
   return items;
 }
 
@@ -5193,7 +5621,7 @@ function sessionConcernSignals(session: Session): string[] {
   if (session.estimatedCostUsd === undefined && session.totalTokens > 0) items.push("API-equivalent cost unavailable because pricing or token split is missing.");
   if (session.parseStatus && session.parseStatus !== "ok") items.push("Parser reported issues for this session.");
   if (session.detectedSurface === "unknown") items.push("Surface could not be detected from local logs.");
-  if (session.repoName.toLowerCase().includes("unknown") || session.warnings.includes("repo_unverified_no_git_root")) items.push("Repo grouping is unverified because no Git root was detected.");
+  if (session.repoName.toLowerCase().includes("unknown") || session.warnings.includes("repo_unverified_no_git_root")) items.push("Repo/folder grouping is unverified because no Git root was detected.");
   if ((session.tokenSnapshotCount ?? 0) === 0 && session.totalTokens === 0) items.push("No token checkpoints were available.");
   return items;
 }
