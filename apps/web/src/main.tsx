@@ -34,6 +34,7 @@ import {
   type KeyInsight,
   type MetricBreakdownRow,
   type MetricKey,
+  type ModelSortKey,
   type ModelPricing,
   type PickerIcon,
   type PickerOption,
@@ -107,6 +108,7 @@ const viewMeta: Record<ViewKey, { title: string; subtitle: string }> = {
   sessionDetail: { title: "Session Detail", subtitle: "One local AI coding session, with signals and token shape" },
   repos: { title: "Repos / folders", subtitle: "Compare local AI coding usage, API-equivalent cost, productivity, and warnings by Git repo or inferred folder" },
   repoDetail: { title: "Repo / folder detail", subtitle: "Focused repo or folder usage, sessions, warnings, and command signals" },
+  models: { title: "Models", subtitle: "Compare model token shape, API-equivalent cost, cache reuse, and repo concentration" },
   commands: { title: "Agent Friction", subtitle: "Command signals that separate blocking issues from harmless shell exits" },
   insights: { title: "Usage Health", subtitle: "What looks good, what needs attention, and why" },
   rtk: { title: "RTK Insights", subtitle: "Token savings from RTK command proxy" },
@@ -119,6 +121,7 @@ const viewIcons: Record<ViewKey, React.ReactElement> = {
   sessionDetail: <Terminal />,
   repos: <FolderGit2 />,
   repoDetail: <FolderGit2 />,
+  models: <BrainCircuit />,
   commands: <TriangleAlert />,
   insights: <Info />,
   rtk: <Command />,
@@ -323,6 +326,7 @@ function App() {
         <nav className="sidebar-nav" aria-label="Primary">
           <NavButton icon={<LayoutDashboard />} label="Overview" active={activeView === "dashboard"} onClick={() => navigateToView("dashboard")} />
           <NavButton icon={<FolderGit2 />} label="Repos / folders" active={activeView === "repos" || activeView === "repoDetail"} onClick={() => navigateToView("repos")} />
+          <NavButton icon={<BrainCircuit />} label="Models" active={activeView === "models"} onClick={() => navigateToView("models")} />
           <NavButton icon={<Terminal />} label="Sessions" active={activeView === "sessions" || activeView === "sessionDetail"} onClick={() => navigateToView("sessions")} />
           <NavButton icon={<TriangleAlert />} label="Agent Friction" active={activeView === "commands"} onClick={() => navigateToView("commands")} badge={data && data.summary.importantCommandFailures > 0 ? compactNumber(data.summary.importantCommandFailures) : undefined} />
           <NavButton icon={<Info />} label="Insights" active={activeView === "insights"} onClick={() => navigateToView("insights")} badge={data && data.health.attentionCount > 0 ? compactNumber(data.health.attentionCount) : undefined} />
@@ -372,7 +376,7 @@ function App() {
             }
           }}
         />
-        {activeView === "dashboard" || activeView === "sessions" || activeView === "repos" || activeView === "repoDetail" || activeView === "commands" || activeView === "insights" ? (
+        {activeView === "dashboard" || activeView === "sessions" || activeView === "repos" || activeView === "repoDetail" || activeView === "models" || activeView === "commands" || activeView === "insights" ? (
           <FiltersBar
             filters={filters}
             setFilters={setFilters}
@@ -462,6 +466,17 @@ function App() {
           />
         ) : null}
 
+        {!error && data && activeView === "models" ? (
+          <ModelsPage
+            data={data}
+            displaySettings={displaySettings}
+            setDisplaySettings={updateDisplaySettings}
+            onOpenRepo={openRepo}
+            onOpenSession={openSession}
+            onFilterModel={(modelId) => setFilters((current) => ({ ...current, model: [modelId] }))}
+          />
+        ) : null}
+
         {!error && data && activeView === "commands" ? <AgentFrictionPage data={data} onOpenRepo={openRepo} onOpenSession={openSession} displaySettings={displaySettings} setDisplaySettings={updateDisplaySettings} /> : null}
 
         {!error && data && activeView === "rtk" ? <RtkDashboard gain={data.rtkGain} pricing={data.pricing} displaySettings={displaySettings} /> : null}
@@ -472,6 +487,8 @@ function App() {
             <TopActionsCard data={data} onNavigate={navigateToView} onOpenRepo={openRepo} onOpenSession={openSession} />
             <SecondaryMetrics summary={data.summary} />
             <SourceBreakdownPanel data={data} />
+            <TopRepositoriesSection data={data} onOpenRepos={() => navigateToView("repos")} onOpenRepo={openRepo} pageSize={displaySettings.tablePageSize} />
+            <WasteSignalsSection data={data} onOpenSessions={() => navigateToView("sessions")} />
 
             <div className="panel p-3">
               <div className="display-control-row">
@@ -529,9 +546,6 @@ function App() {
               <RecentSessionsPanel sessions={recentSessions(data.sessions).slice(0, 6)} onOpenSession={openSession} />
               <KeyInsightsPanel insights={data.health.keyInsights.slice(0, 4)} compact />
             </div>
-
-            <TopRepositoriesSection data={data} onOpenRepos={() => navigateToView("repos")} onOpenRepo={openRepo} pageSize={displaySettings.tablePageSize} />
-            <WasteSignalsSection data={data} onOpenSessions={() => navigateToView("sessions")} />
 
             <div className="panel overflow-hidden">
               <div className="panel-heading">
@@ -806,7 +820,7 @@ function MetricTimelinePanel({ data, metric }: { data: ApiData; metric: MetricKe
               formatter={(value) => tooltipMetric(metric, Number(value))}
             />
             <Legend />
-            <Line type="monotone" dataKey="chartValue" name={metricName} stroke="#6d5dfc" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+            <Line type="monotone" dataKey="chartValue" name={metricName} stroke="#2dd4bf" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
           </LineChart>
         )}
       </ResponsiveContainer>
@@ -3357,6 +3371,14 @@ function SessionsPage({ data, displaySettings, setDisplaySettings, onOpenSession
     () => data.sessions.filter((session) => sessionMatchesSearch(session, search) && sessionMatchesQuickFilter(session, quickFilter)),
     [data.sessions, quickFilter, search],
   );
+  const filteredTokens = filteredSessions.reduce((sum, session) => sum + session.totalTokens, 0);
+  const filteredKnownCost = filteredSessions.reduce<number | undefined>((sum, session) => {
+    if (session.estimatedCostUsd === undefined) return sum;
+    return Number(((sum ?? 0) + session.estimatedCostUsd).toFixed(6));
+  }, undefined);
+  const filteredCommands = filteredSessions.reduce((sum, session) => sum + (session.shellCommandCount ?? 0), 0);
+  const filteredEdits = filteredSessions.reduce((sum, session) => sum + (session.fileEditCount ?? 0), 0);
+  const filteredReviewSessions = filteredSessions.filter(sessionNeedsCommandReview).length;
   const quickOptions: Array<{ value: QuickSessionFilter; label: string }> = [
     { value: "highToken", label: "High token" },
     { value: "failedCommands", label: "Command issues" },
@@ -3371,9 +3393,11 @@ function SessionsPage({ data, displaySettings, setDisplaySettings, onOpenSession
     <section className="mt-4 space-y-4">
       <div className="page-summary-panel">
         <MiniStat label="Loaded sessions" value={<CountValue value={filteredSessions.length} noun="session" />} />
-        <MiniStat label="Prompts" value={<CountValue value={data.summary.userPromptCount} noun="prompt" />} />
-        <MiniStat label="Shell commands" value={<CountValue value={data.summary.shellCommandCount} noun="command" />} />
-        <MiniStat label="File edits detected" value={<CountValue value={data.summary.fileEditCount} noun="edit" />} />
+        <MiniStat label="Total tokens" value={<TokenValue value={filteredTokens} />} />
+        <MiniStat label="API-equivalent cost" value={<CostValue value={filteredKnownCost} />} />
+        <MiniStat label="Sessions needing review" value={<CountValue value={filteredReviewSessions} noun="session" />} />
+        <MiniStat label="File edits detected" value={<CountValue value={filteredEdits} noun="edit" />} />
+        <MiniStat label="Commands run" value={<CountValue value={filteredCommands} noun="command" />} />
       </div>
 
       <div className="panel overflow-hidden">
@@ -3470,6 +3494,182 @@ function ReposPage({ data, onSelectRepo, selectedRepo, displaySettings, setDispl
   );
 }
 
+type ModelUsageRow = UsageGroup & {
+  providerLabel: string;
+  cacheRate: number;
+  averageCostUsd: number | undefined;
+  topRepo: RepoRow | undefined;
+  latestSession: Session | undefined;
+};
+
+function ModelsPage({
+  data,
+  displaySettings,
+  setDisplaySettings,
+  onOpenRepo,
+  onOpenSession,
+  onFilterModel,
+}: {
+  data: ApiData;
+  displaySettings: DisplaySettings;
+  setDisplaySettings: (settings: Partial<DisplaySettings>) => void;
+  onOpenRepo: (repoId: string) => void;
+  onOpenSession: (sessionId: string) => void;
+  onFilterModel: (modelId: string) => void;
+}) {
+  const [modelMetric, setModelMetric] = React.useState<MetricKey>("totalTokens");
+  const rows = modelUsageRows(data);
+  const topModel = rows[0];
+  const modelsWithUnknownCost = rows.filter((model) => model.estimatedCostUsd === undefined && model.totalTokens > 0).length;
+  const bestCache = [...rows].sort((a, b) => b.cacheRate - a.cacheRate)[0];
+  const topInputModel = [...rows].sort((a, b) => b.inputTokens - a.inputTokens)[0];
+  const topCachedModel = [...rows].sort((a, b) => b.cachedInputTokens - a.cachedInputTokens)[0];
+  const topOutputModel = [...rows].sort((a, b) => b.outputTokens - a.outputTokens)[0];
+  const topReasoningModel = [...rows].sort((a, b) => b.reasoningTokens - a.reasoningTokens)[0];
+  return (
+    <section className="mt-4 space-y-4">
+      <div className="page-summary-panel">
+        <MiniStat label="Models used" value={<CountValue value={rows.length} noun="model" />} />
+        <MiniStat label="Top estimated cost model" value={topModel ? <ModelLabel model={topModel.label} /> : "None"} />
+        <MiniStat label="Top model share" value={<PercentValue value={topModel && data.summary.estimatedCostUsd ? (topModel.estimatedCostUsd ?? 0) / data.summary.estimatedCostUsd : 0} />} />
+        <MiniStat label="Best cache reuse" value={bestCache ? <span>{bestCache.label} · <PercentValue value={bestCache.cacheRate} /></span> : "None"} />
+        <MiniStat label="Unpriced token models" value={<CountValue value={modelsWithUnknownCost} noun="model" />} />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <ChartPanel
+          title={`Models: ${metricLabel(modelMetric)}`}
+          className="overview-chart-panel model-chart-panel"
+          actions={(
+            <Select
+              icon={<Calculator />}
+              label="Chart metric"
+              value={modelMetric}
+              onChange={(value) => setModelMetric(value as MetricKey)}
+              options={metricOptions}
+            />
+          )}
+        >
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={groupUsageForChart(rows, modelMetric, displaySettings.chartGroupLimit)} layout="vertical" margin={{ left: 16, right: 16 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.14)" />
+              <XAxis type="number" tickFormatter={(value) => metricTick(modelMetric, Number(value))} tick={{ fill: "#94a3b8" }} />
+              <YAxis dataKey="label" type="category" width={170} tickFormatter={(value) => compactModelLabel(String(value))} tick={{ fontSize: 12, fill: "#94a3b8" }} />
+              <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} formatter={(value) => tooltipMetric(modelMetric, Number(value))} />
+              <Bar dataKey={modelMetric} name={metricLabel(modelMetric)} fill={modelMetric === "estimatedCostUsd" ? "#f59e0b" : "#2dd4bf"} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartPanel>
+        <div className="panel model-shape-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Token shape by model</h2>
+              <p className="text-sm text-slate-600">Largest token buckets in this filtered view.</p>
+            </div>
+          </div>
+          <div className="model-shape-list">
+            <MiniStat label="Highest input" value={topInputModel ? <span>{topInputModel.label} · <TokenValue value={topInputModel.inputTokens} /></span> : "None"} />
+            <MiniStat label="Largest cached input" value={topCachedModel && topCachedModel.cachedInputTokens > 0 ? <span>{topCachedModel.label} · <TokenValue value={topCachedModel.cachedInputTokens} /></span> : "None"} />
+            <MiniStat label="Highest output" value={topOutputModel ? <span>{topOutputModel.label} · <TokenValue value={topOutputModel.outputTokens} /></span> : "None"} />
+            <MiniStat label="Highest reasoning" value={topReasoningModel ? <span>{topReasoningModel.label} · <TokenValue value={topReasoningModel.reasoningTokens} /></span> : "None"} />
+          </div>
+        </div>
+      </div>
+
+      <div className="panel overflow-hidden">
+        <div className="panel-heading">
+          <div>
+            <h2>Models</h2>
+            <p className="text-sm text-slate-600">Compare each model by input tokens, cached input, output, reasoning, sessions, API-equivalent cost, cache reuse, and repo concentration.</p>
+          </div>
+          <div className="panel-actions">
+            <LimitSelect label="Rows" value={displaySettings.tablePageSize} options={pageSizeOptions} onChange={(value) => setDisplaySettings({ tablePageSize: value })} />
+            <ResultsSummary shown={rows.length} total={rows.length} itemLabel="models" />
+          </div>
+        </div>
+        <ModelTable rows={rows} pageSize={displaySettings.tablePageSize} onOpenRepo={onOpenRepo} onOpenSession={onOpenSession} onFilterModel={onFilterModel} />
+      </div>
+    </section>
+  );
+}
+
+function ModelTable({
+  rows,
+  pageSize,
+  onOpenRepo,
+  onOpenSession,
+  onFilterModel,
+}: {
+  rows: ModelUsageRow[];
+  pageSize: number;
+  onOpenRepo: (repoId: string) => void;
+  onOpenSession: (sessionId: string) => void;
+  onFilterModel: (modelId: string) => void;
+}) {
+  const [sort, setSort] = React.useState<{ key: ModelSortKey; direction: SortDirection }>({ key: "cost", direction: "desc" });
+  const sortedRows = React.useMemo(() => sortModelRows(rows, sort), [rows, sort]);
+  const pager = usePagination(sortedRows, pageSize);
+  return (
+    <div className="table-wrap">
+      <table className="model-table">
+        <thead>
+          <tr>
+            <SortableTh label="Model" column="model" sort={sort} setSort={setSort} />
+            <th>Provider</th>
+            <SortableTh label="API-equivalent cost" column="cost" sort={sort} setSort={setSort} />
+            <SortableTh label="Total tokens" column="tokens" sort={sort} setSort={setSort} />
+            <SortableTh label="Total input" column="input" sort={sort} setSort={setSort} />
+            <SortableTh label="Cached input" column="cached" sort={sort} setSort={setSort} />
+            <SortableTh label="Output" column="output" sort={sort} setSort={setSort} />
+            <SortableTh label="Reasoning" column="reasoning" sort={sort} setSort={setSort} />
+            <SortableTh label="Sessions" column="sessions" sort={sort} setSort={setSort} />
+            <SortableTh label="Cache hit" column="cache" sort={sort} setSort={setSort} />
+            <SortableTh label="Top repo / folder" column="repo" sort={sort} setSort={setSort} />
+            <SortableTh label="Latest activity" column="activity" sort={sort} setSort={setSort} />
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pager.items.map((model) => (
+            <tr key={model.id}>
+              <td className="font-medium"><ModelLabel model={model.label} /></td>
+              <td><Badge label={model.providerLabel} /></td>
+              <td><CostValue value={model.estimatedCostUsd} breakdown={model} /></td>
+              <td><TokenValue value={model.totalTokens} showUnit={false} /></td>
+              <td><TokenValue value={model.inputTokens} showUnit={false} /></td>
+              <td><TokenValue value={model.cachedInputTokens} showUnit={false} /></td>
+              <td><TokenValue value={model.outputTokens} showUnit={false} /></td>
+              <td><TokenValue value={model.reasoningTokens} showUnit={false} /></td>
+              <td><CountValue value={model.sessionCount} noun="session" showUnit={false} /></td>
+              <td><PercentValue value={model.cacheRate} /></td>
+              <td>
+                {model.topRepo ? (
+                  <button className="row-link-button" type="button" onClick={() => onOpenRepo(model.topRepo!.id)}>
+                    <RepoLabel name={model.topRepo.label} verified={model.topRepo.verified === true} />
+                  </button>
+                ) : "None"}
+              </td>
+              <td>
+                {model.latestSession ? (
+                  <button className="row-link-button" type="button" onClick={() => onOpenSession(model.latestSession!.id)}>
+                    {relativeTimeLabel(model.latestSession.startedAt ?? model.latestSession.endedAt)}
+                  </button>
+                ) : "Unknown"}
+              </td>
+              <td>
+                <button className="button compact-button" type="button" onClick={() => onFilterModel(model.id)}>
+                  Filter
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <PaginationControls page={pager.page} pageCount={pager.pageCount} total={sortedRows.length} pageSize={pageSize} onPageChange={pager.setPage} />
+    </div>
+  );
+}
+
 function RepoDetailPage({ data, selectedRepo, dateRangeLabel, pageSize, onBack, onOpenSession }: { data: ApiData; selectedRepo: string | null; dateRangeLabel: string; pageSize: number; onBack: () => void; onOpenSession: (sessionId: string) => void }) {
   const rows = repoRows(data);
   const selected = selectedRepo ? rows.find((repo) => repo.id === selectedRepo) : undefined;
@@ -3497,21 +3697,6 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
   const topRepo = affectedRepos[0];
   return (
     <section className="mt-4 space-y-4">
-      <div className="panel command-health-note">
-        <div className="flex items-start gap-3">
-          <TriangleAlert className="mt-1 h-5 w-5 text-amber" aria-hidden />
-          <div>
-            <h2>How Agent Friction is classified</h2>
-            <p>
-              Many shell commands return a non-zero exit during normal exploration. RepoSpend separates blocking failures from harmless non-zero exits and focuses on repeated, blocking, or token-expensive command issues.
-            </p>
-            <p>
-              Search misses, optional file probes, and Git diff checks are treated as low severity unless other evidence suggests they blocked progress. Builds, tests, installs, permissions, auth, database, deploy, and repeated failures are treated as important signals.
-            </p>
-          </div>
-        </div>
-      </div>
-
       <div className="page-summary-panel">
         <MiniStat label="Important failures" value={<CountValue value={data.summary.importantCommandFailures} noun="issue" />} />
         <MiniStat label="Repeated failure clusters" value={<CountValue value={data.summary.repeatedFailureClusters} noun="cluster" />} />
@@ -3520,6 +3705,23 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
         <MiniStat label="Top affected repo / folder" value={topRepo ? topRepo.repoName : "None"} />
       </div>
       <p className="text-xs text-slate-500">Total non-zero command events: {count(data.summary.nonZeroCommandEvents, "event")}.</p>
+
+      <details className="panel command-health-note">
+        <summary className="advanced-summary">
+          <span className="inline-flex items-center gap-2">
+            <TriangleAlert className="h-4 w-4 text-amber" aria-hidden />
+            How Agent Friction is classified
+          </span>
+        </summary>
+        <div className="command-health-note-body">
+          <p>
+            Many shell commands return a non-zero exit during normal exploration. RepoSpend separates blocking failures from harmless non-zero exits and focuses on repeated, blocking, or token-expensive command issues.
+          </p>
+          <p>
+            Search misses, optional file probes, and Git diff checks are treated as low severity unless other evidence suggests they blocked progress. Builds, tests, installs, permissions, auth, database, deploy, and repeated failures are treated as important signals.
+          </p>
+        </div>
+      </details>
 
       <div className="panel overflow-hidden">
         <div className="panel-heading">
@@ -3871,11 +4073,12 @@ function activeFilterSummary(filters: Filters, rangePreset: RangePreset, options
   };
 }
 
-function ChartPanel({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
+function ChartPanel({ title, children, className = "", actions }: { title: string; children: React.ReactNode; className?: string; actions?: React.ReactNode }) {
   return (
     <div className={`panel chart-panel overflow-hidden ${className}`}>
       <div className="panel-heading">
         <h2>{title}</h2>
+        {actions ? <div className="panel-actions chart-panel-actions">{actions}</div> : null}
       </div>
       <div className="chart-panel-body p-3">{children}</div>
     </div>
@@ -4019,7 +4222,7 @@ function Select({ icon, label, value, onChange, options }: { icon: React.ReactEl
     <label className="field">
       <span>{React.cloneElement(icon, { className: "h-4 w-4" })}{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">All</option>
+        {value === "" && !options.some((option) => option.value === "") ? <option value="">All</option> : null}
         {options.map((option) => (
           <option key={option.value} value={option.value}>{option.label}</option>
         ))}
@@ -4676,6 +4879,23 @@ function truncateText(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }
 
+function relativeTimeLabel(value: string | undefined): string {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  const timestamp = date.getTime();
+  if (Number.isNaN(timestamp)) return value.slice(0, 10);
+  const diffMs = Date.now() - timestamp;
+  const absMs = Math.abs(diffMs);
+  const units: Array<{ label: Intl.RelativeTimeFormatUnit; ms: number }> = [
+    { label: "day", ms: 86_400_000 },
+    { label: "hour", ms: 3_600_000 },
+    { label: "minute", ms: 60_000 },
+  ];
+  const unit = units.find((item) => absMs >= item.ms) ?? { label: "minute" as const, ms: 60_000 };
+  const amount = Math.round(diffMs / unit.ms);
+  return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(-amount, unit.label);
+}
+
 function sessionNeedsCommandReview(session: Session): boolean {
   const important = importantCommandFailures(session);
   const nonZero = session.nonZeroCommandEvents ?? important;
@@ -4769,6 +4989,37 @@ function repoRowsFromGroup(repo: UsageGroup, sessions: Session[]): RepoRow {
       ? "Tokens per edit cannot be computed because no file edits were detected for this repo or folder."
       : "Tokens per edit estimates how much token volume was used for each detected file edit. Lower is usually more efficient.",
   };
+}
+
+function modelUsageRows(data: ApiData): ModelUsageRow[] {
+  const repos = repoRows(data);
+  return data.models.filter((model) => model.totalTokens > 0 || model.estimatedCostUsd !== undefined).map((model) => {
+    const sessions = data.sessions.filter((session) => (session.model ?? "unknown-model") === model.id);
+    const topRepo = repos
+      .map((repo) => ({
+        repo,
+        cost: sessions.filter((session) => session.repoRoot === repo.id).reduce((sum, session) => sum + (session.estimatedCostUsd ?? 0), 0),
+        tokens: sessions.filter((session) => session.repoRoot === repo.id).reduce((sum, session) => sum + session.totalTokens, 0),
+      }))
+      .filter((item) => item.tokens > 0 || item.cost > 0)
+      .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens)[0]?.repo;
+    const latestSession = recentSessions(sessions)[0];
+    return {
+      ...model,
+      providerLabel: modelProviderLabel(model.id),
+      cacheRate: model.inputTokens > 0 ? model.cachedInputTokens / model.inputTokens : 0,
+      averageCostUsd: model.estimatedCostUsd !== undefined && model.sessionCount > 0 ? model.estimatedCostUsd / model.sessionCount : undefined,
+      topRepo,
+      latestSession,
+    };
+  }).sort((a, b) => nullableNumber(b.estimatedCostUsd) - nullableNumber(a.estimatedCostUsd) || b.totalTokens - a.totalTokens || a.label.localeCompare(b.label));
+}
+
+function modelProviderLabel(model: string): string {
+  const provider = pricingProvider(model);
+  if (provider === "openai") return "OpenAI";
+  if (provider === "claude") return "Claude";
+  return "Custom";
 }
 
 function topDashboardActions(data: ApiData): Array<{ label: string; detail: string; icon: React.ReactElement; tone: "attention" | "good" | "neutral"; view: ViewKey; repoId?: string; sessionId?: string }> {
@@ -5278,6 +5529,31 @@ function cacheRate(repo: UsageGroup): number {
 
 function sortRepoRows(repos: RepoRow[], sort: { key: RepoSortKey; direction: SortDirection }): RepoRow[] {
   return [...repos].sort((a, b) => applyDirection(compareRepo(a, b, sort.key), sort.direction));
+}
+
+function sortModelRows(models: ModelUsageRow[], sort: { key: ModelSortKey; direction: SortDirection }): ModelUsageRow[] {
+  return [...models].sort((a, b) => applyDirection(compareModel(a, b, sort.key), sort.direction));
+}
+
+function compareModel(a: ModelUsageRow, b: ModelUsageRow, key: ModelSortKey): number {
+  if (key === "model") return a.label.localeCompare(b.label);
+  if (key === "cost") return nullableNumber(a.estimatedCostUsd) - nullableNumber(b.estimatedCostUsd);
+  if (key === "tokens") return a.totalTokens - b.totalTokens;
+  if (key === "input") return a.inputTokens - b.inputTokens;
+  if (key === "cached") return a.cachedInputTokens - b.cachedInputTokens;
+  if (key === "output") return a.outputTokens - b.outputTokens;
+  if (key === "reasoning") return a.reasoningTokens - b.reasoningTokens;
+  if (key === "sessions") return a.sessionCount - b.sessionCount;
+  if (key === "cache") return a.cacheRate - b.cacheRate;
+  if (key === "repo") return (a.topRepo?.label ?? "").localeCompare(b.topRepo?.label ?? "");
+  return latestActivityTimestamp(a) - latestActivityTimestamp(b);
+}
+
+function latestActivityTimestamp(row: ModelUsageRow): number {
+  const raw = row.latestSession?.startedAt ?? row.latestSession?.endedAt;
+  if (!raw) return Number.NEGATIVE_INFINITY;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
 }
 
 function compareRepo(a: RepoRow, b: RepoRow, key: RepoSortKey): number {

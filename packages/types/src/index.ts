@@ -218,7 +218,7 @@ export interface HealthSignal {
   tone: HealthTone;
   metric?: string;
   action?: string;
-  actionTarget?: "dashboard" | "sessions" | "sessionDetail" | "repos" | "repoDetail" | "commands" | "insights" | "rtk" | "settings";
+  actionTarget?: "dashboard" | "sessions" | "sessionDetail" | "repos" | "repoDetail" | "models" | "commands" | "insights" | "rtk" | "settings";
   actionLabel?: string;
   critical?: boolean;
   affectedSessionIds: string[];

@@ -59,9 +59,10 @@ export type RtkCommandSortKey = "command" | "count" | "saved" | "reduction" | "r
 export type MetricKey = "estimatedCostUsd" | "totalTokens" | "inputTokens" | "cachedInputTokens" | "outputTokens" | "reasoningTokens";
 export type SortDirection = "asc" | "desc";
 export type RepoSortKey = "repo" | "cost" | "tokens" | "input" | "cached" | "output" | "reasoning" | "sessions" | "cache" | "files" | "failed" | "roi" | "warnings";
+export type ModelSortKey = "model" | "cost" | "tokens" | "input" | "cached" | "output" | "reasoning" | "sessions" | "cache" | "repo" | "activity";
 export type SessionSortKey = "repo" | "app" | "session" | "model" | "started" | "cost" | "tokens" | "input" | "cached" | "output" | "reasoning" | "messages" | "prompts" | "commands" | "duration" | "files" | "failed" | "warnings";
 export type SessionColumnKey = "input" | "cached" | "output" | "reasoning" | "messages" | "prompts" | "commands" | "commandIssues" | "edits" | "parse" | "tokenMethod" | "confidence" | "checkpoints";
-export type ViewKey = "dashboard" | "sessions" | "sessionDetail" | "repos" | "repoDetail" | "commands" | "insights" | "rtk" | "settings";
+export type ViewKey = "dashboard" | "sessions" | "sessionDetail" | "repos" | "repoDetail" | "models" | "commands" | "insights" | "rtk" | "settings";
 export type SessionDetailTab = "overview" | "timeline" | "files" | "tokens" | "metadata";
 export type TimelineRoleFilter = "all" | "user" | "assistant";
 export type SettingsTab = "pricing" | "sources" | "tokens" | "privacy" | "advanced";
@@ -151,7 +152,7 @@ export const rangeOptions: Array<{ value: RangePreset; label: string }> = [
   { value: "custom", label: "Custom dates" },
 ];
 
-export const colors = ["#6d5dfc", "#2dd4bf", "#f59e0b", "#ef4444", "#38bdf8", "#a78bfa"];
+export const colors = ["#2dd4bf", "#38bdf8", "#f59e0b", "#22c55e", "#8b5cf6", "#ef4444"];
 export const chartLimitOptions = [5, 10, 15, 25];
 export const pageSizeOptions = [10, 25, 50, 100, 250];
 export const defaultDisplaySettings: DisplaySettings = { chartGroupLimit: 10, tablePageSize: 25, splitSourceApps: true };

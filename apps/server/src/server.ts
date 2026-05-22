@@ -12,6 +12,7 @@ import { readRtkGain } from "./rtk.js";
 export interface ServerOptions {
   host?: string;
   port?: number;
+  portFallbackCount?: number;
   serveWeb?: boolean;
 }
 
@@ -100,9 +101,32 @@ function readPackageVersion(): string {
 export async function startServer(options: ServerOptions = {}) {
   const port = options.port ?? Number(process.env.REPOSPEND_PORT ?? 2005);
   const host = options.host ?? "127.0.0.1";
-  const app = createServer(options);
-  await app.listen({ host, port });
-  return { app, url: `http://localhost:${port}` };
+  const candidatePorts = portCandidates(port, options.portFallbackCount ?? 20);
+  let lastError: unknown;
+
+  for (const candidatePort of candidatePorts) {
+    const app = createServer(options);
+    try {
+      await app.listen({ host, port: candidatePort });
+      return { app, url: `http://localhost:${candidatePort}`, port: candidatePort };
+    } catch (error) {
+      await app.close().catch(() => undefined);
+      lastError = error;
+      if (!isAddressInUse(error)) throw error;
+    }
+  }
+
+  throw lastError;
+}
+
+function portCandidates(startPort: number, fallbackCount: number): number[] {
+  if (!Number.isInteger(startPort) || startPort <= 0 || startPort > 65535) return [2005];
+  const count = Math.max(0, Math.min(fallbackCount, 100));
+  return Array.from({ length: count + 1 }, (_value, index) => startPort + index).filter((port) => port <= 65535);
+}
+
+function isAddressInUse(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "EADDRINUSE");
 }
 
 function validatePricingBody(body: unknown) {

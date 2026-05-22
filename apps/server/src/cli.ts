@@ -10,7 +10,9 @@ try {
   if (command === "--help" || command === "-h" || command === "help") {
     printHelp();
   } else if (command === "serve") {
-    const { url } = await startServer({ port: Number(process.env.REPOSPEND_PORT ?? 2005), serveWeb: true });
+    const requestedPort = Number(process.env.REPOSPEND_PORT ?? 2005);
+    const { url, port } = await startServer({ port: requestedPort, serveWeb: true });
+    if (port !== requestedPort) console.log(`Port ${requestedPort} is already in use; using ${port} instead.`);
     console.log(`RepoSpend dashboard: ${url}`);
     openBrowser(url);
   } else if (command === "scan") {

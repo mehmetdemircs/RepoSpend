@@ -2,9 +2,19 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.0.8
+
+- Make `repospend serve` and `npx repospend` recover when the default localhost port is already in use by trying nearby ports instead of exiting with `EADDRINUSE`.
+- Print a clear message when RepoSpend falls back from the requested port to the actual dashboard port.
+- Add a Models view with per-model token shape, API-equivalent cost, cache reuse, top repo, latest activity, and one-click filter into Sessions.
+- Reorder the Overview so the Top repositories and Waste signals panels appear higher on the page.
+- Refresh the dashboard accent color from purple to teal across nav, KPI cards, and the metric timeline.
+- Replace the Sessions page mini-stats with filter-aware totals (tokens, API-equivalent cost, sessions needing review, edits, commands).
+- Make the filters bar scroll with the page instead of sticking to the top.
+- Collapse the "How Agent Friction is classified" explainer into a disclosure to reduce vertical noise on the Agent Friction page.
+
 ## 0.0.7
 
-- Bump RepoSpend package versions to 0.0.7.
 - Add experimental Cursor support with read-only discovery for local JSONL transcripts and SQLite/vscdb storage, keeping sessions visible when token or cost data is unavailable.
 - Include Cursor in source filters, dashboard source health, README data-source documentation, and CLI help.
 - Track known vs. unknown-cost sessions in grouped breakdowns so mixed Cursor or Claude data does not hide partial cost coverage.

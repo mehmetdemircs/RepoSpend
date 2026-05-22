@@ -230,8 +230,8 @@ input {
 }
 
 .nav-item.active {
-  border-color: rgba(167, 139, 250, 0.45);
-  background: linear-gradient(135deg, rgba(109, 93, 252, 0.95), rgba(124, 58, 237, 0.85));
+  border-color: rgba(45, 212, 191, 0.46);
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.92), rgba(30, 64, 175, 0.76));
   color: white;
 }
 
@@ -521,7 +521,26 @@ input {
 
 .overview-chart-panel {
   height: 100%;
-  min-height: 364px;
+  min-height: 332px;
+}
+
+.model-chart-panel {
+  min-height: 340px;
+}
+
+.model-shape-panel {
+  overflow: hidden;
+}
+
+.chart-panel-actions .field {
+  min-width: 220px;
+}
+
+.model-shape-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px;
 }
 
 .overview-chart-pair {
@@ -649,8 +668,8 @@ input {
 }
 
 .kpi-card-strong {
-  border-color: rgba(109, 93, 252, 0.36);
-  background: linear-gradient(180deg, rgba(20, 31, 54, 0.96), rgba(11, 20, 34, 0.9));
+  border-color: rgba(45, 212, 191, 0.34);
+  background: linear-gradient(180deg, rgba(14, 36, 47, 0.96), rgba(11, 20, 34, 0.9));
 }
 
 .kpi-label {
@@ -666,10 +685,10 @@ input {
   height: 28px;
   width: 28px;
   place-items: center;
-  border: 1px solid rgba(109, 93, 252, 0.25);
+  border: 1px solid rgba(45, 212, 191, 0.24);
   border-radius: 8px;
-  background: rgba(109, 93, 252, 0.14);
-  color: #a78bfa;
+  background: rgba(45, 212, 191, 0.12);
+  color: #5eead4;
 }
 
 .kpi-value {
@@ -1071,6 +1090,11 @@ input {
 
 .button:hover {
   background: rgba(30, 41, 59, 0.9);
+}
+
+.compact-button {
+  min-height: 30px;
+  padding: 5px 9px;
 }
 
 .danger-button {
@@ -1559,9 +1583,8 @@ input {
 }
 
 .filter-panel {
-  position: sticky;
-  top: 12px;
-  z-index: 20;
+  position: relative;
+  z-index: 4;
 }
 
 .source-checklist {
@@ -2112,6 +2135,8 @@ table {
 .sessions-table td:first-child,
 .repo-table th:first-child,
 .repo-table td:first-child,
+.model-table th:first-child,
+.model-table td:first-child,
 .command-health-table th:first-child,
 .command-health-table td:first-child,
 .expensive-table th:first-child,
@@ -2124,6 +2149,7 @@ table {
 
 .sessions-table th:first-child,
 .repo-table th:first-child,
+.model-table th:first-child,
 .command-health-table th:first-child,
 .expensive-table th:first-child {
   z-index: 3;
@@ -3316,7 +3342,7 @@ td {
 }
 
 .command-health-note {
-  padding: 16px;
+  overflow: hidden;
 }
 
 .command-health-note h2 {
@@ -3330,6 +3356,18 @@ td {
   color: #cbd5e1;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.command-health-note .advanced-summary {
+  border-bottom: 0;
+}
+
+.command-health-note[open] .advanced-summary {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.command-health-note-body {
+  padding: 12px 16px 16px;
 }
 
 .command-health-table {

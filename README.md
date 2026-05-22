@@ -121,6 +121,13 @@ token intensity across projects.
 Repo detail explains why a project stands out, including cost concentration,
 warnings, token shape, sessions, and command signals.
 
+### Models
+
+![RepoSpend models view with fictional model usage and token shape](docs/screenshots/models-view.png)
+
+The models view compares token shape, API-equivalent cost, cache reuse, sessions,
+and repo concentration across the models used in the current scan.
+
 ### Sessions
 
 ![RepoSpend sessions table with fictional session titles](docs/screenshots/sessions-view.png)
