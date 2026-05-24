@@ -11,3 +11,12 @@ coverage
 .env
 .env.*
 !.env.example
+
+# Local agent/Copilot tooling
+.github/copilot-instructions.md
+.github/hooks/
+.github/prompts/
+
+# Generated Python cache files
+__pycache__/
+*.pyc

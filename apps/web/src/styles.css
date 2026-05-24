@@ -2052,6 +2052,32 @@ input {
   background: rgba(127, 29, 29, 0.12);
 }
 
+.settings-cache-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 2px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.settings-cache-zone h2 {
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.settings-cache-zone p {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.55;
+  margin-top: 4px;
+}
+
+.settings-cache-zone code {
+  color: #99f6e4;
+}
+
 .pagination-controls {
   display: flex;
   align-items: center;
@@ -3711,6 +3737,7 @@ tbody tr.selected {
 
   .settings-status-banner,
   .settings-section-header,
+  .settings-cache-zone,
   .session-detail-heading,
   .session-timeline-toolbar,
   .red-zone {

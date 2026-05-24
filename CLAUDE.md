@@ -98,3 +98,17 @@ Add adapter code under `packages/core/src/sources`. Convert source-specific data
 - TypeScript across the stack; prefer narrow types in `packages/types`.
 - Don't introduce project-level setup files that the first run requires — first run should work with zero config.
 - Don't add dependencies on cloud services or analytics.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues in mehmetdemircs/RepoSpend. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Using defaults: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context (CONTEXT.md at the repo root). See `docs/agents/domain.md`.

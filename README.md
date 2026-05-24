@@ -68,11 +68,12 @@ prints the dashboard URL. By default it runs at
 |---|---|---|
 | Codex | Most complete support | Tokens, models, sessions, repo grouping, command friction |
 | Claude Code | Initial support | Sessions, projects, models, timestamps, tokens when available |
-| Cursor | Experimental | Local JSONL and SQLite/vscdb discovery; tokens/cost only when local data includes them |
+| Cursor | Experimental opt-in | Local JSONL and SQLite/vscdb discovery; tokens/cost only when local data includes them |
 | RTK | Optional/local | Shown only when local RTK data exists |
 
-RepoSpend started as a Codex-first release. Claude Code and Cursor support are
-newer and depend on what those tools persist locally.
+RepoSpend started as a Codex-first release. Claude Code support is newer, and
+Cursor is off by default because accurate Cursor token usage often requires
+account-backed usage data rather than local files alone.
 
 ## Requirements
 
@@ -246,11 +247,17 @@ RepoSpend-owned settings:
 ```text
 ~/.repospend/pricing.json
 ~/.repospend/config.json
+~/.repospend/cache/
 ```
 
 The Settings page includes a reset action for RepoSpend-owned files under
 `~/.repospend/`. It does not delete or edit anything under `~/.codex` or
 `~/.claude`.
+
+RepoSpend caches parsed session summaries under `~/.repospend/cache/` so
+unchanged large transcripts reload faster. Rescan actions clear this parse cache
+before reading local logs again. The Advanced settings tab can clear only the
+parse cache without removing pricing or source settings.
 
 ## Commands
 
@@ -293,8 +300,9 @@ browser.
   token usage are shown when present in local JSONL files.
 - Claude Code sessions without local token details are shown with unknown
   tokens/cost.
-- Cursor support is experimental: local transcript/session discovery is
-  best-effort, and Cursor may omit token/cost details or change local schemas.
+- Cursor support is experimental and off by default: local transcript/session
+  discovery is best-effort, and Cursor may omit token/cost details or change
+  local schemas.
 - Cost estimates do not represent subscription billing, credits, regional
   pricing, or account-specific terms.
 - Budget alerts are not available yet.

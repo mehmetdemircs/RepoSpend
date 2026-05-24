@@ -1,4 +1,5 @@
 export * from "./aggregate.js";
+export * from "./cache.js";
 export * from "./config.js";
 export * from "./dashboard.js";
 export * from "./filters.js";

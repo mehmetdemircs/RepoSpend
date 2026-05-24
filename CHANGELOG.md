@@ -2,6 +2,20 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.0.9
+
+- Cache parsed Codex session summaries under `~/.repospend/cache` so unchanged large transcripts reload much faster.
+- Limit local source scanning to the active dashboard date window when possible, reducing default last-7-days scan work.
+- Warm a bounded last-30-days cache in the background after the default last-7-days dashboard loads, without auto-scanning all-time history.
+- Make refresh/rescan/retry actions clear RepoSpend's parse cache before reloading local logs.
+- Add an Advanced settings action to clear only the parse cache and reload without deleting pricing or source settings.
+- Keep demo mode from reading, warming, or clearing the real local parse cache.
+- Make experimental Cursor support opt-in so default scans and dashboard surfaces stay focused on Codex and Claude Code unless Cursor is explicitly enabled in Settings.
+- Add a local Data Sources setting for enabling Cursor, with copy explaining that reliable Cursor tokens, model names, and costs are often unavailable from local transcript files alone.
+- Hide Cursor quick links, loading-state rows, and status copy while the experimental Cursor source is disabled.
+- Improve Cursor CLI metadata recovery by inferring transcript dates and repo paths from Cursor's local project/transcript paths when records omit timestamp or cwd fields.
+- Avoid an unnecessary standalone Codex session pass for sessions already imported from the Codex SQLite thread index.
+
 ## 0.0.8
 
 - Make `repospend serve` and `npx repospend` recover when the default localhost port is already in use by trying nearby ports instead of exiting with `EADDRINUSE`.

@@ -45,6 +45,7 @@ import {
   type PricingViewFilter,
   type QuickSessionFilter,
   type RangePreset,
+  type RepoSpendConfig,
   type RepoCommandTotals,
   type RepoCostConcentration,
   type RepoDetailTab,
@@ -146,6 +147,7 @@ function App() {
   const [displaySettings, setDisplaySettings] = React.useState<DisplaySettings>(() => readDisplaySettings());
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   const suppressNextUrlSync = React.useRef(false);
+  const backgroundWarmStarted = React.useRef(false);
 
   const query = React.useMemo(() => {
     const params = new URLSearchParams();
@@ -279,6 +281,21 @@ function App() {
     setDisplaySettings((current) => ({ ...current, ...next }));
   }, []);
 
+  const rescanLocalLogs = React.useCallback(() => {
+    setLoading(true);
+    setError(null);
+    void clearParseCache().finally(() => window.location.reload());
+  }, []);
+
+  React.useEffect(() => {
+    if (!data || backgroundWarmStarted.current || rangePreset !== "last7" || hasNonDateFilters(filters)) return;
+    const timeout = window.setTimeout(() => {
+      backgroundWarmStarted.current = true;
+      void warmParseCache({ preset: "last30", splitSourceApps: displaySettings.splitSourceApps });
+    }, 1500);
+    return () => window.clearTimeout(timeout);
+  }, [data, displaySettings.splitSourceApps, filters, rangePreset]);
+
   const optionSource = filterOptionsData ?? data;
   const pickerSortMode: FilterSortMode = "usage";
   const sourceOptions = buildSourcePickerOptions(optionSource?.sources ?? data?.sources ?? [], optionSource?.sessions ?? data?.sessions ?? [], filters.source, pickerSortMode);
@@ -339,7 +356,7 @@ function App() {
           <div className="quick-links">
             <QuickLink href="https://chatgpt.com/codex/cloud/settings/analytics#usage" label="Codex usage" icon={<CodexIcon />} tone="codex" />
             <QuickLink href="https://claude.ai/settings/usage" label="Claude usage" icon={<ClaudeIcon />} tone="claude" />
-            <QuickLink href="https://cursor.com/dashboard/usage" label="Cursor usage" icon={<Code2 className="h-4 w-4" aria-hidden />} tone="cursor" />
+            {cursorSourceEnabled(data) ? <QuickLink href="https://cursor.com/dashboard/usage" label="Cursor usage" icon={<Code2 className="h-4 w-4" aria-hidden />} tone="cursor" /> : null}
             <QuickLink href="https://github.com/mehmetdemircs/RepoSpend" label="GitHub repo" icon={<Github className="h-4 w-4" aria-hidden />} tone="github" />
           </div>
         </div>
@@ -350,7 +367,7 @@ function App() {
             <div>Read-only</div>
             <span>{data?.appVersion ? `v${data.appVersion} · local sources` : "local sources"}</span>
           </div>
-          <button className="icon-button" onClick={() => window.location.reload()} title="Refresh" aria-label="Refresh local scan" type="button">
+          <button className="icon-button" onClick={rescanLocalLogs} title="Refresh" aria-label="Refresh local scan" type="button">
             <RefreshCw className="h-4 w-4" aria-hidden />
           </button>
         </div>
@@ -366,7 +383,7 @@ function App() {
           sourceApps={appOptions}
           repos={repoOptions}
           models={modelOptions}
-          onRefresh={() => window.location.reload()}
+          onRefresh={rescanLocalLogs}
           onResetFilters={() => {
             setRangePreset("last7");
             setFilters({ source: [], sourceApp: [], repo: [], model: [], ...presetRange("last7") });
@@ -398,11 +415,11 @@ function App() {
         ) : null}
         {!error && loading ? <LoadingState compact={Boolean(data)} data={data} /> : null}
 
-        {error ? <ErrorState message={error} /> : null}
+        {error ? <ErrorState message={error} onRetry={rescanLocalLogs} /> : null}
         {!error && activeView === "dashboard" && !loading && data && data.sessions.length === 0 ? (
           <div className="mt-4 space-y-4">
             <DataHealthCard data={data} onOpenSettings={() => navigateToView("settings")} />
-            <EmptyState data={data} />
+            <EmptyState data={data} onRefresh={rescanLocalLogs} />
           </div>
         ) : null}
 
@@ -427,6 +444,13 @@ function App() {
               setPricingDraft(data.pricing.models);
               setPricingStatus("Reset unsaved edits.");
             }}
+            onSaveConfig={async (nextConfig) => {
+              setPricingStatus("Saving local source settings...");
+              const saved = await saveConfig(nextConfig);
+              setData({ ...data, config: saved.config, configPath: saved.path });
+              setPricingStatus(`Saved source settings to ${saved.path}. Reloading local scan...`);
+              window.setTimeout(() => window.location.reload(), 350);
+            }}
             onClearLocalData={async () => {
               setPricingStatus("Clearing RepoSpend local data...");
               const result = await clearLocalData();
@@ -439,6 +463,13 @@ function App() {
               setPricingStatus(`${result.removed ? "Removed" : "No local data found at"} ${result.path}. Reloading...`);
               window.setTimeout(() => window.location.reload(), 350);
             }}
+            onClearParseCache={async () => {
+              setPricingStatus("Clearing RepoSpend parse cache...");
+              const result = await clearParseCache();
+              setPricingStatus(`${result.removed ? "Removed parse cache at" : "No parse cache found at"} ${result.path}. Reloading full scan...`);
+              window.setTimeout(() => window.location.reload(), 350);
+            }}
+            onRescan={rescanLocalLogs}
           />
         ) : null}
 
@@ -1415,7 +1446,6 @@ const rtkInitOptions: Array<{ tool: string; cmd: string }> = [
   { tool: "Claude Code / Copilot", cmd: "rtk init -g" },
   { tool: "Gemini CLI", cmd: "rtk init -g --gemini" },
   { tool: "Codex", cmd: "rtk init -g --codex" },
-  { tool: "Cursor", cmd: "rtk init -g --agent cursor" },
   { tool: "Windsurf", cmd: "rtk init --agent windsurf" },
   { tool: "Cline / Roo Code", cmd: "rtk init --agent cline" },
   { tool: "Kilo Code", cmd: "rtk init --agent kilocode" },
@@ -2738,8 +2768,8 @@ function SortableTh<T extends string>({
   );
 }
 
-function EmptyState({ data }: { data: ApiData }) {
-  const sourceLabels = data.sources.map((source) => source.label).join(", ") || "Codex, Claude Code, Cursor";
+function EmptyState({ data, onRefresh }: { data: ApiData; onRefresh: () => void }) {
+  const sourceLabels = data.sources.map((source) => source.label).join(", ") || "Codex, Claude Code";
   const sourcePaths = data.sources.flatMap((source) => source.paths);
   return (
     <div className="panel mt-4 p-6">
@@ -2747,7 +2777,7 @@ function EmptyState({ data }: { data: ApiData }) {
         <Search className="mt-1 h-5 w-5 text-amber" aria-hidden />
         <div>
           <h2 className="text-base font-semibold">RepoSpend could not find local usage sessions yet.</h2>
-          <p className="mt-1 text-sm text-slate-600">Providers scanned: {sourceLabels}. Run Codex, Claude Code, or Cursor locally, then refresh the scan. RepoSpend reads local files read-only and never mutates source data.</p>
+          <p className="mt-1 text-sm text-slate-600">Providers scanned: {sourceLabels}. Run Codex or Claude Code locally, then refresh the scan. RepoSpend reads local files read-only and never mutates source data.</p>
           <div className="source-checklist mt-4">
             {data.sourceStats.map((source) => (
               <div className="source-check-row" key={source.sourceId ?? source.homePath ?? source.sessionsPath ?? source.statePath ?? "source"}>
@@ -2765,7 +2795,7 @@ function EmptyState({ data }: { data: ApiData }) {
             {sourcePaths.map((sourcePath) => <code className="inline-code" key={sourcePath}>{shortPath(sourcePath)}</code>)}
           </div>
           <p className="mt-3 text-sm text-slate-600">If history persistence is disabled or sessions are stored elsewhere, local usage may be unavailable to RepoSpend.</p>
-          <button className="button mt-3" type="button" onClick={() => window.location.reload()}>Refresh scan</button>
+          <button className="button mt-3" type="button" onClick={onRefresh}>Refresh scan</button>
           <div className="mt-3 space-y-1 text-sm text-slate-600">
             {data.sources.flatMap((source) => source.warnings).map((warning) => (
               <p className="warning-text" key={warning}>{warning}</p>
@@ -2789,8 +2819,9 @@ function LoadingState({ compact = false, data }: { compact?: boolean; data?: Api
   }, [compact]);
 
   const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const cursorEnabled = cursorSourceEnabled(data);
   const stages = [
-    { label: "Discovering local source files", detail: "Codex, Claude Code, Cursor, and RTK paths" },
+    { label: "Discovering local source files", detail: cursorEnabled ? "Codex, Claude Code, Cursor, and RTK paths" : "Codex, Claude Code, and RTK paths" },
     { label: "Parsing sessions and token checkpoints", detail: "Reading transcripts and local SQLite/vscdb data" },
     { label: "Grouping by repo or inferred folder", detail: "Resolving cwd paths, models, warnings, and surfaces" },
     { label: "Estimating API-equivalent cost", detail: "Applying local pricing and dashboard filters" },
@@ -2799,7 +2830,7 @@ function LoadingState({ compact = false, data }: { compact?: boolean; data?: Api
   const sourceRows = [
     { id: "codex", label: "Codex", detail: "CLI sessions and token checkpoints", count: data ? sourceImportedSessions(data, "codex") : 0 },
     { id: "claude", label: "Claude Code", detail: "Project JSONL transcripts and history", count: data ? sourceImportedSessions(data, "claude") : 0 },
-    { id: "cursor", label: "Cursor", detail: "Experimental JSONL and SQLite/vscdb discovery", count: data ? sourceImportedSessions(data, "cursor") : 0 },
+    ...(cursorEnabled ? [{ id: "cursor", label: "Cursor", detail: "Experimental JSONL and SQLite/vscdb discovery", count: data ? sourceImportedSessions(data, "cursor") : 0 }] : []),
     { id: "rtk", label: "RTK", detail: "Local token-savings report when available", count: data?.rtkGain?.available ? 1 : 0 },
   ];
 
@@ -2853,21 +2884,23 @@ const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
   { id: "advanced", label: "Advanced" },
 ];
 
-const apiEquivalentCopy = "RepoSpend shows API-equivalent cost estimates. This is not your actual bill. Local Codex, Claude Code, and Cursor logs may include token counts, but they do not always include your real subscription, credit, cache, or provider billing details.";
+const apiEquivalentCopy = "RepoSpend shows API-equivalent cost estimates. This is not your actual bill. Local Codex and Claude Code logs may include token counts, but they do not always include your real subscription, credit, cache, or provider billing details.";
 
-function SettingsStatusBanner({ data }: { data: ApiData }) {
+function SettingsStatusBanner({ data, onRescan }: { data: ApiData; onRescan: () => void }) {
   const codex = sourceImportedSessions(data, "codex");
   const claude = sourceImportedSessions(data, "claude");
   const cursor = sourceImportedSessions(data, "cursor");
+  const sourceCounts = [count(codex, "Codex session"), count(claude, "Claude Code session")];
+  if (cursorSourceEnabled(data)) sourceCounts.push(count(cursor, "Cursor session"));
   return (
     <div className="settings-status-banner">
       <div>
         <div className="settings-status-title">Local scan complete</div>
         <p>
-          {count(codex, "Codex session")}, {count(claude, "Claude session")}, {count(cursor, "Cursor session")}, {count(data.scan.parseFailureCount, "parse issue")}.
+          {sourceCounts.join(", ")}, {count(data.scan.parseFailureCount, "parse issue")}.
         </p>
       </div>
-      <button className="button" type="button" onClick={() => window.location.reload()}>
+      <button className="button" type="button" onClick={onRescan}>
         <RefreshCw className="h-4 w-4" aria-hidden />
         Rescan local logs
       </button>
@@ -3043,16 +3076,36 @@ function SettingsPricingTab({
   );
 }
 
-function SettingsDataSourcesTab({ data }: { data: ApiData }) {
+function SettingsDataSourcesTab({ data, status, onSaveConfig }: { data: ApiData; status: string | null; onSaveConfig: (config: RepoSpendConfig) => Promise<void> }) {
   const sourceWarnings = data.sources.flatMap((source) => source.warnings);
+  const cursorEnabled = cursorSourceEnabled(data);
+  const nextCursorConfig: RepoSpendConfig = {
+    ...data.config,
+    experimentalSources: {
+      ...data.config.experimentalSources,
+      cursor: !cursorEnabled,
+    },
+  };
   return (
     <div className="settings-tab-panel">
       <div className="settings-section-header">
         <div>
           <h2>Data sources</h2>
-          <p>RepoSpend reads Codex, Claude Code, and experimental Cursor local data read-only, then groups sessions by Git repo where possible and folder/path fallback otherwise.</p>
+          <p>RepoSpend reads Codex and Claude Code local data read-only, then groups sessions by Git repo where possible and folder/path fallback otherwise.</p>
         </div>
       </div>
+      <label className="settings-toggle-card">
+        <input
+          type="checkbox"
+          checked={cursorEnabled}
+          onChange={() => void onSaveConfig(nextCursorConfig)}
+        />
+        <span className="settings-toggle-copy">
+          <strong>Enable experimental Cursor source</strong>
+          <span>Cursor local transcripts often omit reliable tokens, model names, timestamps, and cost. RepoSpend keeps this source off by default because accurate Cursor usage usually requires account-backed usage data rather than local files alone.</span>
+        </span>
+      </label>
+      {status ? <p className="font-semibold text-teal">{status}</p> : null}
       <div className="source-card-grid">
         {data.sourceStats.map((source) => (
           <div className="settings-source-card" key={source.sourceId ?? source.codexHome ?? source.claudeHome ?? source.sessionsPath ?? source.statePath ?? "source"}>
@@ -3132,7 +3185,7 @@ function SettingsPrivacyTab() {
       <div className="privacy-grid">
         <InfoPanel title="Local-first" text="Scans run against files on this machine. RepoSpend does not upload prompts, session content, token counts, or pricing settings." />
         <InfoPanel title="No account required" text="There is no RepoSpend login and no cloud workspace to sync with." />
-        <InfoPanel title="Read-only source logs" text="RepoSpend reads local Codex, Claude Code, and Cursor files but does not modify them." />
+        <InfoPanel title="Read-only source logs" text="RepoSpend reads local Codex and Claude Code files but does not modify them. Experimental sources stay off unless enabled in Data Sources." />
       </div>
     </div>
   );
@@ -3145,6 +3198,7 @@ function SettingsAdvancedTab({
   displaySettings,
   setDisplaySettings,
   onClearLocalData,
+  onClearParseCache,
 }: {
   data: ApiData;
   filterSortMode: FilterSortMode;
@@ -3152,6 +3206,7 @@ function SettingsAdvancedTab({
   displaySettings: DisplaySettings;
   setDisplaySettings: (settings: Partial<DisplaySettings>) => void;
   onClearLocalData: () => Promise<void>;
+  onClearParseCache: () => Promise<void>;
 }) {
   const stats = tokenStats(data);
   return (
@@ -3217,6 +3272,22 @@ function SettingsAdvancedTab({
         </div>
       </div>
 
+      <div className="panel settings-cache-zone p-4">
+        <div>
+          <h2>Parse cache</h2>
+          <p>
+            RepoSpend caches parsed session summaries under <code>~/.repospend/cache</code> so unchanged local transcripts load quickly. Clear this cache to force a full reparse without removing pricing or source settings.
+          </p>
+        </div>
+        <button
+          className="button"
+          type="button"
+          onClick={() => void onClearParseCache()}
+        >
+          Clear parse cache
+        </button>
+      </div>
+
       <div className="panel red-zone settings-danger-zone p-4">
         <div>
           <h2>Danger zone</h2>
@@ -3260,7 +3331,10 @@ function SettingsPage({
   setDisplaySettings,
   onSave,
   onReset,
+  onSaveConfig,
   onClearLocalData,
+  onClearParseCache,
+  onRescan,
 }: {
   data: ApiData;
   draft: Record<string, ModelPricing>;
@@ -3272,13 +3346,16 @@ function SettingsPage({
   setDisplaySettings: (settings: Partial<DisplaySettings>) => void;
   onSave: () => Promise<void>;
   onReset: () => void;
+  onSaveConfig: (config: RepoSpendConfig) => Promise<void>;
   onClearLocalData: () => Promise<void>;
+  onClearParseCache: () => Promise<void>;
+  onRescan: () => void;
 }) {
   const [activeTab, setActiveTab] = React.useState<SettingsTab>("pricing");
 
   return (
     <section className="settings-page mt-4">
-      <SettingsStatusBanner data={data} />
+      <SettingsStatusBanner data={data} onRescan={onRescan} />
       <div className="settings-tabs" role="tablist" aria-label="Settings sections">
         {settingsTabs.map((tab) => (
           <button
@@ -3297,7 +3374,7 @@ function SettingsPage({
         {activeTab === "pricing" ? (
           <SettingsPricingTab data={data} draft={draft} setDraft={setDraft} status={status} onSave={onSave} onReset={onReset} />
         ) : null}
-        {activeTab === "sources" ? <SettingsDataSourcesTab data={data} /> : null}
+        {activeTab === "sources" ? <SettingsDataSourcesTab data={data} status={status} onSaveConfig={onSaveConfig} /> : null}
         {activeTab === "tokens" ? <SettingsTokenCountingTab data={data} /> : null}
         {activeTab === "privacy" ? <SettingsPrivacyTab /> : null}
         {activeTab === "advanced" ? (
@@ -3308,6 +3385,7 @@ function SettingsPage({
             displaySettings={displaySettings}
             setDisplaySettings={setDisplaySettings}
             onClearLocalData={onClearLocalData}
+            onClearParseCache={onClearParseCache}
           />
         ) : null}
       </div>
@@ -4019,14 +4097,14 @@ function InsightColumn({ title, empty, items, onNavigate }: { title: string; emp
   );
 }
 
-function ErrorState({ message }: { message: string }) {
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="panel error-state mt-4" role="alert">
       <TriangleAlert className="mt-0.5 h-5 w-5" aria-hidden />
       <div>
         <strong>Unable to load RepoSpend data.</strong>
         <p>{message}</p>
-        <button className="button mt-3" type="button" onClick={() => window.location.reload()}>
+        <button className="button mt-3" type="button" onClick={onRetry}>
           <RefreshCw className="h-4 w-4" aria-hidden />
           Retry scan
         </button>
@@ -4056,6 +4134,10 @@ function EmptyPanel({ title, text }: { title: string; text: string }) {
 
 function hasActiveFilters(filters: Filters, rangePreset: RangePreset): boolean {
   return filters.source.length > 0 || filters.sourceApp.length > 0 || filters.repo.length > 0 || filters.model.length > 0 || rangePreset !== "last7";
+}
+
+function hasNonDateFilters(filters: Filters): boolean {
+  return filters.source.length > 0 || filters.sourceApp.length > 0 || filters.repo.length > 0 || filters.model.length > 0;
 }
 
 function activeFilterSummary(filters: Filters, rangePreset: RangePreset, options: { sources: PickerOption[]; sourceApps: PickerOption[]; repos: PickerOption[]; models: PickerOption[] }): { date: string; countLabel: string; preview: string[] } {
@@ -4957,10 +5039,32 @@ async function savePricing(models: Record<string, ModelPricing>): Promise<Pricin
   return response.json() as Promise<PricingResponse>;
 }
 
+async function saveConfig(config: RepoSpendConfig): Promise<{ path: string; config: RepoSpendConfig }> {
+  const response = await fetch("/api/settings/config", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json() as Promise<{ path: string; config: RepoSpendConfig }>;
+}
+
 async function clearLocalData(): Promise<{ path: string; removed: boolean }> {
   const response = await fetch("/api/settings/local-data", { method: "DELETE" });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<{ path: string; removed: boolean }>;
+}
+
+async function clearParseCache(): Promise<{ path: string; removed: boolean }> {
+  const response = await fetch("/api/settings/cache", { method: "DELETE" });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json() as Promise<{ path: string; removed: boolean }>;
+}
+
+async function warmParseCache({ preset, splitSourceApps }: { preset: "last30"; splitSourceApps: boolean }): Promise<void> {
+  const params = new URLSearchParams({ preset });
+  if (splitSourceApps) params.set("splitSourceApps", "true");
+  await fetch(`/api/cache/warm?${params}`, { method: "POST" });
 }
 
 function repoRows(data: ApiData): RepoRow[] {
@@ -5364,6 +5468,10 @@ function sourceImportedSessions(data: ApiData, sourceId: "codex" | "claude" | "c
   return data.sourceStats
     .filter((source) => source.sourceId === sourceId)
     .reduce((sum, source) => sum + (source.sessionsImported ?? 0), 0);
+}
+
+function cursorSourceEnabled(data: ApiData | null | undefined): boolean {
+  return data?.config.experimentalSources?.cursor === true;
 }
 
 function sourceHomePath(source: ApiData["sourceStats"][number]): string {

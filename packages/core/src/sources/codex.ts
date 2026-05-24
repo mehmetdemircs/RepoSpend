@@ -5,10 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import type { CommandCategory, CommandIssueClassification, CommandIssueImpact, CommandIssueSample, CommandIssueSeverity, CompactionStats, NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
+import { readJsonCache, writeJsonCache } from "../cache.js";
 import { calculateCostUsd, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
 import { analyzeAgentFriction, type CommandIssue } from "./agent-friction.js";
 import { aggregateTokens, type CodexTokenAggregation } from "./codex-token.js";
+import type { SourceScanWindow } from "./index.js";
 
 interface CodexThreadRow {
   id?: unknown;
@@ -26,6 +28,7 @@ interface CodexThreadRow {
 
 type ImportedModel = { model: string; provider: string | undefined };
 
+const codexSessionCacheVersion = "codex-session-v1";
 let nativeSqliteRebuildAttempted = false;
 
 interface SessionTokenBreakdown extends CodexTokenAggregation {
@@ -68,6 +71,7 @@ interface SessionTokenBreakdown extends CodexTokenAggregation {
 export interface CodexAdapterOptions {
   codexHome?: string;
   config?: RepoSpendConfig;
+  scanWindow?: SourceScanWindow;
   pricing: PricingTable;
 }
 
@@ -110,14 +114,14 @@ export function scanCodex(options: CodexAdapterOptions): CodexScanResult {
     warnings.push(`Codex sessions directory not found at ${sessionsPath}`);
   }
 
-  const sessionFiles = sessionsExists ? indexSessionFiles(sessionsPath, warnings) : new Map<string, string>();
+  const sessionFiles = sessionsExists ? indexSessionFiles(sessionsPath, warnings, options.scanWindow) : new Map<string, string>();
   if (stateExists) {
     const stateSessions = readThreads(statePath, sessionFiles, options, warnings);
     sessions.push(...stateSessions);
   }
 
   if (sessionsExists) {
-    sessions.push(...readStandaloneSessions(sessionFiles, options).filter((session) => !hasImportedSession(sessions, session)));
+    sessions.push(...readStandaloneSessions(remainingStandaloneSessionFiles(sessionFiles, sessions), options).filter((session) => !hasImportedSession(sessions, session)));
   }
 
   return {
@@ -165,7 +169,8 @@ function readThreads(statePath: string, sessionFiles: Map<string, string>, optio
     }
 
     const importedModels = readImportedModelMap(options.codexHome ?? path.join(os.homedir(), ".codex"), warnings);
-    const rows = db.prepare(`SELECT ${selectedColumns.map((column) => `"${column}"`).join(", ")} FROM threads`).all() as CodexThreadRow[];
+    const rows = (db.prepare(`SELECT ${selectedColumns.map((column) => `"${column}"`).join(", ")} FROM threads`).all() as CodexThreadRow[])
+      .filter((row) => rowMatchesScanWindow(row, options.scanWindow));
     const sessions = rows.map((row, index) => threadToUsage(row, index, sessionFiles, options, importedModels));
     return attributeSubagentsToParentSurfaces(sessions, rows);
   } catch (error) {
@@ -457,6 +462,12 @@ function hasImportedSession(sessions: NormalizedUsage[], candidate: NormalizedUs
   });
 }
 
+function remainingStandaloneSessionFiles(sessionFiles: Map<string, string>, importedSessions: NormalizedUsage[]): Map<string, string> {
+  const importedIds = new Set(importedSessions.map((session) => session.id).filter(Boolean));
+  const importedPaths = new Set(importedSessions.map((session) => comparableSourcePath(session.sourcePath)).filter(Boolean));
+  return new Map([...sessionFiles.entries()].filter(([id, sourcePath]) => !importedIds.has(id) && !importedPaths.has(comparableSourcePath(sourcePath))));
+}
+
 function readImportedModelMap(codexHome: string, warnings: string[]): Map<string, ImportedModel> {
   const importsPath = path.join(codexHome, "external_agent_session_imports.json");
   const models = new Map<string, ImportedModel>();
@@ -527,11 +538,12 @@ function comparableSourcePath(value: string | undefined): string | undefined {
   return normalizeVerbatimPath(value)?.replace(/\\/g, "/");
 }
 
-function indexSessionFiles(sessionsPath: string, warnings: string[]): Map<string, string> {
+function indexSessionFiles(sessionsPath: string, warnings: string[], scanWindow?: SourceScanWindow): Map<string, string> {
   const files = new Map<string, string>();
   try {
     walk(sessionsPath, (filePath) => {
       if (!/\.(jsonl|json|log)$/i.test(filePath)) return;
+      if (!fileMayOverlapScanWindow(filePath, scanWindow)) return;
       const id = path.basename(filePath).replace(/\.(jsonl|json|log)$/i, "");
       files.set(id, filePath);
     });
@@ -539,6 +551,25 @@ function indexSessionFiles(sessionsPath: string, warnings: string[]): Map<string
     warnings.push(`Unable to read Codex sessions at ${sessionsPath}: ${errorMessage(error)}`);
   }
   return files;
+}
+
+function rowMatchesScanWindow(row: CodexThreadRow, scanWindow: SourceScanWindow | undefined): boolean {
+  if (!scanWindow?.fromMs && !scanWindow?.toMs) return true;
+  const updatedAt = timestampMs(row.updated_at);
+  const createdAt = timestampMs(row.created_at);
+  const latestTimestamp = updatedAt ?? createdAt;
+  if (scanWindow.fromMs !== undefined && latestTimestamp !== undefined && latestTimestamp < scanWindow.fromMs) return false;
+  if (scanWindow.toMs !== undefined && createdAt !== undefined && createdAt > scanWindow.toMs) return false;
+  return true;
+}
+
+function fileMayOverlapScanWindow(filePath: string, scanWindow: SourceScanWindow | undefined): boolean {
+  if (!scanWindow?.fromMs) return true;
+  try {
+    return fs.statSync(filePath).mtimeMs >= scanWindow.fromMs;
+  } catch {
+    return true;
+  }
 }
 
 function walk(root: string, onFile: (path: string) => void): void {
@@ -553,6 +584,10 @@ function walk(root: string, onFile: (path: string) => void): void {
 }
 
 function readSessionBreakdown(filePath: string): SessionTokenBreakdown {
+  const cacheKey = sessionBreakdownCacheKey(filePath);
+  const cached = cacheKey ? readJsonCache<SessionTokenBreakdown>("codex-session", cacheKey) : undefined;
+  if (cached) return cached;
+
   const breakdown = emptyBreakdown();
   try {
     const text = fs.readFileSync(filePath, "utf8");
@@ -587,7 +622,22 @@ function readSessionBreakdown(filePath: string): SessionTokenBreakdown {
     breakdown.parseErrors.push(message);
     breakdown.warnings.push(message);
   }
+  if (cacheKey) writeJsonCache("codex-session", cacheKey, breakdown);
   return breakdown;
+}
+
+function sessionBreakdownCacheKey(filePath: string): { version: string; filePath: string; size: number; mtimeMs: number } | undefined {
+  try {
+    const stat = fs.statSync(filePath);
+    return {
+      version: codexSessionCacheVersion,
+      filePath: path.resolve(filePath),
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function parseSessionRecords(text: string): { records: unknown[]; errors: string[] } {
@@ -920,6 +970,13 @@ function dateValue(value: unknown): string | undefined {
     return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
   }
   return undefined;
+}
+
+function timestampMs(value: unknown): number | undefined {
+  const date = dateValue(value);
+  if (!date) return undefined;
+  const timestamp = new Date(date).getTime();
+  return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
 function errorMessage(error: unknown): string {

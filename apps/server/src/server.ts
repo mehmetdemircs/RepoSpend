@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { pricingInfo } from "@repospend/core";
-import type { DashboardResponse } from "@repospend/types";
-import { clearRepoSpendLocalData, exportCsv, exportJson, parseDashboardOptions, parseFilters, readDashboardData, readPricingData, writePricingData } from "./data.js";
+import type { DashboardResponse, RepoSpendConfig, UsageFilters } from "@repospend/types";
+import { clearRepoSpendLocalData, clearRepoSpendParseCache, exportCsv, exportJson, parseDashboardOptions, parseFilters, readConfigData, readDashboardData, readPricingData, warmDashboardCache, writeConfigData, writePricingData } from "./data.js";
 import { demoModeEnabled, readDemoDashboardData, readDemoRtkGain } from "./demo-data.js";
 import { readRtkGain } from "./rtk.js";
 
@@ -28,6 +28,7 @@ export function createServer(options: ServerOptions = {}) {
     const demoMode = demoModeEnabled();
     const data = demoMode ? readDemoDashboardData(filters, dashboardOptions) : readDashboardData(filters, dashboardOptions);
     const rtkGain = demoMode ? readDemoRtkGain() : await readRtkGain();
+    const configData = readConfigData();
     return {
       ...data,
       appVersion: readPackageVersion(),
@@ -36,6 +37,8 @@ export function createServer(options: ServerOptions = {}) {
         info: pricingInfo,
         ...readPricingData(),
       },
+      config: configData.config,
+      configPath: configData.path,
       rtkGain,
     };
   });
@@ -45,7 +48,20 @@ export function createServer(options: ServerOptions = {}) {
     ...writePricingData(validatePricingBody(request.body)),
   }));
 
+  app.put("/api/settings/config", async (request) => writeConfigData(validateConfigBody(request.body)));
+
   app.delete("/api/settings/local-data", async () => clearRepoSpendLocalData());
+
+  app.delete("/api/settings/cache", async () => {
+    if (demoModeEnabled()) return { path: "demo mode (cache disabled)", removed: false, demo: true };
+    return clearRepoSpendParseCache();
+  });
+
+  app.post("/api/cache/warm", async (request) => {
+    if (demoModeEnabled()) return { started: false, reason: "demo_mode" };
+    const query = request.query as Record<string, unknown>;
+    return warmDashboardCache(warmCacheFilters(), parseDashboardOptions(query));
+  });
 
   app.get("/api/export.json", async (_request, reply) => {
     reply.header("content-type", "application/json; charset=utf-8");
@@ -159,6 +175,35 @@ function validatePricingBody(body: unknown) {
     validated[model] = modelPricing;
   }
   return validated;
+}
+
+function validateConfigBody(body: unknown): RepoSpendConfig {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return {};
+  const input = body as Record<string, unknown>;
+  const config: RepoSpendConfig = {};
+  if (Array.isArray(input.repos)) config.repos = input.repos as NonNullable<RepoSpendConfig["repos"]>;
+  if (Array.isArray(input.budgets)) config.budgets = input.budgets as NonNullable<RepoSpendConfig["budgets"]>;
+  if (typeof input.pricingPath === "string") config.pricingPath = input.pricingPath;
+  const experimentalSources = input.experimentalSources;
+  if (experimentalSources && typeof experimentalSources === "object" && !Array.isArray(experimentalSources)) {
+    config.experimentalSources = {
+      cursor: (experimentalSources as Record<string, unknown>).cursor === true,
+    };
+  }
+  return config;
+}
+
+function warmCacheFilters(): UsageFilters {
+  const days = 30;
+  const now = new Date();
+  return {
+    from: dateOnly(new Date(now.getTime() - days * 24 * 60 * 60 * 1000)),
+    to: dateOnly(now),
+  };
+}
+
+function dateOnly(value: Date): string {
+  return value.toISOString().slice(0, 10);
 }
 
 function finiteNumber(value: unknown): number | undefined {

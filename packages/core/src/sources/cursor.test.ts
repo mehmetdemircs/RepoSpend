@@ -91,6 +91,47 @@ describe("Cursor adapter", () => {
     expect(result.sessions[0]?.model).toBe("claude-sonnet-4-5");
   });
 
+  it("infers Cursor CLI transcript dates and repos from encoded project paths when records omit metadata", () => {
+    const cursorHome = makeTempDir();
+    const repo = fs.mkdtempSync(path.join("/tmp", "repospend-cursor-real-repo-"));
+    tempDirs.push(repo);
+    fs.mkdirSync(path.join(repo, ".git"));
+    const encodedRepo = `-${repo.split(path.sep).filter(Boolean).join("-")}`;
+    const transcriptDir = path.join(cursorHome, "projects", encodedRepo, "agent-transcripts", "1773480777812");
+    fs.mkdirSync(transcriptDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(transcriptDir, "no-metadata.jsonl"),
+      [
+        JSON.stringify({ role: "user", content: "prompt without timestamp or cwd" }),
+        JSON.stringify({ role: "assistant", content: "reply without timestamp or cwd" }),
+      ].join("\n"),
+    );
+
+    const result = scanCursor({ cursorHome, pricing: {} });
+
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0]?.repoRoot).toBe(repo);
+    expect(result.sessions[0]?.startedAt).toBe("2026-03-14T09:32:57.812Z");
+    expect(result.sessions[0]?.endedAt).toBe("2026-03-14T09:32:57.812Z");
+    expect(result.sessions[0]?.warnings).toContain("missing_token_breakdown");
+  });
+
+  it("uses timestamped Cursor transcript paths for scan window upper bounds", () => {
+    const cursorHome = makeTempDir();
+    const projectId = "-tmp-repospend-cursor-window";
+    const insideDir = path.join(cursorHome, "projects", projectId, "agent-transcripts", "1773480777812");
+    const afterDir = path.join(cursorHome, "projects", projectId, "agent-transcripts", "1774080000000");
+    fs.mkdirSync(insideDir, { recursive: true });
+    fs.mkdirSync(afterDir, { recursive: true });
+    fs.writeFileSync(path.join(insideDir, "inside.jsonl"), JSON.stringify({ role: "user", content: "inside" }));
+    fs.writeFileSync(path.join(afterDir, "after.jsonl"), JSON.stringify({ role: "user", content: "after" }));
+
+    const result = scanCursor({ cursorHome, pricing: {}, scanWindow: { toMs: Date.parse("2026-03-15T23:59:59.999Z") } });
+
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0]?.startedAt).toBe("2026-03-14T09:32:57.812Z");
+  });
+
   it("extracts best-effort sessions from Cursor SQLite/vscdb key-value content", () => {
     const cursorHome = makeTempDir();
     const dbPath = path.join(cursorHome, "state.vscdb");

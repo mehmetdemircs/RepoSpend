@@ -25,6 +25,13 @@ export function loadConfigWithWarnings(): { config: RepoSpendConfig; warnings: s
   }
 }
 
+export function saveConfig(config: RepoSpendConfig): RepoSpendConfig {
+  const localConfigPath = configPath();
+  fs.mkdirSync(path.dirname(localConfigPath), { recursive: true });
+  fs.writeFileSync(localConfigPath, `${JSON.stringify(config, null, 2)}\n`);
+  return loadConfig();
+}
+
 export function normalizePathForMatch(inputPath: string): string {
   return path.resolve(inputPath).replace(/\/+$/, "");
 }

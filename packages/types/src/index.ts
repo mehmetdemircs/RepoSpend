@@ -128,6 +128,9 @@ export interface RepoSpendConfig {
   repos?: RepoAlias[];
   budgets?: RepoBudget[];
   pricingPath?: string;
+  experimentalSources?: {
+    cursor?: boolean;
+  };
 }
 
 export interface SourceStatus {
@@ -392,5 +395,7 @@ export interface DashboardResponse extends Omit<DashboardSnapshot, "summary"> {
   appVersion: string;
   summary: DashboardResponseSummary;
   pricing: PricingResponse;
+  config: RepoSpendConfig;
+  configPath?: string;
   rtkGain: RtkGain;
 }

@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import type { NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
 import { calculateCostUsd, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
+import type { SourceScanWindow } from "./index.js";
 
 const parserVersion = "cursor-v1";
 const maxJsonlBytes = 20 * 1024 * 1024;
@@ -56,6 +57,7 @@ interface CursorSessionCandidate {
 export interface CursorAdapterOptions {
   cursorHome?: string;
   config?: RepoSpendConfig;
+  scanWindow?: SourceScanWindow;
   pricing: PricingTable;
 }
 
@@ -102,8 +104,10 @@ interface CursorDiscovery {
 export function scanCursor(options: CursorAdapterOptions): CursorScanResult {
   const cursorHome = options.cursorHome ?? path.join(os.homedir(), ".cursor");
   const discovery = discoverCursorFiles(cursorHome, Boolean(options.cursorHome));
-  const jsonlCandidates = discovery.jsonlFiles.map((filePath) => cursorJsonlToCandidate(filePath, cursorHome));
-  const databaseCandidates = discovery.databaseFiles.flatMap((filePath) => cursorDatabaseToCandidates(filePath, cursorHome, discovery.warnings));
+  const jsonlFiles = discovery.jsonlFiles.filter((filePath) => fileMayOverlapScanWindow(filePath, options.scanWindow));
+  const databaseFiles = discovery.databaseFiles.filter((filePath) => fileMayOverlapScanWindow(filePath, options.scanWindow));
+  const jsonlCandidates = jsonlFiles.map((filePath) => cursorJsonlToCandidate(filePath, cursorHome));
+  const databaseCandidates = databaseFiles.flatMap((filePath) => cursorDatabaseToCandidates(filePath, cursorHome, discovery.warnings));
   const candidates = dedupeCandidates([...jsonlCandidates, ...databaseCandidates]);
   const sessions = candidates.map((candidate, index) => candidateToUsage(candidate, index, options));
   const parseFailureCount = sessions.filter((session) => session.parseStatus === "failed" || (session.parseErrors?.length ?? 0) > 0).length;
@@ -137,9 +141,9 @@ export function scanCursor(options: CursorAdapterOptions): CursorScanResult {
       statePath: discovery.statePath,
       projectsExists: fs.existsSync(discovery.projectsPath),
       stateExists: fs.existsSync(discovery.statePath),
-      sessionsExists: discovery.jsonlFiles.length > 0,
-      sessionFileCount: discovery.jsonlFiles.length,
-      databaseFileCount: discovery.databaseFiles.length,
+      sessionsExists: jsonlFiles.length > 0,
+      sessionFileCount: jsonlFiles.length,
+      databaseFileCount: databaseFiles.length,
       skippedFileCount: discovery.skippedFileCount,
       sessionsImported: sessions.length,
       parseFailureCount,
@@ -281,6 +285,19 @@ function cursorJsonlSort(a: string, b: string): number {
   return aTranscript - bTranscript || a.localeCompare(b);
 }
 
+function fileMayOverlapScanWindow(filePath: string, scanWindow: SourceScanWindow | undefined): boolean {
+  if (!scanWindow?.fromMs && !scanWindow?.toMs) return true;
+  const inferredTimestamp = timestampMs(inferDateFromCursorPath(filePath));
+  if (scanWindow.fromMs !== undefined && inferredTimestamp !== undefined && inferredTimestamp < scanWindow.fromMs) return false;
+  if (scanWindow.toMs !== undefined && inferredTimestamp !== undefined && inferredTimestamp > scanWindow.toMs) return false;
+  if (scanWindow.fromMs === undefined) return true;
+  try {
+    return fs.statSync(filePath).mtimeMs >= scanWindow.fromMs;
+  } catch {
+    return true;
+  }
+}
+
 function cursorJsonlToCandidate(filePath: string, cursorHome: string): CursorSessionCandidate {
   const breakdown = emptyBreakdown();
   try {
@@ -297,6 +314,11 @@ function cursorJsonlToCandidate(filePath: string, cursorHome: string): CursorSes
     breakdown.warnings.push(message);
   }
   if (!breakdown.id) breakdown.id = path.basename(filePath).replace(/\.jsonl$/i, "") || undefined;
+  const fallbackDate = inferDateFromCursorPath(filePath) ?? fileModifiedDate(filePath);
+  if (fallbackDate) {
+    breakdown.startedAt ??= fallbackDate;
+    breakdown.endedAt ??= fallbackDate;
+  }
   return {
     sourcePath: filePath,
     surface: inferSurfaceFromPath(filePath),
@@ -690,12 +712,80 @@ function inferProjectPathFromCursorPath(filePath: string, cursorHome: string): s
   const projectsIndex = parts.lastIndexOf("projects");
   if (projectsIndex >= 0 && projectsIndex < parts.length - 1) {
     const projectId = parts[projectsIndex + 1];
+    const decodedProjectPath = decodeCursorProjectId(projectId);
+    if (decodedProjectPath) return decodedProjectPath;
     if (projectId?.startsWith("-")) {
       return `${path.sep}${projectId.slice(1).split("-").filter(Boolean).join(path.sep)}`;
     }
     if (projectId) return path.join(cursorHome, "projects", projectId);
   }
   return undefined;
+}
+
+function inferDateFromCursorPath(filePath: string): string | undefined {
+  const parts = filePath.split(path.sep);
+  for (const part of parts) {
+    if (!/^\d{10,13}$/.test(part)) continue;
+    const date = dateValue(Number(part));
+    if (date) return date;
+  }
+  return undefined;
+}
+
+function timestampMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function fileModifiedDate(filePath: string): string | undefined {
+  try {
+    return fs.statSync(filePath).mtime.toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeCursorProjectId(projectId: string | undefined): string | undefined {
+  if (!projectId) return undefined;
+  const id = projectId.startsWith("-") ? projectId.slice(1) : projectId;
+  const tokens = id.split("-").filter(Boolean);
+  if (tokens.length < 2) return undefined;
+
+  const root = cursorProjectRoot(tokens);
+  if (!root) return undefined;
+  const matched = matchEncodedPath(root.path, tokens.slice(root.consumed));
+  if (matched) return matched;
+  return path.join(root.path, ...tokens.slice(root.consumed));
+}
+
+function cursorProjectRoot(tokens: string[]): { path: string; consumed: number } | undefined {
+  if (tokens[0] === "Users" && tokens[1]) return { path: path.join(path.sep, "Users", tokens[1]), consumed: 2 };
+  if (tokens[0] === "home" && tokens[1]) return { path: path.join(path.sep, "home", tokens[1]), consumed: 2 };
+  if (tokens[0] === "tmp") return { path: path.join(path.sep, "tmp"), consumed: 1 };
+  if (/^[A-Za-z]$/.test(tokens[0] ?? "") && tokens[1]) return { path: `${tokens[0]?.toUpperCase()}:\\`, consumed: 1 };
+  return undefined;
+}
+
+function matchEncodedPath(root: string, tokens: string[]): string | undefined {
+  if (!tokens.length) return fs.existsSync(root) ? root : undefined;
+  if (!fs.existsSync(root)) return undefined;
+  try {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const entryTokens = entry.name.split("-").filter(Boolean);
+      if (!startsWithTokens(tokens, entryTokens)) continue;
+      const matched = matchEncodedPath(path.join(root, entry.name), tokens.slice(entryTokens.length));
+      if (matched) return matched;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function startsWithTokens(tokens: string[], prefix: string[]): boolean {
+  return prefix.length <= tokens.length && prefix.every((token, index) => tokens[index] === token);
 }
 
 function inferSurfaceFromPath(filePath: string): CursorSurface {

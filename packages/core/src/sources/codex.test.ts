@@ -2,12 +2,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { scanCodex } from "./codex.js";
 
 const tempDirs: string[] = [];
+let previousRepoSpendHome: string | undefined;
+
+beforeEach(() => {
+  previousRepoSpendHome = process.env.REPOSPEND_HOME;
+  process.env.REPOSPEND_HOME = makeTempDir();
+});
 
 afterEach(() => {
+  if (previousRepoSpendHome === undefined) delete process.env.REPOSPEND_HOME;
+  else process.env.REPOSPEND_HOME = previousRepoSpendHome;
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -33,6 +41,19 @@ describe("Codex adapter", () => {
 
     expect(result.sessions).toEqual([]);
     expect(result.source.warnings.some((warning) => warning.includes("Unable to read Codex sessions"))).toBe(true);
+  });
+
+  it("uses scan window upper bounds for Codex thread rows with known creation dates", () => {
+    const codexHome = makeTempDir();
+    const db = new Database(path.join(codexHome, "state_5.sqlite"));
+    db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, created_at TEXT, updated_at TEXT, cwd TEXT, title TEXT, model_provider TEXT, model TEXT, tokens_used INTEGER)");
+    db.prepare("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run("inside-window", "2026-05-14T10:00:00.000Z", "2026-05-14T10:05:00.000Z", codexHome, "Inside", "openai", "known-model", 100);
+    db.prepare("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run("after-window", "2026-05-16T10:00:00.000Z", "2026-05-16T10:05:00.000Z", codexHome, "After", "openai", "known-model", 100);
+    db.close();
+
+    const result = scanCodex({ codexHome, pricing: {}, scanWindow: { toMs: Date.parse("2026-05-15T23:59:59.999Z") } });
+
+    expect(result.sessions.map((session) => session.id)).toEqual(["inside-window"]);
   });
 
   it("extracts cumulative Codex token_count events and calculates cost", () => {

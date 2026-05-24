@@ -10,6 +10,12 @@ export interface UsageSourceScanOptions {
   codexHome?: string;
   claudeHome?: string;
   cursorHome?: string;
+  scanWindow?: SourceScanWindow;
+}
+
+export interface SourceScanWindow {
+  fromMs?: number;
+  toMs?: number;
 }
 
 export interface UsageSourceScanResult {
@@ -22,21 +28,27 @@ export function scanUsageSources(options: UsageSourceScanOptions): UsageSourceSc
   const codex = scanCodex({
     ...(options.codexHome ? { codexHome: options.codexHome } : {}),
     ...(options.config ? { config: options.config } : {}),
+    ...(options.scanWindow ? { scanWindow: options.scanWindow } : {}),
     pricing: options.pricing,
   });
   const claude = scanClaude({
     ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
     ...(options.config ? { config: options.config } : {}),
+    ...(options.scanWindow ? { scanWindow: options.scanWindow } : {}),
     pricing: options.pricing,
   });
-  const cursor = scanCursor({
-    ...(options.cursorHome ? { cursorHome: options.cursorHome } : {}),
-    ...(options.config ? { config: options.config } : {}),
-    pricing: options.pricing,
-  });
+  const cursorEnabled = options.config?.experimentalSources?.cursor === true || Boolean(options.cursorHome);
+  const cursor = cursorEnabled
+    ? scanCursor({
+        ...(options.cursorHome ? { cursorHome: options.cursorHome } : {}),
+        ...(options.config ? { config: options.config } : {}),
+        ...(options.scanWindow ? { scanWindow: options.scanWindow } : {}),
+        pricing: options.pricing,
+      })
+    : undefined;
   return {
-    sources: [codex.source, claude.source, cursor.source],
-    sourceStats: [codex.stats, claude.stats, cursor.stats],
-    sessions: [...codex.sessions, ...claude.sessions, ...cursor.sessions],
+    sources: [codex.source, claude.source, ...(cursor ? [cursor.source] : [])],
+    sourceStats: [codex.stats, claude.stats, ...(cursor ? [cursor.stats] : [])],
+    sessions: [...codex.sessions, ...claude.sessions, ...(cursor?.sessions ?? [])],
   };
 }

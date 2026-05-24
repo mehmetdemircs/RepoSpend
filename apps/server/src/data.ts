@@ -1,5 +1,8 @@
 import fs from "node:fs";
-import { buildDashboardSnapshot, loadConfig, loadConfigWithWarnings, loadPricingTable, repospendHome, resolvePricingPath, savePricingTable, scanUsageSources, toCsv, type PricingTable } from "@repospend/core";
+import path from "node:path";
+import { spawn, type ChildProcess } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { buildDashboardSnapshot, clearRepoSpendCache, configPath, loadConfig, loadConfigWithWarnings, loadPricingTable, lowerBound, repospendHome, resolvePricingPath, saveConfig, savePricingTable, scanUsageSources, toCsv, upperBound, type PricingTable } from "@repospend/core";
 import type { DashboardSnapshot, NormalizedUsage, UsageFilters } from "@repospend/types";
 
 export type DashboardData = DashboardSnapshot;
@@ -15,33 +18,80 @@ interface RawUsageData {
 }
 
 const scanCacheTtlMs = 10_000;
-let scanCache: { cwd: string; expiresAt: number; data: RawUsageData } | undefined;
+let scanCache: { key: string; expiresAt: number; data: RawUsageData } | undefined;
+let warmScanInFlight = false;
+let warmScanChild: ChildProcess | undefined;
+const warmedScanKeys = new Set<string>();
 
 export function readDashboardData(filters: UsageFilters = {}, options: DashboardReadOptions = {}): DashboardData {
-  const raw = readRawUsageData();
+  const raw = readRawUsageData(filters);
   return buildDashboardSnapshot({ ...raw, sessions: displaySessions(raw.sessions, options), filters });
 }
 
 export function clearScanCache(): void {
   scanCache = undefined;
+  warmScanInFlight = false;
+  warmScanChild?.kill();
+  warmScanChild = undefined;
+  warmedScanKeys.clear();
 }
 
-function readRawUsageData(): RawUsageData {
+function readRawUsageData(filters: UsageFilters = {}): RawUsageData {
   const cwd = runtimeCwd();
-  if (scanCache && scanCache.cwd === cwd && scanCache.expiresAt > Date.now()) {
+  const { config, warnings: configWarnings } = loadConfigWithWarnings();
+  const cacheKey = scanCacheKey({ cwd, filters, cursorEnabled: config.experimentalSources?.cursor === true });
+  if (scanCache && scanCache.key === cacheKey && scanCache.expiresAt > Date.now()) {
     return scanCache.data;
   }
 
-  const { config, warnings: configWarnings } = loadConfigWithWarnings();
   const pricing = loadPricingTable(resolvePricingPath(config));
-  const scan = scanUsageSources({ config, pricing });
+  const scanWindow = scanWindowFromFilters(filters);
+  const scan = scanUsageSources({
+    config,
+    pricing,
+    ...(scanWindow ? { scanWindow } : {}),
+  });
   const data = {
     sources: scan.sources.map((source) => ({ ...source, warnings: [...source.warnings, ...configWarnings] })),
     sourceStats: scan.sourceStats,
     sessions: scan.sessions,
   };
-  scanCache = { cwd, data, expiresAt: Date.now() + scanCacheTtlMs };
+  scanCache = { key: cacheKey, data, expiresAt: Date.now() + scanCacheTtlMs };
   return data;
+}
+
+export function warmDashboardCache(filters: UsageFilters = {}, options: DashboardReadOptions = {}): { started: boolean; key: string; reason?: string } {
+  const cwd = runtimeCwd();
+  const config = loadConfig();
+  const key = scanCacheKey({ cwd, filters, cursorEnabled: config.experimentalSources?.cursor === true });
+  if (scanCache?.key === key || warmedScanKeys.has(key)) return { started: false, key, reason: "already_warm" };
+  if (warmScanInFlight) return { started: false, key, reason: "warm_scan_in_flight" };
+
+  warmScanInFlight = true;
+  let child: ChildProcess;
+  try {
+    child = spawn(process.execPath, [...process.execArgv, cliEntryPath(), "__warm-cache", ...warmCacheArgs(filters, options)], {
+      detached: true,
+      env: process.env,
+      stdio: "ignore",
+    });
+  } catch (error) {
+    warmScanInFlight = false;
+    return { started: false, key, reason: error instanceof Error ? error.message : String(error) };
+  }
+  warmScanChild = child;
+  child.once("error", () => {
+    warmScanInFlight = false;
+    if (warmScanChild === child) warmScanChild = undefined;
+  });
+  child.once("exit", (code) => {
+    warmScanInFlight = false;
+    if (warmScanChild === child) warmScanChild = undefined;
+    if (code === 0) warmedScanKeys.add(key);
+  });
+  child.unref();
+
+  return { started: true, key };
 }
 
 export function parseFilters(query: Record<string, unknown>): UsageFilters {
@@ -76,6 +126,22 @@ export function readPricingData(): { path: string; models: PricingTable } {
   };
 }
 
+export function readConfigData(): { path: string; config: ReturnType<typeof loadConfig> } {
+  return {
+    path: configPath(),
+    config: loadConfig(),
+  };
+}
+
+export function writeConfigData(nextConfig: ReturnType<typeof loadConfig>): { path: string; config: ReturnType<typeof loadConfig> } {
+  const saved = saveConfig(nextConfig);
+  clearScanCache();
+  return {
+    path: configPath(),
+    config: saved,
+  };
+}
+
 export function writePricingData(models: PricingTable): { path: string; models: PricingTable } {
   const config = loadConfig();
   const pricingPath = resolvePricingPath(config);
@@ -93,6 +159,12 @@ export function clearRepoSpendLocalData(): { path: string; removed: boolean } {
   fs.rmSync(target, { recursive: true, force: true });
   clearScanCache();
   return { path: target, removed };
+}
+
+export function clearRepoSpendParseCache(): { path: string; removed: boolean } {
+  const result = clearRepoSpendCache();
+  clearScanCache();
+  return result;
 }
 
 export function exportJson(): string {
@@ -126,6 +198,39 @@ function sourceScopedAppLabel(session: NormalizedUsage): string {
   if (!app || app === "Unknown") return sourceClientLabel(session.sourceClient);
   if (!shouldScopeApp(app)) return app;
   return `${sourceClientLabel(session.sourceClient)} on ${app}`;
+}
+
+function scanWindowFromFilters(filters: UsageFilters) {
+  const fromMs = filters.from ? lowerBound(filters.from) : undefined;
+  const toMs = filters.to ? upperBound(filters.to) : undefined;
+  const scanWindow: { fromMs?: number; toMs?: number } = {};
+  if (fromMs !== undefined) scanWindow.fromMs = fromMs;
+  if (toMs !== undefined) scanWindow.toMs = toMs;
+  return scanWindow.fromMs === undefined && scanWindow.toMs === undefined ? undefined : scanWindow;
+}
+
+function scanCacheKey({ cwd, filters, cursorEnabled }: { cwd: string; filters: UsageFilters; cursorEnabled: boolean }): string {
+  return JSON.stringify({
+    cwd,
+    from: filters.from ?? "",
+    to: filters.to ?? "",
+    cursor: cursorEnabled,
+  });
+}
+
+function warmCacheArgs(filters: UsageFilters, options: DashboardReadOptions): string[] {
+  const args: string[] = [];
+  if (filters.from) args.push("--from", filters.from);
+  if (filters.to) args.push("--to", filters.to);
+  if (options.splitSourceApps) args.push("--splitSourceApps");
+  return args;
+}
+
+function cliEntryPath(): string {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const sourceCli = path.join(currentDir, "cli.ts");
+  if (fs.existsSync(sourceCli)) return sourceCli;
+  return path.join(currentDir, "cli.js");
 }
 
 function shouldScopeApp(app: string): boolean {

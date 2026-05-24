@@ -4,6 +4,7 @@ import path from "node:path";
 import type { NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
 import { calculateCostUsd, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
+import type { SourceScanWindow } from "./index.js";
 
 interface ClaudeRecord {
   type?: unknown;
@@ -66,6 +67,7 @@ interface ClaudeSessionBreakdown extends ClaudeTokenTotals {
 export interface ClaudeAdapterOptions {
   claudeHome?: string;
   config?: RepoSpendConfig;
+  scanWindow?: SourceScanWindow;
   pricing: PricingTable;
 }
 
@@ -112,6 +114,7 @@ export function scanClaude(options: ClaudeAdapterOptions): ClaudeScanResult {
   const historyExists = fs.existsSync(historyPath);
   const orderedFiles = discovery.files
     .map((file) => ({ file, mtimeMs: safeMtimeMs(file.filePath) }))
+    .filter(({ mtimeMs }) => !options.scanWindow?.fromMs || mtimeMs >= options.scanWindow.fromMs)
     .sort((a, b) => a.mtimeMs - b.mtimeMs);
   const usageSelection = selectClaudeUsageOccurrences(orderedFiles.map(({ file }) => file));
   const sessions = orderedFiles.flatMap(({ file }, index) => claudeFileToUsages(file, index, options, usageSelection));

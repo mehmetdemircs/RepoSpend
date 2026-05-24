@@ -15,6 +15,8 @@ try {
     if (port !== requestedPort) console.log(`Port ${requestedPort} is already in use; using ${port} instead.`);
     console.log(`RepoSpend dashboard: ${url}`);
     openBrowser(url);
+  } else if (command === "__warm-cache") {
+    readDashboardData(cliDateFilters(args), { splitSourceApps: args.includes("--splitSourceApps") });
   } else if (command === "scan") {
     const data = readDashboardData(cliFilters(args));
     console.log(JSON.stringify({ sources: data.sources, sessionCount: data.sessions.length, summary: data.summary }, null, 2));
@@ -56,7 +58,7 @@ function openBrowser(url: string): void {
 
 function printGroups(groups: ReturnType<typeof groupByRepo>): void {
   if (!groups.length) {
-    console.log("No usage found. Scanned Codex, Claude Code, and Cursor local data paths.");
+    console.log("No usage found. Scanned enabled local data paths.");
     return;
   }
 
@@ -73,6 +75,15 @@ function cliFilters(args: string[]) {
   const source = valueAfter(args, "--source");
   if (!source || source === "all") return {};
   return { source };
+}
+
+function cliDateFilters(args: string[]) {
+  const from = valueAfter(args, "--from");
+  const to = valueAfter(args, "--to");
+  return {
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+  };
 }
 
 function valueAfter(args: string[], flag: string): string | undefined {
@@ -93,5 +104,7 @@ function printHelp(): void {
   repospend export --format csv
 
 Options:
-  --source all|codex|claude|cursor`);
+  --source all|codex|claude|cursor
+
+Cursor is experimental and only scans when enabled in ~/.repospend/config.json.`);
 }
