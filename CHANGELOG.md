@@ -2,6 +2,23 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.1.0
+
+- Add GitHub Copilot support for local OTEL exports, Copilot session-state files, and VS Code Copilot Chat transcript/debug files, leaving cost unknown when local data lacks full token splits.
+- Add Copilot source status, labels, settings metrics, quick links, tests, API-equivalent model pricing aliases, and VS Code model metadata recovery.
+- Add Claude service-tier metadata and Codex current-config service-tier visibility in the dashboard cost summary and settings.
+- Add a Data Doctor confidence report in the dashboard, Settings, and `repospend doctor`, covering token coverage, pricing coverage, repo verification, parser issues, source warnings, and empty-data states.
+- Add pricing-gap triage in Settings and Usage Health, with one-click review of unpriced token-bearing sessions and clearer separation between missing model rates and missing token detail.
+- Add bundled Claude Opus 4.8 pricing and inherited pricing labels for nearby newer Claude and GPT model IDs when an exact local rate is not present.
+- Improve dashboard scanability by simplifying the Overview, promoting "Start here" actions, normalizing compact number/model labels, cleaning noisy markdown session titles, and adding a Sessions cost-outlier legend.
+- Improve Agent Friction by treating command failures as triage evidence, routing review actions directly to command evidence, and avoiding false positives from source text or HTTP-style status codes.
+- Add dashboard-style filters to CLI summaries and exports, and apply API export filters consistently across JSON and CSV.
+- Harden localhost settings/cache mutations with Host and Origin checks for local API writes.
+- Remove unused budget configuration and UI/documentation copy so old budget fields are intentionally dropped on the next config save.
+- Improve README, package metadata, AI-readable docs, and dashboard screenshots for repo-level AI coding usage discovery while keeping Cursor experimental and RTK framed as token-reduction workflow context.
+- Move detailed source paths and Cursor troubleshooting into `docs/data-sources.md`, and publish the linked docs with the npm package.
+- Raise the Vite chunk warning threshold to match the current local dashboard bundle size.
+
 ## 0.0.9
 
 - Cache parsed Codex session summaries under `~/.repospend/cache` so unchanged large transcripts reload much faster.

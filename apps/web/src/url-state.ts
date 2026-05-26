@@ -62,12 +62,12 @@ export function buildUrlSearch({
   return search ? `?${search}` : "";
 }
 
-function parsePathView(pathParts: string[]): ViewKey | undefined {
+export function parsePathView(pathParts: string[]): ViewKey | undefined {
   if (pathParts.length === 0) return undefined;
   if (pathParts[0] === "sessions") return pathParts[1] ? "sessionDetail" : "sessions";
   if (pathParts[0] === "repos") return pathParts[1] ? "repoDetail" : "repos";
   if (pathParts[0] === "models") return "models";
-  if (pathParts[0] === "agent-friction") return "commands";
+  if (pathParts[0] === "agent-friction" || pathParts[0] === "commands") return "commands";
   if (pathParts[0] === "insights") return "insights";
   if (pathParts[0] === "rtk") return "rtk";
   if (pathParts[0] === "settings") return "settings";

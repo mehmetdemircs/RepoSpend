@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { groupByDay, groupByHour, groupByModel, groupByRepo, groupBySourceApp } from "./aggregate.js";
-import { calculateCostUsd } from "./pricing.js";
+import { calculateCostUsd, defaultPricing } from "./pricing.js";
 import { findGitRoot, resolveRepoInfo } from "./repo.js";
-import type { NormalizedUsage } from "@repospend/types";
+import { isCopilotAliasModel, resolvePricingForModel, versionedFallbackModel, type NormalizedUsage } from "@repospend/types";
 
 const tempDirs: string[] = [];
 
@@ -93,6 +93,77 @@ describe("pricing and grouping", () => {
     expect(cost).toBe(1.5);
   });
 
+  it("does not inherit regular Opus pricing for Copilot fast mode without public token rates", () => {
+    expect(
+      calculateCostUsd(
+        {
+          model: "claude-opus-4-6-fast-mode",
+          inputTokens: 1_000_000,
+          cachedInputTokens: 0,
+          outputTokens: 100_000,
+          reasoningTokens: 0,
+        },
+        {
+          "claude-opus-4-6": { inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+          "claude-opus-4-6-fast-mode": { inputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0 },
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("keeps unrelated Opus 4.6 fast-suffixed variants priceable through family pricing", () => {
+    expect(
+      calculateCostUsd(
+        {
+          model: "claude-opus-4-6-fast-eval",
+          inputTokens: 1_000_000,
+          cachedInputTokens: 0,
+          outputTokens: 100_000,
+          reasoningTokens: 0,
+        },
+        {
+          "claude-opus-4-6": { inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+        },
+      ),
+    ).toBe(7.5);
+  });
+
+  it("normalizes dotted Claude model aliases before family pricing", () => {
+    expect(
+      calculateCostUsd(
+        {
+          model: "claude-sonnet-4.6",
+          inputTokens: 1_000_000,
+          cachedInputTokens: 0,
+          outputTokens: 100_000,
+          reasoningTokens: 0,
+        },
+        {
+          "claude-sonnet-4-6": { inputPerMillion: 3, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
+        },
+      ),
+    ).toBe(4.5);
+  });
+
+  it("does not classify GPT-4.1 aliases as GitHub-tuned Copilot models", () => {
+    expect(isCopilotAliasModel("gpt-4.1")).toBe(false);
+    expect(isCopilotAliasModel("gpt-41")).toBe(false);
+    expect(
+      calculateCostUsd(
+        {
+          model: "gpt-41",
+          inputTokens: 1_000_000,
+          cachedInputTokens: 0,
+          outputTokens: 100_000,
+          reasoningTokens: 0,
+        },
+        {
+          "gpt-4.1": { inputPerMillion: 2, cachedInputPerMillion: 0.5, outputPerMillion: 8 },
+        },
+      ),
+    ).toBe(2.8);
+  });
+
   it("treats input tokens as total input when cache write and cache read tokens are split out", () => {
     const cost = calculateCostUsd(
       {
@@ -116,6 +187,33 @@ describe("pricing and grouping", () => {
     expect(cost).toBe(7.935);
   });
 
+  it("prices Claude Opus 4.8 from its own bundled rate card", () => {
+    const opusUsage = { model: "claude-opus-4-8", inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 };
+    // $5/M input + $25/M output: 1 * 5 + 0.1 * 25 = 7.5 (not the old $15/$75 Opus 4 fallback).
+    expect(calculateCostUsd(opusUsage, defaultPricing)).toBe(7.5);
+  });
+
+  it("inherits the nearest older known version for unknown newer models", () => {
+    const usageFor = (model: string) => ({ model, inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 });
+    // Unknown Opus 4.9 / Opus 5 fall back to Opus 4.8 ($5/$25 => 7.5), not the pricier Opus 4 base.
+    expect(calculateCostUsd(usageFor("claude-opus-4-9"), defaultPricing)).toBe(7.5);
+    expect(calculateCostUsd(usageFor("claude-opus-5"), defaultPricing)).toBe(7.5);
+    // Unknown GPT 5.6 falls back to GPT 5.5 ($5 input / $30 output => 8).
+    expect(calculateCostUsd(usageFor("gpt-5.6"), defaultPricing)).toBe(8);
+  });
+
+  it("reports the inherited source model so the UI can label it", () => {
+    expect(resolvePricingForModel("claude-opus-4-9", defaultPricing)).toMatchObject({ sourceModel: "claude-opus-4-8", inherited: true });
+    expect(resolvePricingForModel("gpt-5.6", defaultPricing)).toMatchObject({ sourceModel: "gpt-5.5", inherited: true });
+  });
+
+  it("only inherits within the same tier and never from a newer version", () => {
+    // gpt-5.6-mini inherits gpt-5.4-mini, not the base gpt-5.5 line.
+    expect(versionedFallbackModel("gpt-5.6-mini", Object.keys(defaultPricing))).toBe("gpt-5.4-mini");
+    // A dot-less alias must not parse as version 41 and grab the newest GPT.
+    expect(calculateCostUsd({ model: "gpt-41", inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 }, defaultPricing)).toBe(2.8);
+  });
+
   it("groups by day, hour, and model", () => {
     const sessions = [
       usage({ id: "a", startedAt: "2026-05-18T10:15:00.000Z", model: "gpt-5", totalTokens: 100 }),
@@ -126,6 +224,14 @@ describe("pricing and grouping", () => {
     expect(groupByDay(sessions)).toHaveLength(2);
     expect(groupByHour(sessions).find((group) => group.id.startsWith("2026-05-18T10"))?.totalTokens).toBe(300);
     expect(groupByModel(sessions).map((group) => group.id).sort()).toEqual(["gpt-5", "gpt-5-mini"]);
+  });
+
+  it("labels synthetic-only Claude unknown model groups", () => {
+    const sessions = [
+      usage({ id: "synthetic", sourceClient: "claude", model: undefined, totalTokens: 0, warnings: ["claude_synthetic_zero_usage", "missing_token_breakdown"] }),
+    ];
+
+    expect(groupByModel(sessions).find((group) => group.id === "unknown-model")?.label).toBe("Claude synthetic / no usage");
   });
 
   it("groups by source app", () => {

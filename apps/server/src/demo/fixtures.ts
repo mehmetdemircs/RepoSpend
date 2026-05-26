@@ -1,16 +1,16 @@
-import { buildDashboardSnapshot, calculateCostUsd, defaultPricing } from "@repospend/core";
-import type { DashboardSnapshot, DashboardSourceStats, NormalizedUsage, RtkGain, SourceStatus, UsageFilters } from "@repospend/types";
-import { displaySessions, type DashboardReadOptions } from "./data.js";
+import { defaultPricing } from "@repospend/core";
+import type { DashboardSourceStats, NormalizedUsage, SourceStatus } from "@repospend/types";
 
-const baseDate = "2026-05-18";
-const demoPricing = {
+export const baseDate = "2026-05-18";
+
+export const demoPricing = {
   ...defaultPricing,
   "gpt-5.3-codex": { inputPerMillion: 1.75, cachedInputPerMillion: 0.175, outputPerMillion: 14, reasoningOutputPerMillion: 14 },
   "gpt-5.3-codex-spark": { inputPerMillion: 1.75, cachedInputPerMillion: 0.175, outputPerMillion: 14, reasoningOutputPerMillion: 14 },
   "claude-haiku-4-5-20251001": { inputPerMillion: 1, cacheCreationInputPerMillion: 1.25, cachedInputPerMillion: 0.1, outputPerMillion: 5 },
 };
 
-type DemoSessionInput = {
+export type DemoSessionInput = {
   id: string;
   repo: string;
   title: string;
@@ -45,74 +45,24 @@ type DemoSessionInput = {
   tokenConfidence?: NormalizedUsage["tokenConfidence"];
 };
 
-export function demoModeEnabled(): boolean {
-  return process.env.REPOSPEND_DEMO_DATA === "lotr";
-}
-
-export function readDemoDashboardData(filters: UsageFilters = {}, options: DashboardReadOptions = {}): DashboardSnapshot {
-  return buildDashboardSnapshot({
-    sources: demoSources,
-    sourceStats: demoSourceStats,
-    sessions: displaySessions(demoSessions, options),
-    filters,
-  });
-}
-
-export function readDemoRtkGain(): RtkGain {
+function issue(
+  command: string,
+  category: NormalizedUsage["commandIssueSamples"][number]["category"],
+  severity: NormalizedUsage["commandIssueSamples"][number]["severity"],
+  impact: NormalizedUsage["commandIssueSamples"][number]["impact"],
+  reason: string,
+): NormalizedUsage["commandIssueSamples"][number] {
   return {
-    available: true,
-    rtkDetected: true,
-    rtkVersion: "rtk-demo 1.0.0",
-    rtkCodexHookStatus: "active",
-    rtkLastActivityAt: "2026-05-18T18:42:00.000Z",
-    rtkDataSource: "fictional demo data",
-    totalCommands: 248,
-    inputTokens: "18.4M",
-    outputTokens: "2.6M",
-    tokensSaved: "5.8M",
-    savedPercent: 23.9,
-    totalExecTime: "41m",
-    averageExecTime: "9.9s",
-    rtkTokensSaved: "5.8M",
-    rtkSavingsRate: 23.9,
-    rtkCommandsProcessed: 248,
-    rtkAverageCommandRuntime: "9.9s",
-    rtkTopSavingsCommands: [
-      { command: "rg", count: 74, saved: "1.9M", averageSavedPercent: 31.2, time: "8m" },
-      { command: "pnpm test", count: 18, saved: "840K", averageSavedPercent: 17.4, time: "12m" },
-      { command: "git diff", count: 39, saved: "620K", averageSavedPercent: 26.8, time: "2m" },
-    ],
-    rtkRecentActivity: [
-      "rg council-of-elrond planner",
-      "pnpm test --filter gondor-api",
-      "git diff -- shire-mobile",
-    ],
-    rtkDiscoverAvailable: true,
-    rtkDiscoverError: undefined,
-    rtkDiscoverSummary: "Total: 248 fictional command events scanned.",
-    rtkCoverageGaps: [
-      { command: "cat", count: 21, rtkEquivalent: "rtk sed", status: "easy win", estimatedSavings: "410K" },
-      { command: "grep", count: 13, rtkEquivalent: "rtk rg", status: "easy win", estimatedSavings: "360K" },
-    ],
-    rtkUnhandledCommands: [
-      { command: "palantirctl inspect", count: 5, example: "palantirctl inspect eye-of-sauron-alerts" },
-    ],
-    topCommands: [
-      { command: "rg", count: 74, saved: "1.9M", averageSavedPercent: 31.2, time: "8m" },
-      { command: "git", count: 46, saved: "720K", averageSavedPercent: 18.3, time: "3m" },
-      { command: "pnpm", count: 31, saved: "1.1M", averageSavedPercent: 16.8, time: "17m" },
-    ],
-    recentCommands: [
-      "rtk rg auth gates-of-moria",
-      "rtk pnpm test --filter palantir-observability",
-      "rtk git diff -- one-ring-infra",
-    ],
-    raw: "RepoSpend LOTR demo RTK output",
-    error: undefined,
+    command,
+    category,
+    classification: severity === "critical" ? "blocking_failure" : "warning",
+    severity,
+    impact,
+    reason,
   };
 }
 
-const demoSources: SourceStatus[] = [
+export const demoSources: SourceStatus[] = [
   {
     id: "codex",
     label: "Codex",
@@ -127,9 +77,20 @@ const demoSources: SourceStatus[] = [
     paths: ["/demo/middle-earth/claude/projects"],
     warnings: [],
   },
+  {
+    id: "copilot",
+    label: "GitHub Copilot",
+    available: true,
+    paths: [
+      "/demo/middle-earth/copilot/otel",
+      "/demo/middle-earth/copilot/session-state",
+      "/demo/middle-earth/vscode/User/workspaceStorage",
+    ],
+    warnings: [],
+  },
 ];
 
-const demoSourceStats: DashboardSourceStats[] = [
+export const demoSourceStats: DashboardSourceStats[] = [
   {
     sourceId: "codex",
     sourceLabel: "Codex",
@@ -159,9 +120,29 @@ const demoSourceStats: DashboardSourceStats[] = [
     projectDirCount: 4,
     lastScannedAt: "2026-05-18T19:01:00.000Z",
   },
+  {
+    sourceId: "copilot",
+    sourceLabel: "GitHub Copilot",
+    homePath: "/demo/middle-earth/copilot",
+    copilotHome: "/demo/middle-earth/copilot",
+    otelPath: "/demo/middle-earth/copilot/otel",
+    workspaceStoragePath: "/demo/middle-earth/vscode/User/workspaceStorage",
+    otelExists: true,
+    sessionsExists: true,
+    otelFileCount: 5,
+    transcriptFileCount: 3,
+    debugLogFileCount: 2,
+    sessionStateFileCount: 2,
+    sessionFileCount: 10,
+    sessionsImported: 3,
+    parseFailureCount: 0,
+    unreadableFileCount: 0,
+    malformedFileCount: 0,
+    lastScannedAt: "2026-05-18T19:02:00.000Z",
+  },
 ];
 
-const demoInputs: DemoSessionInput[] = [
+export const demoInputs: DemoSessionInput[] = [
   {
     id: "lotr-session-001",
     repo: "one-ring-infra",
@@ -336,6 +317,32 @@ const demoInputs: DemoSessionInput[] = [
     branch: "planner/elrond-v2",
   },
   {
+    id: "lotr-session-015",
+    repo: "rivendell-dashboard",
+    title: "Use Copilot to draft council agenda actions",
+    sourceClient: "copilot",
+    sourceApp: "VS Code",
+    sourceAppRaw: "vscode.copilot-chat",
+    model: "lark-vscode-preview",
+    provider: "github-copilot",
+    hour: 14,
+    minute: 55,
+    durationMinutes: 36,
+    inputTokens: 510_000,
+    cachedInputTokens: 180_000,
+    outputTokens: 74_000,
+    reasoningTokens: 0,
+    prompts: 4,
+    replies: 7,
+    tools: 24,
+    commands: 6,
+    edits: 6,
+    reads: 29,
+    outcome: "completed",
+    branch: "planner/copilot-actions",
+    detectedSurface: "vscode_extension",
+  },
+  {
     id: "lotr-session-007",
     repo: "palantir-observability",
     title: "Optimize observability for eye-of-sauron alerts",
@@ -360,6 +367,39 @@ const demoInputs: DemoSessionInput[] = [
     branch: "alerts/eye-slo",
     harmlessNonZero: 2,
     exploratoryMisses: 3,
+  },
+  {
+    id: "lotr-session-016",
+    repo: "palantir-observability",
+    title: "Trace Copilot alert summaries through the seeing-stone feed",
+    sourceClient: "copilot",
+    sourceApp: "Copilot CLI",
+    sourceAppRaw: "copilot-cli",
+    model: "copilot/gpt-5-mini",
+    provider: "openai",
+    hour: 16,
+    minute: 35,
+    durationMinutes: 43,
+    inputTokens: 690_000,
+    cachedInputTokens: 210_000,
+    outputTokens: 88_000,
+    reasoningTokens: 0,
+    prompts: 5,
+    replies: 8,
+    tools: 30,
+    commands: 13,
+    edits: 3,
+    reads: 34,
+    outcome: "partial",
+    branch: "alerts/copilot-summaries",
+    warnings: ["copilot_partial_token_breakdown"],
+    importantFailures: 1,
+    topFailureType: "test",
+    detectedSurface: "terminal_cli",
+    tokenConfidence: "medium",
+    issueSamples: [
+      issue("pnpm test --filter palantir-alerts", "test", "warning", "medium", "A generated summary snapshot changed before the matcher was tightened."),
+    ],
   },
   {
     id: "lotr-session-008",
@@ -435,6 +475,32 @@ const demoInputs: DemoSessionInput[] = [
     reads: 16,
     outcome: "completed",
     branch: "docs/ring-config",
+  },
+  {
+    id: "lotr-session-017",
+    repo: "fellowship-docs",
+    title: "Ask Copilot to review the ring-config redaction guide",
+    sourceClient: "copilot",
+    sourceApp: "VS Code",
+    sourceAppRaw: "vscode.copilot-chat",
+    model: "copilot/claude-sonnet-4.5",
+    provider: "anthropic",
+    hour: 18,
+    minute: 42,
+    durationMinutes: 18,
+    inputTokens: 240_000,
+    cachedInputTokens: 96_000,
+    outputTokens: 31_000,
+    reasoningTokens: 0,
+    prompts: 2,
+    replies: 4,
+    tools: 12,
+    commands: 3,
+    edits: 2,
+    reads: 15,
+    outcome: "completed",
+    branch: "docs/copilot-redaction",
+    detectedSurface: "vscode_extension",
   },
   {
     id: "lotr-session-011",
@@ -543,123 +609,3 @@ const demoInputs: DemoSessionInput[] = [
     branch: "offline/bag-end",
   },
 ];
-
-const demoSessions = demoInputs.map(toSession);
-
-function toSession(input: DemoSessionInput): NormalizedUsage {
-  const start = timestamp(input.hour, input.minute);
-  const end = new Date(new Date(start).getTime() + input.durationMinutes * 60_000).toISOString();
-  const repoRoot = `/demo/middle-earth/${input.repo}`;
-  const totalTokens = input.inputTokens + input.outputTokens + input.reasoningTokens;
-  const importantFailures = input.importantFailures ?? 0;
-  const harmlessNonZero = input.harmlessNonZero ?? 0;
-  const exploratoryMisses = input.exploratoryMisses ?? 0;
-  const repeatedClusters = input.repeatedClusters ?? 0;
-  const failedToolCalls = importantFailures + repeatedClusters;
-  const nonZeroCommandEvents = importantFailures + harmlessNonZero + exploratoryMisses;
-  const cost = calculateCostUsd({
-    model: input.model,
-    inputTokens: input.inputTokens,
-    cachedInputTokens: input.cachedInputTokens,
-    outputTokens: input.outputTokens,
-    reasoningTokens: input.reasoningTokens,
-  }, demoPricing);
-
-  return {
-    id: input.id,
-    sourceClient: input.sourceClient,
-    sourceApp: input.sourceApp,
-    sourceAppRaw: input.sourceAppRaw ?? input.sourceApp.toLowerCase(),
-    sourcePath: `/demo/middle-earth/${input.sourceClient}/sessions/${input.id}.jsonl`,
-    repoRoot,
-    repoName: input.repo,
-    cwd: `${repoRoot}/worktree`,
-    gitRemoteUrl: `https://example.invalid/middle-earth/${input.repo}.git`,
-    gitBranch: input.branch,
-    title: input.title,
-    startedAt: start,
-    endedAt: end,
-    model: input.model,
-    provider: input.provider,
-    durationMs: input.durationMinutes * 60_000,
-    rawEventCount: input.tools + input.replies + input.prompts + 8,
-    parseStatus: "ok",
-    parseErrors: [],
-    detectedSurface: input.detectedSurface ?? detectedSurfaceForApp(input.sourceApp),
-    surfaceConfidence: "high",
-    surfaceReason: "Demo fixture includes an explicit fictional source app.",
-    promptTimeline: [
-      { role: "user", text: input.title, timestamp: start },
-      { role: "assistant", text: demoReply(input.repo, input.edits, importantFailures), timestamp: timestamp(input.hour, Math.min(input.minute + 7, 59)) },
-    ],
-    sessionOutcome: input.outcome,
-    inputTokens: input.inputTokens,
-    cachedInputTokens: input.cachedInputTokens,
-    outputTokens: input.outputTokens,
-    reasoningTokens: input.reasoningTokens,
-    reasoningOutputTokens: input.reasoningTokens,
-    totalTokens,
-    tokenAggregationMethod: "direct_usage",
-    tokenConfidence: input.tokenConfidence ?? "high",
-    tokenSnapshotCount: Math.max(2, Math.round(input.durationMinutes / 18)),
-    estimatedCostUsd: cost,
-    messageCount: input.prompts + input.replies,
-    rawTokenTotal: totalTokens,
-    warnings: input.warnings ?? [],
-    userPromptCount: input.prompts,
-    assistantMessageCount: input.replies,
-    toolCallCount: input.tools,
-    shellCommandCount: input.commands,
-    failedToolCallCount: failedToolCalls,
-    nonZeroCommandEvents,
-    importantCommandFailures: importantFailures,
-    harmlessNonZeroEvents: harmlessNonZero,
-    exploratoryMisses,
-    repeatedFailureClusters: repeatedClusters,
-    commandIssueSeverity: importantFailures > 1 ? "critical" : importantFailures > 0 ? "warning" : "none",
-    commandIssueImpact: importantFailures > 1 ? "high" : importantFailures > 0 ? "medium" : "none",
-    topFailureType: input.topFailureType,
-    commandIssueSamples: input.issueSamples ?? [],
-    fileReadCount: input.reads,
-    fileEditCount: input.edits,
-  };
-}
-
-function detectedSurfaceForApp(sourceApp: string): NormalizedUsage["detectedSurface"] {
-  if (sourceApp === "VS Code") return "vscode_extension";
-  if (sourceApp === "Terminal") return "terminal_cli";
-  if (sourceApp === "Codex app") return "codex_app_cloud";
-  if (sourceApp === "Claude Desktop App") return "local_agent";
-  return "terminal_cli";
-}
-
-function timestamp(hour: number, minute: number): string {
-  return `${baseDate}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00.000Z`;
-}
-
-function issue(
-  command: string,
-  category: NormalizedUsage["commandIssueSamples"][number]["category"],
-  severity: NormalizedUsage["commandIssueSamples"][number]["severity"],
-  impact: NormalizedUsage["commandIssueSamples"][number]["impact"],
-  reason: string,
-): NormalizedUsage["commandIssueSamples"][number] {
-  return {
-    command,
-    category,
-    classification: severity === "critical" ? "blocking_failure" : "warning",
-    severity,
-    impact,
-    reason,
-  };
-}
-
-function demoReply(repo: string, edits: number, importantFailures: number): string {
-  if (importantFailures > 0) {
-    return `Found the noisy path in ${repo}, separated the risky failures from ordinary exploration, and left a short list of follow-up checks.`;
-  }
-  if (edits === 0) {
-    return `Mapped the spend pattern in ${repo} without changing files, which is exactly the kind of research-only trail RepoSpend should make visible.`;
-  }
-  return `Updated ${repo} with focused changes and enough local checks to make the token spend easy to explain.`;
-}

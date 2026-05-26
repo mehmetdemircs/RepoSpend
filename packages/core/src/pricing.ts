@@ -1,25 +1,19 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NormalizedUsage, RepoSpendConfig } from "@repospend/types";
+import { findModelPricing, type ModelPricing, type NormalizedUsage, type RepoSpendConfig } from "@repospend/types";
 
-export interface ModelPricing {
-  inputPerMillion: number;
-  cachedInputPerMillion?: number;
-  cacheCreationInputPerMillion?: number;
-  outputPerMillion: number;
-  reasoningOutputPerMillion?: number;
-  note?: string;
-}
+export type { ModelPricing } from "@repospend/types";
 
 export type PricingTable = Record<string, ModelPricing>;
 
 export const pricingInfo = {
-  sourceName: "Bundled OpenAI and Claude API pricing",
+  sourceName: "Bundled API-equivalent model pricing",
   sourceUrl: "https://developers.openai.com/api/docs/pricing",
   sourceUrls: [
     { label: "OpenAI pricing reference", url: "https://developers.openai.com/api/docs/pricing" },
     { label: "Claude pricing reference", url: "https://platform.claude.com/docs/en/about-claude/pricing" },
+    { label: "GitHub Copilot model pricing reference", url: "https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" },
   ],
   unit: "USD per 1M tokens",
   updatedAt: "2026-05-18",
@@ -49,8 +43,19 @@ export const defaultPricing: PricingTable = {
   "gpt-5-pro": { inputPerMillion: 15, outputPerMillion: 120, reasoningOutputPerMillion: 120 },
   "gpt-5-mini": { inputPerMillion: 0.25, cachedInputPerMillion: 0.025, outputPerMillion: 2, reasoningOutputPerMillion: 2 },
   "gpt-5-nano": { inputPerMillion: 0.05, cachedInputPerMillion: 0.005, outputPerMillion: 0.4, reasoningOutputPerMillion: 0.4 },
+  "gpt-4.1": { inputPerMillion: 2, cachedInputPerMillion: 0.5, outputPerMillion: 8 },
+  "gemini-2.5-pro": { inputPerMillion: 1.25, cachedInputPerMillion: 0.125, outputPerMillion: 10, note: "GitHub Copilot supported Google-hosted model; API-equivalent estimate, not a Copilot bill." },
+  "gemini-3-flash": { inputPerMillion: 0.5, cachedInputPerMillion: 0.05, outputPerMillion: 3, note: "GitHub Copilot supported Google-hosted model; API-equivalent estimate, not a Copilot bill." },
+  "gemini-3.1-pro": { inputPerMillion: 2, cachedInputPerMillion: 0.2, outputPerMillion: 12, note: "GitHub Copilot supported Google-hosted model; API-equivalent estimate, not a Copilot bill." },
+  "gemini-3.5-flash": { inputPerMillion: 1.5, cachedInputPerMillion: 0.15, outputPerMillion: 9, note: "GitHub Copilot supported Google-hosted model; API-equivalent estimate, not a Copilot bill." },
+  "raptor-mini": { inputPerMillion: 0.25, cachedInputPerMillion: 0.025, outputPerMillion: 2, note: "GitHub Copilot fine-tuned model using GPT-5 mini pricing." },
+  "oswe-vscode-prime": { inputPerMillion: 0.25, cachedInputPerMillion: 0.025, outputPerMillion: 2, note: "GitHub Copilot Raptor mini internal model id." },
+  "lark": { inputPerMillion: 0.25, cachedInputPerMillion: 0.025, outputPerMillion: 2, note: "GitHub Copilot preview model; estimated with lightweight Copilot pricing." },
+  "goldeneye": { inputPerMillion: 1.25, cachedInputPerMillion: 0.125, outputPerMillion: 10, note: "GitHub Copilot fine-tuned model using GPT-5.1-Codex pricing." },
+  "claude-opus-4-8": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
   "claude-opus-4-7": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
   "claude-opus-4-6": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+  "claude-opus-4-6-fast-mode": { inputPerMillion: 0, cacheCreationInputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0, note: "GitHub Copilot supported model, but public per-token pricing is not listed separately. RepoSpend leaves API-equivalent pricing unset." },
   "claude-opus-4-5": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
   "claude-opus-4-1": { inputPerMillion: 15, cacheCreationInputPerMillion: 18.75, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
   "claude-opus-4": { inputPerMillion: 15, cacheCreationInputPerMillion: 18.75, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
@@ -108,34 +113,4 @@ export function calculateCostUsd(usage: Pick<NormalizedUsage, "model" | "inputTo
     (usage.outputTokens / 1_000_000) * modelPricing.outputPerMillion +
     (usage.reasoningTokens / 1_000_000) * reasoningRate;
   return Number(cost.toFixed(6));
-}
-
-function findModelPricing(model: string, pricing: PricingTable): ModelPricing | undefined {
-  const lower = model.toLowerCase();
-  const exactPricing = pricing[model] ?? pricing[lower];
-  if (isUsablePricing(exactPricing)) return exactPricing;
-  const familyPricing = claudeFamilyPricing(lower, pricing);
-  if (isUsablePricing(familyPricing)) return familyPricing;
-  return undefined;
-}
-
-function claudeFamilyPricing(model: string, pricing: PricingTable): ModelPricing | undefined {
-  const families = [
-    "claude-opus-4-7",
-    "claude-opus-4-6",
-    "claude-opus-4-5",
-    "claude-opus-4-1",
-    "claude-opus-4",
-    "claude-sonnet-4-6",
-    "claude-sonnet-4-5",
-    "claude-sonnet-4",
-    "claude-haiku-4-5",
-    "claude-3-5-haiku",
-  ];
-  const family = families.find((candidate) => model === candidate || model.startsWith(`${candidate}-`));
-  return family ? pricing[family] : undefined;
-}
-
-function isUsablePricing(pricing: ModelPricing | undefined): pricing is ModelPricing {
-  return typeof pricing?.inputPerMillion === "number" && pricing.inputPerMillion > 0 && typeof pricing.outputPerMillion === "number" && pricing.outputPerMillion > 0;
 }

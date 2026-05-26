@@ -58,3 +58,9 @@ When checking RepoSpend against `ccusage`, Tokscale, or another local usage tool
 - Treat token total differences as suspicious only after accounting for cache semantics, reasoning semantics, date filters, and cumulative Codex checkpoints.
 
 For Codex, RepoSpend prefers per-turn `last_token_usage` deltas and skips stale duplicate snapshots when available. This avoids under-counting sessions that compacted and avoids over-counting rebroadcast cumulative checkpoints.
+
+For GitHub Copilot, RepoSpend aligns with ccusage and Tokscale for OTEL-backed
+records, but keeps `cachedInputTokens` as a subset of `inputTokens` in the
+normalized model. Copilot CLI session-state files can expose output tokens
+without input/cache tokens; those sessions are counted as partial token data and
+left unpriced until a full OTEL usage record is available.

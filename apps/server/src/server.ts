@@ -6,7 +6,7 @@ import Fastify from "fastify";
 import { pricingInfo } from "@repospend/core";
 import type { DashboardResponse, RepoSpendConfig, UsageFilters } from "@repospend/types";
 import { clearRepoSpendLocalData, clearRepoSpendParseCache, exportCsv, exportJson, parseDashboardOptions, parseFilters, readConfigData, readDashboardData, readPricingData, warmDashboardCache, writeConfigData, writePricingData } from "./data.js";
-import { demoModeEnabled, readDemoDashboardData, readDemoRtkGain } from "./demo-data.js";
+import { demoModeEnabled, readDemoDashboardData, readDemoRtkGain } from "./demo/index.js";
 import { readRtkGain } from "./rtk.js";
 
 export interface ServerOptions {
@@ -18,6 +18,16 @@ export interface ServerOptions {
 
 export function createServer(options: ServerOptions = {}) {
   const app = Fastify({ logger: false });
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (!isProtectedLocalMutation(request.method, request.url)) return;
+    if (!isAllowedLocalHost(request.headers.host)) {
+      return reply.code(403).send({ error: "Mutating RepoSpend local settings requires a localhost Host header." });
+    }
+    if (!isAllowedLocalOrigin(request.headers.origin)) {
+      return reply.code(403).send({ error: "Mutating RepoSpend local settings requires a localhost Origin." });
+    }
+  });
 
   app.get("/api/health", async () => ({ ok: true, app: "RepoSpend", version: readPackageVersion() }));
 
@@ -63,15 +73,17 @@ export function createServer(options: ServerOptions = {}) {
     return warmDashboardCache(warmCacheFilters(), parseDashboardOptions(query));
   });
 
-  app.get("/api/export.json", async (_request, reply) => {
+  app.get("/api/export.json", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
     reply.header("content-type", "application/json; charset=utf-8");
-    return exportJson();
+    return exportJson(parseFilters(query), parseDashboardOptions(query));
   });
 
-  app.get("/api/export.csv", async (_request, reply) => {
+  app.get("/api/export.csv", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
     reply.header("content-type", "text/csv; charset=utf-8");
     reply.header("content-disposition", "attachment; filename=\"repospend-export.csv\"");
-    return exportCsv();
+    return exportCsv(parseFilters(query), parseDashboardOptions(query));
   });
 
   if (options.serveWeb !== false) {
@@ -145,6 +157,37 @@ function isAddressInUse(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "EADDRINUSE");
 }
 
+function isProtectedLocalMutation(method: string, url: string): boolean {
+  if (method !== "PUT" && method !== "POST" && method !== "DELETE") return false;
+  return url.startsWith("/api/settings/") || url.startsWith("/api/cache/");
+}
+
+function isAllowedLocalHost(hostHeader: string | undefined): boolean {
+  if (!hostHeader) return false;
+  const host = hostFromHeader(hostHeader).toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function isAllowedLocalOrigin(originHeader: string | undefined): boolean {
+  if (!originHeader) return true;
+  try {
+    return isAllowedLocalHost(new URL(originHeader).host);
+  } catch {
+    return false;
+  }
+}
+
+function hostFromHeader(hostHeader: string): string {
+  const value = hostHeader.trim();
+  if (value.startsWith("[")) {
+    const end = value.indexOf("]");
+    return end >= 0 ? value.slice(1, end) : value;
+  }
+  const colonCount = (value.match(/:/g) ?? []).length;
+  if (colonCount === 1) return value.slice(0, value.indexOf(":"));
+  return value;
+}
+
 function validatePricingBody(body: unknown) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new Error("Expected JSON body with a models object.");
@@ -182,7 +225,6 @@ function validateConfigBody(body: unknown): RepoSpendConfig {
   const input = body as Record<string, unknown>;
   const config: RepoSpendConfig = {};
   if (Array.isArray(input.repos)) config.repos = input.repos as NonNullable<RepoSpendConfig["repos"]>;
-  if (Array.isArray(input.budgets)) config.budgets = input.budgets as NonNullable<RepoSpendConfig["budgets"]>;
   if (typeof input.pricingPath === "string") config.pricingPath = input.pricingPath;
   const experimentalSources = input.experimentalSources;
   if (experimentalSources && typeof experimentalSources === "object" && !Array.isArray(experimentalSources)) {

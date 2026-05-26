@@ -5,7 +5,17 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    ignores: ["**/dist/**", "**/coverage/**", "apps/web/src/components/ui/**"],
+    ignores: ["**/dist/**", "**/web-dist/**", "**/coverage/**", "apps/web/src/components/ui/**"],
+  },
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        URL: "readonly",
+      },
+    },
   },
   {
     rules: {

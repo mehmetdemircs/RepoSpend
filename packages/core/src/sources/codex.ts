@@ -94,6 +94,10 @@ export interface CodexScanStats {
   sessionsImported: number;
   parseFailureCount: number;
   unreadableFileCount: number;
+  serviceTier?: string | undefined;
+  serviceTierSource?: "current_config" | undefined;
+  serviceTierConfidence?: "medium" | undefined;
+  serviceTierDetail?: string | undefined;
   lastScannedAt: string;
 }
 
@@ -101,6 +105,9 @@ export function scanCodex(options: CodexAdapterOptions): CodexScanResult {
   const codexHome = options.codexHome ?? path.join(os.homedir(), ".codex");
   const statePath = path.join(codexHome, "state_5.sqlite");
   const sessionsPath = path.join(codexHome, "sessions");
+  const configPath = path.join(codexHome, "config.toml");
+  const configExists = fs.existsSync(configPath);
+  const serviceTier = readCodexServiceTier(configPath);
   const warnings: string[] = [];
   const sessions: NormalizedUsage[] = [];
 
@@ -129,8 +136,12 @@ export function scanCodex(options: CodexAdapterOptions): CodexScanResult {
       id: "codex",
       label: "Codex",
       available: stateExists || sessionsExists,
-      paths: [statePath, sessionsPath],
+      paths: configExists ? [statePath, sessionsPath, configPath] : [statePath, sessionsPath],
       warnings,
+      serviceTier,
+      serviceTierSource: serviceTier ? "current_config" : undefined,
+      serviceTierConfidence: serviceTier ? "medium" : undefined,
+      serviceTierDetail: serviceTier ? `Current Codex config service_tier: ${serviceTier}` : undefined,
     },
     sessions,
     stats: {
@@ -146,9 +157,23 @@ export function scanCodex(options: CodexAdapterOptions): CodexScanResult {
       sessionsImported: sessions.length,
       parseFailureCount: sessions.filter((session) => session.parseStatus === "failed").length,
       unreadableFileCount: sessions.filter((session) => session.parseErrors?.some((error) => error.startsWith("unable_to_read_session_file:"))).length,
+      serviceTier,
+      serviceTierSource: serviceTier ? "current_config" : undefined,
+      serviceTierConfidence: serviceTier ? "medium" : undefined,
+      serviceTierDetail: serviceTier ? `Current Codex config service_tier: ${serviceTier}` : undefined,
       lastScannedAt: new Date().toISOString(),
     },
   };
+}
+
+function readCodexServiceTier(configPath: string): string | undefined {
+  try {
+    const text = fs.readFileSync(configPath, "utf8");
+    const match = text.match(/^\s*service_tier\s*=\s*["']?([^"'\s#]+)["']?/m);
+    return match?.[1]?.trim().toLowerCase() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readThreads(statePath: string, sessionFiles: Map<string, string>, options: CodexAdapterOptions, warnings: string[]): NormalizedUsage[] {

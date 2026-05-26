@@ -1,5 +1,6 @@
 import type { DashboardSnapshot, DashboardSourceStats, NormalizedUsage, SourceStatus, UsageFilters } from "@repospend/types";
 import { groupByDay, groupByHour, groupByModel, groupBySourceApp, summarize } from "./aggregate.js";
+import { buildDataConfidence } from "./data-confidence.js";
 import { filterUsage } from "./filters.js";
 import { buildRepoRollups } from "./repo-rollup.js";
 import { buildUsageHealth } from "./usage-health.js";
@@ -45,9 +46,10 @@ export function buildDashboardSnapshot(input: DashboardSnapshotInput): Dashboard
     models: groupByModel(sessions),
     sourceApps,
     health: buildUsageHealth({ sessions, summary, repos, sourceApps, scan }),
+    confidence: buildDataConfidence({ sources: input.sources, sourceStats: input.sourceStats, sessions, scan }),
   };
 }
 
 function isDashboardVisibleSession(session: NormalizedUsage): boolean {
-  return session.totalTokens > 0 || session.sourceClient === "claude" || session.sourceClient === "cursor";
+  return session.totalTokens > 0 || session.sourceClient === "claude" || session.sourceClient === "cursor" || session.sourceClient === "copilot";
 }

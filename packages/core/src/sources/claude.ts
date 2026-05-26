@@ -62,6 +62,9 @@ interface ClaudeSessionBreakdown extends ClaudeTokenTotals {
   promptTimeline: PromptTimelineItem[];
   warnings: string[];
   usageEvents: ClaudeUsageEvent[];
+  serviceTiers: string[];
+  serviceSpeeds: string[];
+  syntheticZeroUsageCount: number;
 }
 
 export interface ClaudeAdapterOptions {
@@ -93,6 +96,10 @@ export interface ClaudeScanStats {
   unreadableFileCount: number;
   malformedFileCount: number;
   historyEntryCount: number;
+  serviceTier?: string | undefined;
+  serviceTierSource?: "session_usage" | undefined;
+  serviceTierConfidence?: "high" | undefined;
+  serviceTierDetail?: string | undefined;
   lastScannedAt: string;
 }
 
@@ -118,6 +125,7 @@ export function scanClaude(options: ClaudeAdapterOptions): ClaudeScanResult {
     .sort((a, b) => a.mtimeMs - b.mtimeMs);
   const usageSelection = selectClaudeUsageOccurrences(orderedFiles.map(({ file }) => file));
   const sessions = orderedFiles.flatMap(({ file }, index) => claudeFileToUsages(file, index, options, usageSelection));
+  const serviceTierSummary = summarizeServiceTiers(sessions.map((session) => session.serviceTier), "Claude session usage");
   const historyEntryCount = countHistoryEntries(historyPath);
   const parseFailureCount = sessions.filter((session) => session.parseStatus === "failed" || (session.parseErrors?.length ?? 0) > 0).length;
   const unreadableFileCount = sessions.filter((session) => session.parseErrors?.some((error) => error.startsWith("unable_to_read_session_file:"))).length;
@@ -135,6 +143,7 @@ export function scanClaude(options: ClaudeAdapterOptions): ClaudeScanResult {
       available: discovery.files.length > 0 || historyExists,
       paths: unique([...discovery.projectsPaths, historyPath, ...discovery.desktopSessionRoots]),
       warnings,
+      ...serviceTierSummary,
     },
     sessions,
     stats: {
@@ -153,6 +162,7 @@ export function scanClaude(options: ClaudeAdapterOptions): ClaudeScanResult {
       unreadableFileCount,
       malformedFileCount,
       historyEntryCount,
+      ...serviceTierSummary,
       lastScannedAt: new Date().toISOString(),
     },
   };
@@ -249,7 +259,10 @@ function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options:
   const warnings = [...repo.warnings, ...breakdown.warnings];
   const entrypoint = breakdown.entrypoint ?? inferClaudeEntrypointFromPath(file.filePath);
   if (!breakdown.cwd) warnings.push("repo_inferred_from_claude_project_dir");
+  if (!breakdown.model && breakdown.usageCount === 0 && breakdown.syntheticZeroUsageCount > 0) warnings.push("claude_synthetic_zero_usage");
   const hasTokenBreakdown = breakdown.totalTokens > 0 && breakdown.usageCount > 0;
+  const serviceTierSummary = summarizeClaudeServiceTier(breakdown.serviceTiers, breakdown.serviceSpeeds);
+  const serviceSpeedSummary = summarizeServiceTiers(breakdown.serviceSpeeds, "Claude usage.speed");
   const usage: NormalizedUsage = {
     id: `${id}${idSuffix}`,
     sourceClient: "claude",
@@ -287,6 +300,20 @@ function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options:
     detectedSurface: claudeSurface(entrypoint),
     surfaceConfidence: "medium",
     surfaceReason: entrypoint ? `Claude Code entrypoint: ${entrypoint}` : "Claude Code transcript",
+    serviceTier: serviceTierSummary.serviceTier,
+    serviceTierSource: serviceTierSummary.serviceTier ? "session_usage" : undefined,
+    serviceTierConfidence: serviceTierSummary.serviceTier ? "high" : undefined,
+    serviceTierDetail: serviceTierSummary.serviceTierDetail,
+    sourceMetadata: breakdown.serviceTiers.length || breakdown.serviceSpeeds.length
+      ? {
+        claude: {
+          serviceTiers: breakdown.serviceTiers,
+          speeds: breakdown.serviceSpeeds,
+          serviceTier: serviceTierSummary.serviceTier,
+          speed: serviceSpeedSummary.serviceTier,
+        },
+      }
+      : undefined,
     userPromptCount: breakdown.userPromptCount,
     assistantMessageCount: breakdown.assistantMessageCount,
     toolCallCount: breakdown.toolCallCount,
@@ -362,6 +389,8 @@ function applyClaudeRecord(breakdown: ClaudeSessionBreakdown, record: ClaudeReco
     applyPromptTimeline(breakdown, role, message.content, timestamp);
     const usage = firstObject(message.usage);
     const usageTokens = usage ? usageTotal(usage) : 0;
+    const rawModel = stringValue(message.model);
+    if (rawModel === "<synthetic>" && usage && usageTokens === 0) breakdown.syntheticZeroUsageCount += 1;
     const model = normalizeClaudeModel(message.model);
     if (model && (usageTokens > 0 || !breakdown.model)) breakdown.model = model;
     const selectedUsage = usageTokens > 0 ? usageSelection.usageByOccurrence.get(usageOccurrenceKey) : undefined;
@@ -432,6 +461,8 @@ function cloneUsage(usage: Record<string, unknown>): Record<string, unknown> {
     cache_read_input_tokens: numberValue(usage.cache_read_input_tokens),
     cache_creation_input_tokens: numberValue(usage.cache_creation_input_tokens),
     output_tokens: numberValue(usage.output_tokens),
+    service_tier: stringValue(usage.service_tier),
+    speed: stringValue(usage.speed),
   };
 }
 
@@ -440,6 +471,8 @@ function mergeUsageMax(target: Record<string, unknown>, usage: Record<string, un
   target.cache_read_input_tokens = Math.max(numberValue(target.cache_read_input_tokens), numberValue(usage.cache_read_input_tokens));
   target.cache_creation_input_tokens = Math.max(numberValue(target.cache_creation_input_tokens), numberValue(usage.cache_creation_input_tokens));
   target.output_tokens = Math.max(numberValue(target.output_tokens), numberValue(usage.output_tokens));
+  target.service_tier ??= stringValue(usage.service_tier);
+  target.speed ??= stringValue(usage.speed);
 }
 
 function applyUsage(breakdown: ClaudeSessionBreakdown, usage: Record<string, unknown>): void {
@@ -452,6 +485,8 @@ function applyUsage(breakdown: ClaudeSessionBreakdown, usage: Record<string, unk
   breakdown.cacheCreationInputTokens += cacheCreation;
   breakdown.outputTokens += output;
   breakdown.usageCount += 1;
+  pushUnique(breakdown.serviceTiers, normalizedServiceTier(usage.service_tier));
+  pushUnique(breakdown.serviceSpeeds, normalizedServiceTier(usage.speed));
 }
 
 function segmentClaudeBreakdownByDayAndModel(breakdown: ClaudeSessionBreakdown): Array<{ breakdown: ClaudeSessionBreakdown; suffix: string }> {
@@ -579,7 +614,49 @@ function emptyBreakdown(): ClaudeSessionBreakdown {
     promptTimeline: [],
     warnings: [],
     usageEvents: [],
+    serviceTiers: [],
+    serviceSpeeds: [],
+    syntheticZeroUsageCount: 0,
   };
+}
+
+function summarizeClaudeServiceTier(serviceTiers: string[], speeds: string[]): { serviceTier?: string; serviceTierSource?: "session_usage"; serviceTierConfidence?: "high"; serviceTierDetail?: string } {
+  const tierSummary = summarizeServiceTiers(serviceTiers, "Claude usage.service_tier");
+  return tierSummary.serviceTier ? tierSummary : summarizeServiceTiers(speeds, "Claude usage.speed");
+}
+
+function summarizeServiceTiers(values: Array<string | undefined>, source: string): { serviceTier?: string; serviceTierSource?: "session_usage"; serviceTierConfidence?: "high"; serviceTierDetail?: string } {
+  const uniqueValues = unique(values.filter((value): value is string => Boolean(value)));
+  if (uniqueValues.length === 0) return {};
+  if (uniqueValues.length === 1) {
+    const serviceTier = uniqueValues[0];
+    if (!serviceTier) return {};
+    return {
+      serviceTier,
+      serviceTierSource: "session_usage",
+      serviceTierConfidence: "high",
+      serviceTierDetail: serviceTierDetail(source, uniqueValues),
+    };
+  }
+  return {
+    serviceTier: "mixed",
+    serviceTierSource: "session_usage",
+    serviceTierConfidence: "high",
+    serviceTierDetail: serviceTierDetail(source, uniqueValues),
+  };
+}
+
+function serviceTierDetail(source: string, values: string[]): string {
+  return `${source}: ${unique(values).join(", ")}`;
+}
+
+function normalizedServiceTier(value: unknown): string | undefined {
+  const tier = stringValue(value)?.trim().toLowerCase();
+  return tier || undefined;
+}
+
+function pushUnique(target: string[], value: string | undefined): void {
+  if (value && !target.includes(value)) target.push(value);
 }
 
 function applyPromptTimeline(breakdown: ClaudeSessionBreakdown, role: string | undefined, content: unknown, timestamp: string | undefined): void {

@@ -4,7 +4,7 @@ RepoSpend is a local-first dashboard that shows which Git repositories are consu
 
 For product context, domain terms, and UX principles, read `CONTEXT.md` first.
 
-This file intentionally mirrors the other agent guide (`AGENTS.md`/`CLAUDE.md`). When changing one, update the other in the same commit.
+`AGENTS.md` is a symlink to this file, so the two agent guides can never drift — edit `CLAUDE.md` only.
 
 ## Repo Layout
 
@@ -14,18 +14,32 @@ This file intentionally mirrors the other agent guide (`AGENTS.md`/`CLAUDE.md`).
 - `packages/types` — shared normalized model
 - `docs/` — publishing notes, ADRs, etc.
 
+## Environment
+
+- Node `>=20`, pnpm `9.15.9` (pinned via `packageManager` — use corepack: `corepack enable`).
+- Monorepo is plain pnpm workspaces — no turbo/nx. Root scripts orchestrate packages with `pnpm --filter`/`-r`.
+- `pnpm dev` builds `types`+`core`, then runs server + web in parallel via `pnpm --parallel`.
+
 ## Common Commands
 
 ```bash
 pnpm install
-pnpm dev          # run the local app
-pnpm test
+pnpm dev          # run the local app (server + web)
+pnpm test         # pnpm -r test across all packages
 pnpm lint
 pnpm typecheck
 pnpm build
 ```
 
 Run `pnpm test`, `pnpm lint`, `pnpm typecheck`, and `pnpm build` before opening a PR.
+
+To iterate on a single package or test instead of the whole suite (tests use Vitest):
+
+```bash
+pnpm --filter @repospend/core test                       # one package
+pnpm --filter @repospend/core test src/dashboard.test.ts # one file
+pnpm --filter @repospend/core test -t "name of test"     # one test by name
+```
 
 ## Pre-Commit Sanity Check (manual)
 
@@ -52,7 +66,7 @@ Flag any large discrepancy in the PR description (rough rule of thumb: >5% on to
 
 When reviewing a PR that touches token aggregation: if the change moves RepoSpend's token total noticeably closer to `ccusage`, re-check the cost column. A "fix" that adds `cachedInputTokens` to `inputTokens` for display will silently double Codex cost, because [packages/core/src/pricing.ts](packages/core/src/pricing.ts) prices the two buckets separately. **Cost parity is the goal; token-count parity is not.**
 
-Codex per-turn aggregation is also load-bearing: prefer `last_token_usage` (per-turn delta, summed) over `total_token_usage` (cumulative, max). Codex resets the cumulative counter on `/compact`, so max-of-cumulative under-counts any session that compacted. The reasoning is documented at [packages/core/src/sources/codex-token.ts:128](packages/core/src/sources/codex-token.ts:128).
+Codex per-turn aggregation is also load-bearing: prefer `last_token_usage` (per-turn delta, summed) over `total_token_usage` (cumulative, max). Codex resets the cumulative counter on `/compact`, so max-of-cumulative under-counts any session that compacted. The reasoning is documented at [packages/core/src/sources/codex-token.ts](packages/core/src/sources/codex-token.ts#L128).
 
 ### Codex Desktop on Windows
 
@@ -72,9 +86,10 @@ RepoSpend captures Codex CLI usage from `~/.codex/`. The Codex **Desktop app** s
 - Missing, malformed, old-schema, or unreadable source files should warn, not crash scans.
 - Preserve repo-first grouping.
 - Do not invent token splits or costs when local data is incomplete.
-- Codex cumulative token checkpoints should not be naively summed. Prefer per-turn `last_token_usage` deltas; fall back to max of `total_token_usage` only when no deltas exist.
-- `cached_input_tokens` is a subset of `input_tokens`, never an additive bucket. Do not add cached tokens on top of input when computing totals or pricing.
 - Claude Code sessions with missing token data should remain visible with unknown cost.
+- Two token-accounting rules are load-bearing — see the **Pre-Commit Sanity Check** above for the full reasoning and file references:
+  - Codex cumulative checkpoints are not naively summed: prefer per-turn `last_token_usage` deltas, fall back to max of `total_token_usage` only when no deltas exist.
+  - `cached_input_tokens` is a subset of `input_tokens`, never an additive bucket — adding them on top silently doubles Codex cost.
 
 ## Adding A Source Adapter
 

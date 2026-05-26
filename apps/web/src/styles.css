@@ -585,10 +585,14 @@ input {
 .primary-kpi-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .top-actions-card {
+  border-color: rgba(245, 158, 11, 0.28);
+  background:
+    linear-gradient(135deg, rgba(245, 158, 11, 0.1), transparent 42%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(8, 13, 25, 0.94));
   overflow: hidden;
 }
 
@@ -605,9 +609,9 @@ input {
   align-items: start;
   gap: 10px;
   min-height: 72px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 8px;
-  background: rgba(2, 6, 23, 0.26);
+  background: rgba(2, 6, 23, 0.42);
   color: #e2e8f0;
   cursor: pointer;
   padding: 12px;
@@ -704,6 +708,14 @@ input {
   margin-top: 6px;
   color: #94a3b8;
   font-size: 12px;
+}
+
+.kpi-detail-stack {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .kpi-link {
@@ -821,6 +833,51 @@ input {
 .data-health-main p {
   color: #94a3b8;
   font-size: 13px;
+}
+
+.confidence-issue-list {
+  display: grid;
+  gap: 10px;
+}
+
+.compact-confidence-list {
+  margin-top: 12px;
+}
+
+.confidence-issue-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.22);
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 10px;
+}
+
+.confidence-issue-row strong {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.confidence-issue-row p {
+  color: #94a3b8;
+  margin-top: 3px;
+}
+
+.confidence-issue-row span:last-child {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.confidence-critical {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.confidence-attention {
+  border-color: rgba(245, 158, 11, 0.24);
 }
 
 .token-accuracy-card {
@@ -1445,6 +1502,11 @@ input {
   color: #7dd3fc;
 }
 
+.source-badge-copilot {
+  border-color: rgba(196, 181, 253, 0.28);
+  color: #ddd6fe;
+}
+
 .source-app-cell {
   display: flex;
   min-width: 0;
@@ -1501,6 +1563,12 @@ input {
 .combo-icon-codex-vscode .combo-icon-corner,
 .combo-icon-codex-terminal .combo-icon-corner {
   background: #042f2e;
+  border-color: rgba(15, 23, 42, 0.88);
+}
+
+.combo-icon-copilot-vscode .combo-icon-corner,
+.combo-icon-copilot-terminal .combo-icon-corner {
+  background: #312e81;
   border-color: rgba(15, 23, 42, 0.88);
 }
 
@@ -1708,6 +1776,32 @@ input {
   padding: 12px 16px;
 }
 
+.session-table-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.session-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.session-legend-swatch {
+  display: inline-block;
+  height: 14px;
+  width: 4px;
+  border-radius: 999px;
+}
+
+.session-legend-cost {
+  background: #f59e0b;
+}
+
 .search-field {
   display: flex;
   min-height: 38px;
@@ -1897,6 +1991,77 @@ input {
   justify-content: start;
 }
 
+.pricing-gap-panel {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.32);
+  padding: 14px 16px;
+}
+
+.pricing-gap-attention {
+  border-color: rgba(245, 158, 11, 0.26);
+  background: rgba(120, 53, 15, 0.12);
+}
+
+.pricing-gap-good {
+  border-color: rgba(45, 212, 191, 0.24);
+  background: rgba(13, 148, 136, 0.1);
+}
+
+.pricing-gap-eyebrow {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.pricing-gap-panel h3 {
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 760;
+  margin-top: 3px;
+}
+
+.pricing-gap-panel p {
+  max-width: 900px;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 5px;
+}
+
+.pricing-gap-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pricing-gap-stat {
+  min-width: 98px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.5);
+  padding: 8px 10px;
+}
+
+.pricing-gap-stat span {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.pricing-gap-stat strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 15px;
+  margin-top: 2px;
+}
+
 .pricing-meta-row,
 .source-card-grid,
 .privacy-grid,
@@ -2015,6 +2180,32 @@ input {
 .settings-detail-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 10px;
+}
+
+.doctor-score-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid rgba(45, 212, 191, 0.18);
+  border-radius: 10px;
+  background: rgba(13, 34, 45, 0.42);
+  padding: 16px;
+}
+
+.doctor-score-panel strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 30px;
+  line-height: 1;
+  margin-top: 5px;
+}
+
+.doctor-score-panel p,
+.doctor-score-label {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .privacy-grid {
@@ -2603,6 +2794,25 @@ td {
   padding: 10px;
 }
 
+.command-review-evidence {
+  display: grid;
+  gap: 10px;
+}
+
+.command-review-evidence > p {
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.command-review-note {
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.07);
+  color: #fcd34d !important;
+  padding: 9px 10px;
+}
+
 .timeline-list {
   display: grid;
   gap: 10px;
@@ -3033,9 +3243,7 @@ td {
 }
 
 .status-files-edited,
-.status-completed,
-.status-high,
-.status-medium {
+.status-completed {
   border-color: rgba(45, 212, 191, 0.34);
   color: #5eead4;
 }
@@ -3049,12 +3257,63 @@ td {
   color: #fbbf24;
 }
 
+.status-high {
+  border-color: rgba(239, 68, 68, 0.34);
+  color: #fca5a5;
+}
+
+.status-medium {
+  border-color: rgba(245, 158, 11, 0.34);
+  color: #fbbf24;
+}
+
 .status-failed-commands,
 .status-command-failures-detected,
 .status-command-issue,
 .status-command-issues-detected {
   border-color: rgba(239, 68, 68, 0.34);
   color: #fca5a5;
+}
+
+.badge-row.warning-badge-row {
+  margin-top: 0;
+}
+
+.status-badge.badge-critical,
+.status-badge.badge-warning,
+.status-badge.badge-info,
+.status-badge.badge-good,
+.status-badge.badge-neutral {
+  text-transform: none;
+}
+
+.status-badge.badge-critical {
+  border-color: rgba(239, 68, 68, 0.38);
+  background: rgba(127, 29, 29, 0.16);
+  color: #fca5a5;
+}
+
+.status-badge.badge-warning {
+  border-color: rgba(245, 158, 11, 0.38);
+  background: rgba(120, 53, 15, 0.16);
+  color: #fbbf24;
+}
+
+.status-badge.badge-info {
+  border-color: rgba(45, 212, 191, 0.3);
+  background: rgba(13, 148, 136, 0.12);
+  color: #5eead4;
+}
+
+.status-badge.badge-good {
+  border-color: rgba(34, 197, 94, 0.34);
+  background: rgba(20, 83, 45, 0.14);
+  color: #86efac;
+}
+
+.status-badge.badge-neutral {
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
 }
 
 .repo-detail-summary,
@@ -3371,6 +3630,73 @@ td {
   overflow: hidden;
 }
 
+.friction-action-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(10, 18, 29, 0.78));
+  padding: 16px;
+}
+
+.friction-action-attention {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: linear-gradient(180deg, rgba(43, 28, 9, 0.56), rgba(10, 18, 29, 0.78));
+}
+
+.friction-action-good {
+  border-color: rgba(45, 212, 191, 0.24);
+}
+
+.friction-action-copy {
+  min-width: 0;
+}
+
+.friction-action-eyebrow {
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.friction-action-panel h2 {
+  color: #f8fafc;
+  font-size: 17px;
+  font-weight: 760;
+  margin-top: 3px;
+}
+
+.friction-action-panel p {
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 5px;
+}
+
+.friction-action-command {
+  width: fit-content;
+  max-width: min(820px, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.48);
+  color: #e2e8f0 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  padding: 6px 8px;
+}
+
+.friction-action-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .command-health-note h2 {
   color: #f8fafc;
   font-size: 15px;
@@ -3397,7 +3723,44 @@ td {
 }
 
 .command-health-table {
-  min-width: 1080px;
+  min-width: 1180px;
+}
+
+.friction-inspect-cell {
+  display: grid;
+  gap: 2px;
+}
+
+.friction-inspect-cell span {
+  color: #f8fafc;
+  font-weight: 650;
+}
+
+.friction-inspect-cell small {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.command-signal-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 260px;
+  max-width: 360px;
+}
+
+.command-signal-command {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.command-signal-cell p {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .status-completed,
@@ -3518,6 +3881,23 @@ td {
   .insights-grid {
     grid-template-columns: 1fr;
   }
+
+  .pricing-gap-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-gap-stats {
+    justify-content: flex-start;
+  }
+
+  .friction-action-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .friction-action-buttons {
+    justify-content: flex-start;
+  }
 }
 
 tbody tr {
@@ -3553,6 +3933,13 @@ tbody tr.selected {
   color: #f8fafc;
   font-size: 14px;
   font-weight: 700;
+  line-height: 1.35;
+}
+
+.mini-stat-detail {
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 11px;
   line-height: 1.35;
 }
 
@@ -3727,7 +4114,8 @@ tbody tr.selected {
   .repo-detail-summary,
   .repo-concentration-stats,
   .repo-custom-dates,
-  .repo-review-row {
+  .repo-review-row,
+  .doctor-score-panel {
     grid-template-columns: 1fr;
   }
 

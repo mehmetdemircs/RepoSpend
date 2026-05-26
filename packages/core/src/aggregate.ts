@@ -51,7 +51,13 @@ export function groupByRepo(sessions: NormalizedUsage[]): UsageGroup[] {
 }
 
 export function groupByModel(sessions: NormalizedUsage[]): UsageGroup[] {
-  return groupBy(sessions, (session) => session.model ?? "unknown-model", (session) => session.model ?? "Model not recorded");
+  const groups = groupBy(sessions, (session) => session.model ?? "unknown-model", (session) => session.model ?? "Model not recorded");
+  const unknownModelSessions = sessions.filter((session) => !session.model);
+  // Keep mixed unknown-model buckets generic; only relabel when every unknown model is the Claude synthetic zero-usage case.
+  if (unknownModelSessions.length > 0 && unknownModelSessions.every(isClaudeSyntheticZeroUsageSession)) {
+    return groups.map((group) => group.id === "unknown-model" ? { ...group, label: "Claude synthetic / no usage" } : group);
+  }
+  return groups;
 }
 
 export function groupBySourceApp(sessions: NormalizedUsage[]): UsageGroup[] {
@@ -104,6 +110,10 @@ function groupBy(sessions: NormalizedUsage[], keyFn: (session: NormalizedUsage) 
     groups.set(id, group);
   }
   return [...groups.values()].sort((a, b) => (b.estimatedCostUsd ?? 0) - (a.estimatedCostUsd ?? 0) || b.totalTokens - a.totalTokens);
+}
+
+function isClaudeSyntheticZeroUsageSession(session: NormalizedUsage): boolean {
+  return session.warnings.includes("claude_synthetic_zero_usage");
 }
 
 export function toCsv(sessions: NormalizedUsage[]): string {

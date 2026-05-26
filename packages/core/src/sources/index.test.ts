@@ -22,11 +22,12 @@ describe("usage source scanning", () => {
   it("does not scan experimental Cursor data unless it is enabled", () => {
     const codexHome = makeTempDir();
     const claudeHome = makeTempDir();
+    const copilotHome = makeTempDir();
 
-    const result = scanUsageSources({ codexHome, claudeHome, config: {}, pricing: {} });
+    const result = scanUsageSources({ codexHome, claudeHome, copilotHome, config: {}, pricing: {} });
 
-    expect(result.sources.map((source) => source.id)).toEqual(["codex", "claude"]);
-    expect(result.sourceStats.map((source) => source.sourceId)).toEqual(["codex", "claude"]);
+    expect(result.sources.map((source) => source.id)).toEqual(["codex", "claude", "copilot"]);
+    expect(result.sourceStats.map((source) => source.sourceId)).toEqual(["codex", "claude", "copilot"]);
     expect(result.sessions.some((session) => session.sourceClient === "cursor")).toBe(false);
   });
 });

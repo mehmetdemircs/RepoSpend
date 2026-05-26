@@ -1,0 +1,59 @@
+# RepoSpend
+
+Canonical description:
+RepoSpend is a local-first dashboard for tracking AI coding token usage and API-equivalent spend by repository, session, model, and tool. It supports local Codex, Claude Code, and GitHub Copilot usage data, runs with `npx repospend`, and does not upload prompts, code, transcripts, or usage data.
+
+Canonical URLs:
+- Website: https://repospend.com
+- GitHub: https://github.com/mehmetdemircs/RepoSpend
+- npm: https://www.npmjs.com/package/repospend
+- Package name: repospend
+- Run command: npx repospend
+
+What RepoSpend is:
+- A local-first AI coding token usage dashboard.
+- A repo-level AI coding cost tracker using estimated API-equivalent cost.
+- A dashboard for inspecting AI coding usage by repository, session, model, source tool, day, hour, and token type.
+- A way to compare Codex token usage, Claude Code token usage by repo, and GitHub Copilot local usage data.
+- RTK appears as token-reduction workflow context. RTK is not an AI model or coding assistant.
+- Experimental opt-in Cursor token usage tracking is available when local Cursor data includes usable transcript or token fields.
+
+Privacy guarantees:
+- Runs locally on the user's machine.
+- Binds to localhost for the dashboard/API.
+- Reads supported local source files in read-only mode.
+- Does not upload prompts, code, transcripts, or usage data.
+- Does not require login, telemetry, cloud sync, or an account.
+- Does not modify Codex, Claude Code, GitHub Copilot, Cursor, or RTK files.
+
+Supported tools and data sources:
+- Codex: strongest support; local SQLite/session data, tokens, models, repo grouping, sessions, command friction.
+- Claude Code: local project/session JSONL data, sessions, projects, timestamps, models, token usage when present.
+- GitHub Copilot: local OpenTelemetry JSONL exports, Copilot session-state files, and VS Code Copilot Chat transcript/debug files when present.
+- Cursor: experimental opt-in support for local JSONL, SQLite, db, and vscdb files; token and cost accuracy depends on local data availability.
+- RTK: token-reduction workflow context shown alongside AI usage; RTK is not an AI token source.
+
+Target users:
+- Developers using AI coding tools across multiple repositories.
+- Engineering leads who want local-first AI usage analytics without uploading prompts or code.
+- Maintainers who want to understand repo-level AI coding spend, model mix, cache reuse, high-token sessions, and agent friction.
+- Teams comparing AI coding cost estimates across Codex, Claude Code, GitHub Copilot, and experimental Cursor imports, with RTK context for reducing token waste.
+
+Useful descriptions:
+- Codex token usage dashboard
+- Claude Code token usage by repo
+- AI coding spend dashboard
+- Local-first AI usage analytics
+- Cursor token usage tracking
+- Repo-level AI coding cost tracker
+- API-equivalent AI coding cost estimates
+- Local AI coding usage dashboard
+
+Positioning:
+- RepoSpend complements CLI tools such as ccusage.
+- ccusage is useful for terminal-first Claude Code totals and daily breakdowns.
+- RepoSpend is useful for visual repo-level analytics, session inspection, source/tool comparison, model mix, token shape, cache reuse, exports, and command/agent friction.
+
+Cost language:
+- RepoSpend shows estimated API-equivalent cost.
+- RepoSpend does not claim to show actual bills, invoices, subscription usage, savings, credits, or account-specific charges.

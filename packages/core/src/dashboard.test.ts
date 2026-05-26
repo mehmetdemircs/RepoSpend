@@ -23,6 +23,8 @@ describe("dashboard snapshot", () => {
     expect(dashboard.repos[0]?.fileEditCount).toBe(2);
     expect(dashboard.repos[0]?.failedCommandCount).toBe(2);
     expect(dashboard.health.wasteSignals.some((signal) => signal.id === "command-issue-sessions")).toBe(true);
+    expect(dashboard.confidence.unpricedTokenSessions).toBe(0);
+    expect(dashboard.confidence.tokenDataSessions).toBe(2);
   });
 
   it("excludes unknown-start sessions when date filters are active", () => {

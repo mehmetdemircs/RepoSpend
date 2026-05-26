@@ -66,14 +66,27 @@ export function formatRate(value: number): string {
 }
 
 export function compactNumber(value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact" }).format(value);
+  if (!Number.isFinite(value)) return "0";
+  const sign = value < 0 ? "-" : "";
+  const absolute = Math.abs(value);
+  const units = [
+    { threshold: 1_000_000_000_000, suffix: "T" },
+    { threshold: 1_000_000_000, suffix: "B" },
+    { threshold: 1_000_000, suffix: "M" },
+    { threshold: 1_000, suffix: "K" },
+  ];
+  const unit = units.find((item) => absolute >= item.threshold);
+  if (!unit) return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value);
+  const scaled = absolute / unit.threshold;
+  const formatted = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(scaled);
+  return `${sign}${formatted}${unit.suffix}`;
 }
 
 function currency(value: number, minimumFractionDigits: number, maximumFractionDigits: number, compact = false): string {
+  if (compact) return `$${compactNumber(value)}`;
   return `$${new Intl.NumberFormat(undefined, {
     maximumFractionDigits,
     minimumFractionDigits,
-    notation: compact ? "compact" : "standard",
   }).format(value)}`;
 }
 

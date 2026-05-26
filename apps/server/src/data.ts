@@ -167,12 +167,12 @@ export function clearRepoSpendParseCache(): { path: string; removed: boolean } {
   return result;
 }
 
-export function exportJson(): string {
-  return JSON.stringify(readDashboardData().sessions, null, 2);
+export function exportJson(filters: UsageFilters = {}, options: DashboardReadOptions = {}): string {
+  return JSON.stringify(readDashboardData(filters, options).sessions, null, 2);
 }
 
-export function exportCsv(): string {
-  return toCsv(readDashboardData().sessions);
+export function exportCsv(filters: UsageFilters = {}, options: DashboardReadOptions = {}): string {
+  return toCsv(readDashboardData(filters, options).sessions);
 }
 
 function stringQuery(value: unknown): string | undefined {
@@ -196,6 +196,7 @@ export function displaySessions(sessions: NormalizedUsage[], options: DashboardR
 function sourceScopedAppLabel(session: NormalizedUsage): string {
   const app = session.sourceApp || fallbackSurfaceLabel(session.detectedSurface);
   if (!app || app === "Unknown") return sourceClientLabel(session.sourceClient);
+  if (session.sourceClient === "copilot" && app === "Copilot CLI") return "GitHub Copilot CLI";
   if (!shouldScopeApp(app)) return app;
   return `${sourceClientLabel(session.sourceClient)} on ${app}`;
 }
@@ -241,6 +242,7 @@ function shouldScopeApp(app: string): boolean {
 function sourceClientLabel(source: NormalizedUsage["sourceClient"]): string {
   if (source === "codex") return "Codex";
   if (source === "claude") return "Claude Code";
+  if (source === "copilot") return "GitHub Copilot";
   if (source === "gemini-cli") return "Gemini CLI";
   if (source === "opencode") return "OpenCode";
   if (source === "cursor") return "Cursor";

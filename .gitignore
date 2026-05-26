@@ -20,3 +20,4 @@ coverage
 # Generated Python cache files
 __pycache__/
 *.pyc
+graphify-out/

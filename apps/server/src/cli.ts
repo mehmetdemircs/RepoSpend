@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { groupByDay, groupByHour, groupByModel, groupByRepo, groupBySourceApp, toCsv } from "@repospend/core";
 import { readDashboardData } from "./data.js";
+import { parseCliDashboardOptions, parseCliDateFilters, parseCliFilters, valueAfter } from "./cli-options.js";
 import { startServer } from "./server.js";
 
 const [command = "serve", ...args] = process.argv.slice(2);
@@ -16,24 +17,26 @@ try {
     console.log(`RepoSpend dashboard: ${url}`);
     openBrowser(url);
   } else if (command === "__warm-cache") {
-    readDashboardData(cliDateFilters(args), { splitSourceApps: args.includes("--splitSourceApps") });
+    readDashboardData(parseCliDateFilters(args), parseCliDashboardOptions(args));
   } else if (command === "scan") {
-    const data = readDashboardData(cliFilters(args));
+    const data = readDashboardData(parseCliFilters(args), parseCliDashboardOptions(args));
     console.log(JSON.stringify({ sources: data.sources, sessionCount: data.sessions.length, summary: data.summary }, null, 2));
   } else if (command === "by-repo") {
-    printGroups(groupByRepo(readDashboardData(cliFilters(args)).sessions));
+    printGroups(groupByRepo(readDashboardData(parseCliFilters(args), parseCliDashboardOptions(args)).sessions));
   } else if (command === "by-day") {
-    printGroups(groupByDay(readDashboardData(cliFilters(args)).sessions));
+    printGroups(groupByDay(readDashboardData(parseCliFilters(args), parseCliDashboardOptions(args)).sessions));
   } else if (command === "by-hour") {
-    printGroups(groupByHour(readDashboardData(cliFilters(args)).sessions));
+    printGroups(groupByHour(readDashboardData(parseCliFilters(args), parseCliDashboardOptions(args)).sessions));
   } else if (command === "by-model") {
-    printGroups(groupByModel(readDashboardData(cliFilters(args)).sessions));
+    printGroups(groupByModel(readDashboardData(parseCliFilters(args), parseCliDashboardOptions(args)).sessions));
   } else if (command === "by-app") {
-    printGroups(groupBySourceApp(readDashboardData(cliFilters(args)).sessions));
+    printGroups(groupBySourceApp(readDashboardData(parseCliFilters(args), parseCliDashboardOptions(args)).sessions));
+  } else if (command === "doctor") {
+    printDoctor(readDashboardData(parseCliFilters(args), parseCliDashboardOptions(args)));
   } else if (command === "export") {
     const format = valueAfter(args, "--format") ?? "json";
-    const filters = cliFilters(args);
-    const sessions = readDashboardData(filters).sessions;
+    const filters = parseCliFilters(args);
+    const sessions = readDashboardData(filters, parseCliDashboardOptions(args)).sessions;
     console.log(format === "csv" ? toCsv(sessions) : JSON.stringify(sessions, null, 2));
   } else {
     console.error(`Unknown command: ${command}`);
@@ -71,29 +74,44 @@ function printGroups(groups: ReturnType<typeof groupByRepo>): void {
   console.table(rows);
 }
 
-function cliFilters(args: string[]) {
-  const source = valueAfter(args, "--source");
-  if (!source || source === "all") return {};
-  return { source };
+function printDoctor(data: ReturnType<typeof readDashboardData>): void {
+  const confidence = data.confidence;
+  console.log(`RepoSpend data confidence: ${confidence.label} (${confidence.score}/100)`);
+  console.table([
+    { metric: "Sessions", value: confidence.sessionCount },
+    { metric: "Token data coverage", value: `${Math.round(confidence.tokenDataPct * 100)}% (${confidence.tokenDataSessions}/${confidence.sessionCount})` },
+    { metric: "Pricing coverage", value: `${Math.round(confidence.pricingCoveragePct * 100)}% (${confidence.pricedTokenSessions}/${confidence.tokenDataSessions})` },
+    { metric: "Repo grouping", value: `${Math.round(confidence.verifiedRepoPct * 100)}% verified (${confidence.verifiedRepoSessions}/${confidence.sessionCount})` },
+    { metric: "Parse issues", value: confidence.parseIssueCount },
+    { metric: "Source warnings", value: confidence.sourceWarningCount },
+  ]);
+  if (confidence.issues.length) {
+    console.table(confidence.issues.map((issue) => ({
+      severity: issue.tone,
+      issue: issue.title,
+      detail: issue.detail,
+      sessions: issue.affectedSessionIds.length,
+    })));
+  } else {
+    console.log("No data-confidence issues detected.");
+  }
+  console.table(data.sourceStats.map((source) => ({
+    source: source.sourceLabel ?? source.sourceId ?? "unknown",
+    imported: source.sessionsImported ?? 0,
+    files: source.sessionFileCount,
+    parseIssues: source.parseFailureCount ?? 0,
+    primaryData: sourcePrimaryDataFound(source) ? "found" : "missing",
+  })));
 }
 
-function cliDateFilters(args: string[]) {
-  const from = valueAfter(args, "--from");
-  const to = valueAfter(args, "--to");
-  return {
-    ...(from ? { from } : {}),
-    ...(to ? { to } : {}),
-  };
-}
-
-function valueAfter(args: string[], flag: string): string | undefined {
-  const index = args.indexOf(flag);
-  return index >= 0 ? args[index + 1] : undefined;
+function sourcePrimaryDataFound(source: ReturnType<typeof readDashboardData>["sourceStats"][number]): boolean {
+  return Boolean(source.stateExists || source.sessionsExists || source.projectsExists || source.historyExists || source.otelExists || (source.otelFileCount ?? 0) > 0 || (source.databaseFileCount ?? 0) > 0);
 }
 
 function printHelp(): void {
   console.log(`RepoSpend commands:
   repospend serve
+  repospend doctor
   repospend scan
   repospend by-repo
   repospend by-day
@@ -104,7 +122,13 @@ function printHelp(): void {
   repospend export --format csv
 
 Options:
-  --source all|codex|claude|cursor
+  --source all|codex|claude|copilot|cursor
+  --sourceApp "VS Code" | --source-app "VS Code" | --app "VS Code"
+  --repo <repo name or path>
+  --model <model id>
+  --from YYYY-MM-DD
+  --to YYYY-MM-DD
+  --split-source-apps
 
 Cursor is experimental and only scans when enabled in ~/.repospend/config.json.`);
 }

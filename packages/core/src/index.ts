@@ -1,6 +1,7 @@
 export * from "./aggregate.js";
 export * from "./cache.js";
 export * from "./config.js";
+export * from "./data-confidence.js";
 export * from "./dashboard.js";
 export * from "./filters.js";
 export * from "./fs.js";
@@ -10,6 +11,7 @@ export * from "./repo-rollup.js";
 export * from "./sources/codex.js";
 export * from "./sources/codex-token.js";
 export * from "./sources/claude.js";
+export * from "./sources/copilot.js";
 export * from "./sources/cursor.js";
 export * from "./sources/index.js";
 export * from "./usage-health.js";

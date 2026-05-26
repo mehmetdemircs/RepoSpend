@@ -4,12 +4,12 @@ RepoSpend is a local-first AI coding usage dashboard. The product promise is rep
 
 ## Current Release
 
-- Version: `0.0.9`
+- Version: `0.1.0`
 - Scope: early debug release
-- Source clients: Codex, Claude Code, and opt-in experimental Cursor support
+- Source clients: Codex, Claude Code, GitHub Copilot, and opt-in experimental Cursor support
 - Server: localhost-only local Fastify API
 - Dashboard: React/Vite/Tailwind dark analytics UI
-- Storage: reads Codex from `~/.codex`, Claude Code from local Claude paths, and opt-in experimental Cursor data from local Cursor paths; stores RepoSpend-owned local settings and parse cache files under `~/.repospend`
+- Storage: reads Codex from `~/.codex`, Claude Code from local Claude paths, GitHub Copilot from local Copilot paths, and opt-in experimental Cursor data from local Cursor paths; stores RepoSpend-owned local settings and parse cache files under `~/.repospend`
 - License: Apache-2.0
 
 ## Main Navigation
@@ -31,7 +31,7 @@ RepoSpend is a local-first AI coding usage dashboard. The product promise is rep
 - **Dashboard Snapshot**: The filtered, zero-token-cleaned read model used by the local API and dashboard.
 - **Usage Health**: Derived signals that explain what looks healthy, what needs attention, and which sessions are affected.
 - **Agent Friction**: Command signals focused on important failures, repeated failure clusters, high-impact command issues, and harmless non-zero exits.
-- **API-equivalent Cost**: A local estimate based on token counts and public API-style pricing assumptions. It is not the user's actual ChatGPT, Codex, Claude, or Claude Code bill.
+- **API-equivalent Cost**: A local estimate based on token counts and public API-style pricing assumptions. It is not the user's actual ChatGPT, Codex, Claude, Claude Code, or GitHub Copilot bill.
 - **RTK Savings**: Estimated tokens avoided by the local `rtk` command proxy, when local RTK reports are available.
 - **Data Health**: Local scan status: files scanned, sessions imported, parser issues, token checkpoints, and last scan time.
 

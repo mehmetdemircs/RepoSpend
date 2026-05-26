@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { AppWindow, ArrowDownUp, Blocks, Bot, BrainCircuit, Calculator, ChartNoAxesCombined, CircleDollarSign, Code2, Columns3, Command, Copy, Cpu, Database, Download, ExternalLink, Filter, FolderGit2, FolderOpen, Github, GitBranch, Info, LayoutDashboard, LayoutPanelTop, MonitorCog, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings, Sparkles, SquareTerminal, Terminal, TriangleAlert, X } from "lucide-react";
+import { isUsableModelPricing, resolvePricingForModel } from "@repospend/types";
 import {
   Bar,
   BarChart,
@@ -22,26 +23,24 @@ import {
   pageSizeOptions,
   rangeOptions,
   sessionColumnOptions,
-  type AgentFrictionRepo,
   type ApiData,
-  type BreakdownRow,
+  type AgentFrictionRepo,
   type BreakdownTab,
   type DashboardResponse,
   type DisplaySettings,
   type FilterSortMode,
   type Filters,
   type InsightItem,
-  type KeyInsight,
   type MetricBreakdownRow,
   type MetricKey,
   type ModelSortKey,
+  type ModelUsageRow,
   type ModelPricing,
   type PickerIcon,
   type PickerOption,
   type PopoverPosition,
   type PricingProviderFilter,
   type PricingResponse,
-  type PricingRow,
   type PricingViewFilter,
   type QuickSessionFilter,
   type RangePreset,
@@ -56,7 +55,6 @@ import {
   type RepoSortKey,
   type RtkCommand,
   type RtkCommandSortKey,
-  type RtkCoverageGap,
   type RtkGain,
   type RtkUnhandledCommand,
   type Session,
@@ -67,7 +65,6 @@ import {
   type SortDirection,
   type Summary,
   type TimelineRoleFilter,
-  type TokenStats,
   type UsageGroup,
   type ViewKey,
 } from "./app-types";
@@ -93,6 +90,72 @@ import {
   tooltipMetric,
   uniquePickerOptions,
 } from "./ui-utils";
+import {
+  agentFrictionRepos,
+  aggregationMethodLabel,
+  breakdownCostLabel,
+  compactModelLabel,
+  confidenceLabel,
+  cursorSourceEnabled,
+  estimateAvoidedCostUsd,
+  exportReposCsv,
+  exportSessionsCsv,
+  failureTypeLabel,
+  findSessionById,
+  importantCommandFailures,
+  insightSeverity,
+  isCostOutlier,
+  issueImpactLabel,
+  listText,
+  modelUsageRows,
+  nullableNumber,
+  parseRecentRtkCommand,
+  parseTokenAmount,
+  polishCostLanguage,
+  pricingMissing,
+  pricingProvider,
+  pricingRows,
+  readableCommandName,
+  readableIssueLabel,
+  readableWarning,
+  relativeTimeLabel,
+  repoCommandTotals,
+  repoCostConcentration,
+  repoCostDriverExplanation,
+  repoDailyBreakdown,
+  repoDiagnosisSentence,
+  repoModelBreakdown,
+  repoRows,
+  repoRowsFromGroup,
+  rtkAvoidedCostRate,
+  rtkHookLabel,
+  rtkRecommendedActions,
+  sessionBadges,
+  sessionConcernSignals,
+  sessionCostOutlierThreshold,
+  sessionDisplayTitle,
+  sessionMatchesQuickFilter,
+  sessionMatchesRepoQuickFilter,
+  sessionMatchesSearch,
+  sessionNeedsCommandReview,
+  sessionPositiveSignals,
+  shortCommand,
+  sortedRtkCommands,
+  sortModelRows,
+  sortRepoRows,
+  sortSessionRows,
+  sourceDetectedPaths,
+  sourceEmptyFix,
+  sourceHomePath,
+  sourceImportedSessions,
+  sourcePrimaryDataFound,
+  tokenIntensityInterpretation,
+  tokenStats,
+  topDashboardActions,
+  topSessionsToReview,
+  usageBreakdownRows,
+  usePagination,
+} from "./selectors";
 import "./styles.css";
 const chartTooltipStyle = {
   background: "#0f172a",
@@ -110,7 +173,7 @@ const viewMeta: Record<ViewKey, { title: string; subtitle: string }> = {
   repos: { title: "Repos / folders", subtitle: "Compare local AI coding usage, API-equivalent cost, productivity, and warnings by Git repo or inferred folder" },
   repoDetail: { title: "Repo / folder detail", subtitle: "Focused repo or folder usage, sessions, warnings, and command signals" },
   models: { title: "Models", subtitle: "Compare model token shape, API-equivalent cost, cache reuse, and repo concentration" },
-  commands: { title: "Agent Friction", subtitle: "Command signals that separate blocking issues from harmless shell exits" },
+  commands: { title: "Agent Friction", subtitle: "Possible failed commands separated from harmless shell exits" },
   insights: { title: "Usage Health", subtitle: "What looks good, what needs attention, and why" },
   rtk: { title: "RTK Insights", subtitle: "Token savings from RTK command proxy" },
   settings: { title: "Settings", subtitle: "Local pricing and dashboard configuration" },
@@ -129,6 +192,8 @@ const viewIcons: Record<ViewKey, React.ReactElement> = {
   settings: <Settings />,
 };
 
+type SessionSearchIntent = { search: string; key: number };
+
 function App() {
   const initialUrlState = React.useMemo(() => parseUrlState(), []);
   const [data, setData] = React.useState<ApiData | null>(null);
@@ -140,9 +205,11 @@ function App() {
   const [metric, setMetric] = React.useState<MetricKey>(initialUrlState.metric);
   const [selectedRepo, setSelectedRepo] = React.useState<string | null>(initialUrlState.selectedRepo);
   const [selectedSessionId, setSelectedSessionId] = React.useState<string | null>(initialUrlState.selectedSessionId);
+  const [sessionDetailInitialTab, setSessionDetailInitialTab] = React.useState<SessionDetailTab>("overview");
   const [activeView, setActiveView] = React.useState<ViewKey>(initialUrlState.activeView);
   const [pricingDraft, setPricingDraft] = React.useState<Record<string, ModelPricing>>({});
   const [pricingStatus, setPricingStatus] = React.useState<string | null>(null);
+  const [sessionSearchIntent, setSessionSearchIntent] = React.useState<SessionSearchIntent | null>(null);
   const [filterSortMode, setFilterSortMode] = React.useState<FilterSortMode>(() => readFilterSortMode());
   const [displaySettings, setDisplaySettings] = React.useState<DisplaySettings>(() => readDisplaySettings());
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
@@ -211,13 +278,14 @@ function App() {
     const availableSources = new Set<string>(filterOptionsData.sessions.map((session) => session.sourceClient));
     const availableSourceApps = new Set(filterOptionsData.sourceApps.map((app) => app.label));
     const availableRepos = new Set(filterOptionsData.repos.flatMap((repo) => [repo.id, repo.label]));
-    const availableModels = new Set(filterOptionsData.models.map((model) => model.label));
+    const availableModels = new Set(filterOptionsData.models.flatMap((model) => [model.id, model.label]));
+    const modelIdByLabel = new Map(filterOptionsData.models.map((model) => [model.label, model.id]));
     const nextFilters = {
       ...filters,
       source: filters.source.filter((source) => availableSources.has(source)),
       sourceApp: filters.sourceApp.filter((app) => availableSourceApps.has(app)),
       repo: filters.repo.filter((repo) => availableRepos.has(repo)),
-      model: filters.model.filter((model) => availableModels.has(model)),
+      model: filters.model.map((model) => modelIdByLabel.get(model) ?? model).filter((model) => availableModels.has(model)),
     };
     if (
       nextFilters.source.length !== filters.source.length
@@ -304,8 +372,16 @@ function App() {
   const appOptions = buildGroupPickerOptions(optionSource?.sourceApps ?? [], filters.sourceApp, pickerSortMode, "app");
 
   const navigateToView = React.useCallback((view: ViewKey) => setActiveView(view), []);
-  const openSession = React.useCallback((sessionId: string) => {
+  const openSessionsWithSearch = React.useCallback((search: string) => {
+    setSessionSearchIntent({ search, key: Date.now() });
+    setActiveView("sessions");
+  }, []);
+  const clearSessionSearchIntent = React.useCallback(() => {
+    setSessionSearchIntent(null);
+  }, []);
+  const openSession = React.useCallback((sessionId: string, initialTab: SessionDetailTab = "overview") => {
     setSelectedSessionId(sessionId);
+    setSessionDetailInitialTab(initialTab);
     setActiveView("sessionDetail");
   }, []);
   const openRepo = React.useCallback((repoId: string) => {
@@ -356,6 +432,7 @@ function App() {
           <div className="quick-links">
             <QuickLink href="https://chatgpt.com/codex/cloud/settings/analytics#usage" label="Codex usage" icon={<CodexIcon />} tone="codex" />
             <QuickLink href="https://claude.ai/settings/usage" label="Claude usage" icon={<ClaudeIcon />} tone="claude" />
+            <QuickLink href="https://github.com/settings/billing/summary" label="Copilot billing" icon={<Github className="h-4 w-4" aria-hidden />} tone="github" />
             {cursorSourceEnabled(data) ? <QuickLink href="https://cursor.com/dashboard/usage" label="Cursor usage" icon={<Code2 className="h-4 w-4" aria-hidden />} tone="cursor" /> : null}
             <QuickLink href="https://github.com/mehmetdemircs/RepoSpend" label="GitHub repo" icon={<Github className="h-4 w-4" aria-hidden />} tone="github" />
           </div>
@@ -469,17 +546,28 @@ function App() {
               setPricingStatus(`${result.removed ? "Removed parse cache at" : "No parse cache found at"} ${result.path}. Reloading full scan...`);
               window.setTimeout(() => window.location.reload(), 350);
             }}
+            onReviewUnpricedSessions={() => openSessionsWithSearch("cannot be priced")}
             onRescan={rescanLocalLogs}
           />
         ) : null}
 
-        {!error && data && activeView === "insights" ? <InsightsPage data={data} onNavigate={navigateToView} /> : null}
+        {!error && data && activeView === "insights" ? <InsightsPage data={data} onNavigate={navigateToView} onReviewUnpricedSessions={() => openSessionsWithSearch("cannot be priced")} /> : null}
 
-        {!error && data && activeView === "sessions" ? <SessionsPage data={data} displaySettings={displaySettings} setDisplaySettings={updateDisplaySettings} onOpenSession={openSession} /> : null}
+        {!error && data && activeView === "sessions" ? (
+          <SessionsPage
+            data={data}
+            displaySettings={displaySettings}
+            setDisplaySettings={updateDisplaySettings}
+            onOpenSession={openSession}
+            searchIntent={sessionSearchIntent}
+            onSearchIntentConsumed={clearSessionSearchIntent}
+          />
+        ) : null}
 
         {!error && data && activeView === "sessionDetail" ? (
           <SessionDetailPage
             session={findSessionById(filterOptionsData ?? data, selectedSessionId)}
+            initialTab={sessionDetailInitialTab}
             onBack={() => navigateToView("sessions")}
           />
         ) : null}
@@ -571,21 +659,6 @@ function App() {
                   </ResponsiveContainer>
                 </ChartPanel>
               </div>
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-              <RecentSessionsPanel sessions={recentSessions(data.sessions).slice(0, 6)} onOpenSession={openSession} />
-              <KeyInsightsPanel insights={data.health.keyInsights.slice(0, 4)} compact />
-            </div>
-
-            <div className="panel overflow-hidden">
-              <div className="panel-heading">
-                <div>
-                  <h2>{data.summary.knownCostSessions > 0 ? "Highest Estimated Cost Sessions" : "Largest Sessions"}</h2>
-                  <p className="text-sm text-slate-600">Sessions to inspect first for estimated API-equivalent cost, token volume, or productivity signals.</p>
-                </div>
-              </div>
-              <ExpensiveSessionsTable sessions={topSessions(data.sessions, data.summary.knownCostSessions > 0)} pageSize={displaySettings.tablePageSize} onOpenSession={openSession} onOpenRepo={openRepo} />
             </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
@@ -915,8 +988,8 @@ function OverviewKpis({ data, onOpenRepo }: { data: ApiData; onOpenRepo: (repoId
   const summary = data.summary;
   const hasKnownCost = summary.knownCostSessions > 0;
   const topRepo = data.repos[0];
-  const usefulPct = summary.sessionCount > 0 ? (summary.sessionCount - summary.noCodeChangeSessions) / summary.sessionCount : 0;
   const commandIssueRate = summary.shellCommandCount > 0 ? summary.importantCommandFailures / summary.shellCommandCount : 0;
+  const costTierBadge = overviewServiceTierBadge(data);
   const items: Array<{ label: string; value: React.ReactNode; detail?: React.ReactNode; icon: React.ReactElement; strong?: boolean; help?: React.ReactNode }> = [
     {
       label: "Total Tokens",
@@ -944,7 +1017,12 @@ function OverviewKpis({ data, onOpenRepo }: { data: ApiData; onOpenRepo: (repoId
     {
       label: "API-equivalent Cost",
       value: <CostValue value={summary.estimatedCostUsd} label={hasKnownCost ? money(summary.estimatedCostUsd) : "Needs token split"} />,
-      detail: "Estimate only. Not your actual subscription bill.",
+      detail: (
+        <span className="kpi-detail-stack">
+          <span>Estimate only. Not your actual subscription bill.</span>
+          {costTierBadge}
+        </span>
+      ),
       icon: <CircleDollarSign />,
       strong: true,
       help: <CostBreakdownPopover value={summary.estimatedCostUsd} breakdown={summary} />,
@@ -957,30 +1035,18 @@ function OverviewKpis({ data, onOpenRepo }: { data: ApiData; onOpenRepo: (repoId
       strong: true,
     },
     {
-      label: "Sessions",
-      value: <CountValue value={summary.sessionCount} noun="session" />,
-      detail: summary.skippedZeroTokenSessions > 0 ? `${count(summary.skippedZeroTokenSessions, "zero-token placeholder")} skipped` : "Token-bearing local sessions",
-      icon: <Terminal />,
-    },
-    {
-      label: "Sessions With File Edits",
-      value: <CountValue value={summary.sessionCount - summary.noCodeChangeSessions} noun="session" />,
-      detail: summary.sessionCount > 0 ? `${percent(usefulPct)} of sessions have detected file edits` : "No sessions in this view",
-      icon: <ChartNoAxesCombined />,
-    },
-    {
-      label: "Important Command Issue Rate",
+      label: "Possible Failed Command Rate",
       value: <PercentValue value={commandIssueRate} />,
-      detail: summary.shellCommandCount > 0 ? `${count(summary.importantCommandFailures, "important issue")} of ${count(summary.shellCommandCount, "command")}` : "No shell commands detected",
+      detail: summary.shellCommandCount > 0 ? `${count(summary.importantCommandFailures, "flagged command")} of ${count(summary.shellCommandCount, "command")}` : "No shell commands detected",
       icon: <TriangleAlert />,
       help: (
         <MetricHelpPopover
-          title="Important command issue rate"
+          title="Possible failed command rate"
           mainValue={percent(commandIssueRate)}
-          body="Share of detected shell commands that RepoSpend classified as blocking, repeated, or token-expensive command issues."
+          body="Share of detected shell commands that RepoSpend classified as blocking, repeated, or token-expensive failures."
           note="Harmless non-zero exits such as search misses and file-existence probes are not counted here."
           breakdown={[
-            { label: "Important issues", value: count(summary.importantCommandFailures, "issue") },
+            { label: "Flagged commands", value: count(summary.importantCommandFailures, "command") },
             { label: "Shell commands", value: count(summary.shellCommandCount, "command") },
             { label: "Harmless exits", value: count(summary.harmlessNonZeroEvents + summary.exploratoryMisses, "event") },
           ]}
@@ -1006,15 +1072,67 @@ function OverviewKpis({ data, onOpenRepo }: { data: ApiData; onOpenRepo: (repoId
   );
 }
 
-function TopActionsCard({ data, onNavigate, onOpenRepo, onOpenSession }: { data: ApiData; onNavigate: (view: ViewKey) => void; onOpenRepo: (repoId: string) => void; onOpenSession: (sessionId: string) => void }) {
+function overviewServiceTierBadge(data: ApiData): React.ReactNode {
+  const codex = data.sourceStats.find((source) => source.sourceId === "codex" && source.serviceTier);
+  if (codex?.serviceTier) {
+    return (
+      <Badge
+        label={`Codex ${serviceTierLabel(codex.serviceTier)} config`}
+        title={codex.serviceTierDetail ?? "Current Codex config service tier. Historical Codex sessions do not reliably store this per session."}
+        tone={serviceTierTone(codex.serviceTier)}
+      />
+    );
+  }
+
+  const claude = data.sourceStats.find((source) => source.sourceId === "claude" && source.serviceTier);
+  if (!claude?.serviceTier) return null;
+  return (
+    <Badge
+      label={`Claude ${serviceTierLabel(claude.serviceTier)} observed`}
+      title={claude.serviceTierDetail ?? "Claude service tier observed in local usage records."}
+      tone={serviceTierTone(claude.serviceTier)}
+    />
+  );
+}
+
+function sessionServiceTierMetadata(session: Session): React.ReactNode {
+  if (session.serviceTier) {
+    return (
+      <Badge
+        label={serviceTierLabel(session.serviceTier)}
+        title={session.serviceTierDetail}
+        tone={serviceTierTone(session.serviceTier)}
+      />
+    );
+  }
+  if (session.sourceClient === "codex") return "Not recorded per session";
+  return "Unknown";
+}
+
+function serviceTierLabel(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return "Unknown";
+  if (normalized === "mixed") return "Mixed";
+  if (normalized === "fast") return "Fast";
+  if (normalized === "priority") return "Priority";
+  if (normalized === "standard") return "Standard";
+  return normalized.split(/[-_\s]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
+function serviceTierTone(value: string): BadgeTone {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "fast" || normalized === "mixed" ? "warning" : "info";
+}
+
+function TopActionsCard({ data, onNavigate, onOpenRepo, onOpenSession }: { data: ApiData; onNavigate: (view: ViewKey) => void; onOpenRepo: (repoId: string) => void; onOpenSession: (sessionId: string, initialTab?: SessionDetailTab) => void }) {
   const actions = topDashboardActions(data);
   if (!actions.length) return null;
   return (
     <section className="panel top-actions-card">
       <div className="panel-heading">
         <div>
-          <h2>Top Actions</h2>
-          <p className="text-sm text-slate-600">Fastest next checks for the current filters.</p>
+          <h2>Start here</h2>
+          <p className="text-sm text-slate-600">Highest-leverage checks for the current filters.</p>
         </div>
       </div>
       <div className="top-actions-list">
@@ -1024,7 +1142,7 @@ function TopActionsCard({ data, onNavigate, onOpenRepo, onOpenSession }: { data:
             key={action.label}
             type="button"
             onClick={() => {
-              if (action.sessionId) onOpenSession(action.sessionId);
+              if (action.sessionId) onOpenSession(action.sessionId, action.sessionTab);
               else if (action.repoId) onOpenRepo(action.repoId);
               else onNavigate(action.view);
             }}
@@ -1042,8 +1160,12 @@ function TopActionsCard({ data, onNavigate, onOpenRepo, onOpenSession }: { data:
 }
 
 function SecondaryMetrics({ summary }: { summary: Summary }) {
+  const sessionsWithFileEdits = Math.max(summary.sessionCount - summary.noCodeChangeSessions, 0);
+  const usefulPct = summary.sessionCount > 0 ? sessionsWithFileEdits / summary.sessionCount : 0;
   return (
     <div className="secondary-metric-grid">
+      <MiniStat label="Sessions" value={<CountValue value={summary.sessionCount} noun="session" />} />
+      <MiniStat label="File-edit sessions" value={<CountValue value={sessionsWithFileEdits} noun="session" />} detail={summary.sessionCount > 0 ? `${percent(usefulPct)} of sessions` : "No sessions in this view"} />
       <MiniStat label="Total input tokens" value={<TokenValue value={summary.inputTokens} />} />
       <MiniStat label="Output tokens" value={<TokenValue value={summary.outputTokens} />} />
       <MiniStat label="Reasoning tokens" value={<TokenValue value={summary.reasoningTokens} />} />
@@ -1065,7 +1187,6 @@ function SecondaryMetrics({ summary }: { summary: Summary }) {
       />
       <MiniStat label="Files edited" value={<CountValue value={summary.fileEditCount} noun="file" />} />
       <MiniStat label="Commands run" value={<CountValue value={summary.shellCommandCount} noun="command" />} />
-      <MiniStat label="No-edit sessions" value={<CountValue value={summary.noCodeChangeSessions} noun="session" />} />
     </div>
   );
 }
@@ -1113,6 +1234,7 @@ function SourceBreakdownPanel({ data }: { data: ApiData }) {
 
 function DataHealthCard({ data, onOpenSettings }: { data: ApiData; onOpenSettings: () => void }) {
   const sourceLabels = data.sources.filter((source) => source.available).map((source) => source.label).join(", ") || "No active providers";
+  const confidence = data.confidence;
   return (
     <section className="panel data-health-card">
       <div className="data-health-main">
@@ -1126,12 +1248,25 @@ function DataHealthCard({ data, onOpenSettings }: { data: ApiData; onOpenSetting
         <button className="button" type="button" onClick={onOpenSettings}>View data sources</button>
       </div>
       <div className="data-health-grid">
+        <MiniStat label="Data confidence" value={`${confidence.label} (${confidence.score}/100)`} />
+        <MiniStat label="Token coverage" value={<PercentValue value={confidence.tokenDataPct} />} />
+        <MiniStat label="Pricing coverage" value={<PercentValue value={confidence.pricingCoveragePct} />} />
         <MiniStat label="Sessions scanned" value={<CountValue value={data.scan.sessionFileCount} noun="file" />} />
         <MiniStat label="Repos / folders discovered" value={<CountValue value={data.scan.repoCount} noun="item" />} />
         <MiniStat label="Parser issues" value={data.scan.parseFailureCount ? <CountValue value={data.scan.parseFailureCount} noun="issue" /> : "No parser issues found"} />
         <MiniStat label="Last scan" value={formatDateTime(data.scan.lastScannedAt)} />
         <MiniStat label="AI providers" value={sourceLabels} />
       </div>
+      {confidence.issues.length ? (
+        <div className="confidence-issue-list compact-confidence-list">
+          {confidence.issues.slice(0, 3).map((issue) => (
+            <div className="confidence-issue-row" key={issue.id}>
+              <Badge label={issue.tone} />
+              <span>{issue.title}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1178,37 +1313,6 @@ function TokenAccuracyCard({ data, compact = false }: { data: ApiData; compact?:
         <MiniStat label="Missing token data" value={<CountValue value={stats.sessionsMissingTokenData} noun="session" />} />
       </div>
     </section>
-  );
-}
-
-function RecentSessionsPanel({ sessions, onOpenSession }: { sessions: Session[]; onOpenSession: (sessionId: string) => void }) {
-  return (
-    <div className="panel overflow-hidden">
-      <div className="panel-heading">
-        <h2>Recent Sessions</h2>
-        <span className="text-xs text-slate-500">Recent activity worth scanning</span>
-      </div>
-      <div className="session-list">
-        {sessions.length ? sessions.map((session) => (
-          <button className="session-row session-row-rich session-row-button" type="button" key={session.id} onClick={() => onOpenSession(session.id)}>
-            <div className="session-icon">
-              <Terminal className="h-4 w-4" aria-hidden />
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</div>
-              <div className="truncate text-xs text-slate-500">
-                <RepoLabel name={session.repoName} verified={sessionIsRepoVerified(session)} /> · {sourceLabel(session.sourceClient)} · {session.sourceApp || surfaceLabel(session.detectedSurface)} · {session.startedAt ? session.startedAt.slice(0, 10) : "Unknown date"}
-              </div>
-              <BadgeRow labels={sessionBadges(session)} />
-            </div>
-            <div className="text-right">
-              <div className="text-sm font-semibold"><TokenValue value={session.totalTokens} showUnit={false} /></div>
-              <div className="text-xs text-slate-500"><CostValue value={session.estimatedCostUsd} /></div>
-            </div>
-          </button>
-        )) : <p className="p-4 text-sm text-slate-600">No sessions in this view.</p>}
-      </div>
-    </div>
   );
 }
 
@@ -1270,8 +1374,6 @@ function RtkDashboard({ gain, pricing, displaySettings }: { gain: RtkGain; prici
         <RtkHealthBanner gain={gain} />
         <RtkInstallGuide />
         <RtkExplainer />
-        <RtkCoverageGaps gain={gain} />
-        <RtkRecommendedActions actions={recommendedActions} />
         <RtkStatusSection gain={gain} />
       </section>
     );
@@ -1355,10 +1457,7 @@ function RtkDashboard({ gain, pricing, displaySettings }: { gain: RtkGain; prici
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <RtkCoverageGaps gain={gain} />
-        <RtkRecommendedActions actions={recommendedActions} />
-      </div>
+      <RtkFollowUpGrid gain={gain} actions={recommendedActions} />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="panel overflow-hidden">
@@ -1392,6 +1491,15 @@ function RtkDashboard({ gain, pricing, displaySettings }: { gain: RtkGain; prici
         <pre className="raw-output">{gain.raw}</pre>
       </details>
     </section>
+  );
+}
+
+function RtkFollowUpGrid({ gain, actions }: { gain: RtkGain; actions: string[] }) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-2">
+      <RtkCoverageGaps gain={gain} />
+      <RtkRecommendedActions actions={actions} />
+    </div>
   );
 }
 
@@ -1904,7 +2012,7 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
             <MiniStat label="Estimated cost" value={<CostValue value={row.estimatedCostUsd} breakdown={row} />} />
             <MiniStat label="Total tokens" value={<TokenValue value={row.totalTokens} />} />
             <MiniStat label="Files edited" value={<CountValue value={row.fileEditCount} noun="file" />} />
-            <MiniStat label="Command issues" value={<CountValue value={row.failedCommandCount} noun="issue" />} />
+            <MiniStat label="Possible failed commands" value={<CountValue value={row.failedCommandCount} noun="command" />} />
             <MiniStat label="Tokens per edit" value={<TokenIntensityValue label={row.tokenRoiLabel} title={row.tokenRoiTitle} />} />
             <MiniStat label="Interpretation" value={tokenIntensity} />
             <MiniStat label="Top model" value={topModel ? topModel.label : "Unknown"} />
@@ -1940,7 +2048,7 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
                 ["expensive", "Expensive"],
                 ["partial", "Partial"],
                 ["longRunning", "Long-running"],
-                ["commandIssues", "Command issues"],
+                ["commandIssues", "Possible failed commands"],
                 ["opusOnly", "Opus only"],
               ] as Array<[RepoSessionQuickFilter, string]>).map(([value, label]) => (
                 <button
@@ -1982,7 +2090,7 @@ function RepoDiagnosisCard({ repo, sessions, concentration, topModel }: { repo: 
       <p className="repo-diagnosis-text">{sentence}</p>
       <div className="repo-diagnosis-points">
         <span>{topModel ? `${topModel.label} drives ${percent(topModel.costShare)} of known repo cost.` : "Model cost driver is unavailable."}</span>
-        <span>{repo.failedCommandCount > 0 ? `${count(repo.failedCommandCount, "important command issue")} detected.` : "No important command issues were detected."}</span>
+        <span>{repo.failedCommandCount > 0 ? `${count(repo.failedCommandCount, "possible failed command")} detected.` : "No possible failed commands were detected."}</span>
         <span>{repo.fileEditCount > 0 ? "File edit counts were detected, but stable paths may be unavailable." : "No file edits were detected in this filtered view."}</span>
       </div>
     </div>
@@ -2024,7 +2132,7 @@ function TopSessionsToReviewCard({ sessions, onOpenSession }: { sessions: RepoRe
       <div className="panel-heading">
         <div>
           <h2>Top sessions to review</h2>
-          <p className="text-sm text-slate-600">Picked by cost, duration, outcome, command issues, and unusual token volume.</p>
+          <p className="text-sm text-slate-600">Picked by cost, duration, outcome, possible failed commands, and unusual token volume.</p>
         </div>
       </div>
       <div className="repo-review-list">
@@ -2199,11 +2307,11 @@ function RepoCommandsTab({ sessions, commandTotals, onOpenSession }: { sessions:
           <MiniStat label="Repeated clusters" value={<CountValue value={commandTotals.repeated} noun="cluster" />} />
           <MiniStat label="Sessions to review" value={<CountValue value={reviewSessions.length} noun="session" />} />
         </div>
-        {commandTotals.important === 0 ? <p className="success-state mt-4">No important command issues detected.</p> : null}
+        {commandTotals.important === 0 ? <p className="success-state mt-4">No possible failed commands detected.</p> : null}
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="detail-card">
-          <h3>Important command issues</h3>
+          <h3>Possible failed command evidence</h3>
           <div className="mt-3 space-y-2">
             {issueSamples.filter(({ issue }) => issue.severity === "critical" || issue.severity === "warning").slice(0, 8).map(({ session, issue }, index) => (
               <div className="issue-row" key={`${session.id}-${issue.command}-${index}`}>
@@ -2217,7 +2325,7 @@ function RepoCommandsTab({ sessions, commandTotals, onOpenSession }: { sessions:
                 </div>
               </div>
             ))}
-            {!issueSamples.some(({ issue }) => issue.severity === "critical" || issue.severity === "warning") ? <p className="text-sm text-slate-600">No important command issue samples were available.</p> : null}
+            {!issueSamples.some(({ issue }) => issue.severity === "critical" || issue.severity === "warning") ? <p className="text-sm text-slate-600">No possible failed command samples were available.</p> : null}
           </div>
         </div>
         <div className="detail-card">
@@ -2327,7 +2435,7 @@ function SessionsTable({
             {hasColumn("messages") ? <SortableTh label="Messages" column="messages" sort={sort} setSort={setSort} /> : null}
             {hasColumn("prompts") ? <SortableTh label="Prompts" column="prompts" sort={sort} setSort={setSort} /> : null}
             {hasColumn("commands") ? <SortableTh label="Commands" column="commands" sort={sort} setSort={setSort} /> : null}
-            {hasColumn("commandIssues") ? <SortableTh label="Command issues" column="failed" sort={sort} setSort={setSort} /> : null}
+            {hasColumn("commandIssues") ? <SortableTh label="Possible failed commands" column="failed" sort={sort} setSort={setSort} /> : null}
             {hasColumn("edits") ? <SortableTh label="Edits" column="files" sort={sort} setSort={setSort} /> : null}
             {hasColumn("parse") ? <th>Parse</th> : null}
             {!compact && hasColumn("tokenMethod") ? <th>Token method</th> : null}
@@ -2349,7 +2457,7 @@ function SessionsTable({
               {!compact ? <td><div className="source-app-cell"><SourceBadge source={session.sourceClient} /><AppLabel app={session.sourceApp} surface={session.detectedSurface} /></div></td> : null}
               <td className="max-w-72 truncate font-medium" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</td>
               <td><OutcomeBadge outcome={session.sessionOutcome} /></td>
-              <td><ModelLabel model={session.model} /></td>
+              <td><ModelLabel model={sessionDisplayModel(session)} /></td>
               <td>{session.startedAt ? session.startedAt.slice(0, 10) : "Unknown"}</td>
               <td>{formatDuration(session.durationMs)}</td>
               <td><CostValue value={session.estimatedCostUsd} session={session} /></td>
@@ -2383,18 +2491,18 @@ function SessionsTable({
   );
 }
 
-function SessionDetailPanel({ session }: { session: Session | undefined }) {
-  const [activeTab, setActiveTab] = React.useState<SessionDetailTab>("overview");
+function SessionDetailPanel({ session, initialTab = "overview" }: { session: Session | undefined; initialTab?: SessionDetailTab }) {
+  const [activeTab, setActiveTab] = React.useState<SessionDetailTab>(initialTab);
   const [timelineSearch, setTimelineSearch] = React.useState("");
   const [timelineRole, setTimelineRole] = React.useState<TimelineRoleFilter>("all");
   const [expandedTimelineItems, setExpandedTimelineItems] = React.useState<Set<string>>(() => new Set());
 
   React.useEffect(() => {
-    setActiveTab("overview");
+    setActiveTab(initialTab);
     setTimelineSearch("");
     setTimelineRole("all");
     setExpandedTimelineItems(new Set());
-  }, [session?.id]);
+  }, [initialTab, session?.id]);
 
   if (!session) {
     return (
@@ -2408,6 +2516,7 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
   const concerns = sessionConcernSignals(session);
   const importantIssues = (session.commandIssueSamples ?? []).filter((issue) => issue.severity === "critical" || issue.severity === "warning");
   const commandIssueSamples = importantIssues.length ? importantIssues : (session.commandIssueSamples ?? []).slice(0, 6);
+  const hasCommandReview = importantCommandFailures(session) > 0;
   const promptTimeline = session.promptTimeline ?? [];
   const tabs: Array<{ key: SessionDetailTab; label: string }> = [
     { key: "overview", label: "Overview" },
@@ -2452,7 +2561,7 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
         <MiniStat label="Estimated cost" value={<CostValue value={session.estimatedCostUsd} session={session} />} />
         <MiniStat label="Total tokens" value={<TokenValue value={session.totalTokens} />} />
         <MiniStat label="Duration" value={formatDuration(session.durationMs)} />
-        <MiniStat label="Model" value={<ModelLabel model={session.model} />} />
+        <MiniStat label="Model" value={<ModelLabel model={sessionDisplayModel(session)} />} />
         <MiniStat label="File edits" value={<CountValue value={session.fileEditCount ?? 0} noun="edit" />} />
         <MiniStat label="Commands" value={<CountValue value={session.shellCommandCount ?? 0} noun="command" />} />
       </div>
@@ -2475,10 +2584,15 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
       <div className="session-detail-body">
         {activeTab === "overview" ? (
           <div className="session-tab-grid">
+            {hasCommandReview ? (
+              <SessionDetailCard className="session-card-wide" title="Why this session was flagged">
+                <CommandReviewEvidence session={session} issues={commandIssueSamples} />
+              </SessionDetailCard>
+            ) : null}
             <SessionDetailCard title="Highlights">
               {positives.length ? <SignalList items={positives} /> : <p className="detail-muted">No strong positive signals were detected from local metadata.</p>}
             </SessionDetailCard>
-            <SessionDetailCard title="Needs attention">
+            <SessionDetailCard title="Review before action">
               {concerns.length ? <SignalList items={concerns} /> : <p className="detail-muted">No obvious issues detected for this session.</p>}
             </SessionDetailCard>
             <SessionDetailCard title="Session activity">
@@ -2487,7 +2601,7 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
                 <MiniStat label="Prompts" value={<CountValue value={session.userPromptCount ?? 0} noun="prompt" />} />
                 <MiniStat label="Assistant replies" value={<CountValue value={session.assistantMessageCount ?? 0} noun="reply" />} />
                 <MiniStat label="Tool calls" value={<CountValue value={session.toolCallCount ?? 0} noun="tool call" />} />
-                <MiniStat label="Command issues" value={<CountValue value={importantCommandFailures(session)} noun="issue" />} />
+                <MiniStat label="Possible failed commands" value={<CountValue value={importantCommandFailures(session)} noun="command" />} />
                 <MiniStat
                   label="Compactions"
                   value={<CompactionSummary compaction={session.compaction} />}
@@ -2571,26 +2685,8 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
                 <MiniStat label="Harmless exits" value={<CountValue value={(session.harmlessNonZeroEvents ?? 0) + (session.exploratoryMisses ?? 0)} noun="event" />} />
               </div>
             </SessionDetailCard>
-            <SessionDetailCard className="session-card-wide" title="Command diagnostics">
-              {commandIssueSamples.length ? (
-                <div className="space-y-2">
-                  {commandIssueSamples.map((issue, index) => (
-                    <div className="issue-row" key={`${issue.command}-${index}`}>
-                      <div>
-                        <div className="font-mono text-xs text-slate-100" title={issue.command}>{shortCommand(issue.command)}</div>
-                        <p className="mt-1 text-xs text-slate-500">{issue.reason}</p>
-                      </div>
-                      <div className="issue-row-badges">
-                        <Badge label={readableIssueLabel(issue.category)} />
-                        <Badge label={readableIssueLabel(issue.severity)} />
-                        <Badge label={`${issue.impact} impact`} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="detail-muted">No command issue detail was available in this local session log.</p>
-              )}
+            <SessionDetailCard className="session-card-wide" title="Possible failed command evidence">
+              <CommandReviewEvidence session={session} issues={commandIssueSamples} />
             </SessionDetailCard>
           </div>
         ) : null}
@@ -2631,6 +2727,7 @@ function SessionDetailPanel({ session }: { session: Session | undefined }) {
                 <MetadataRow label="Provider" value={session.provider ?? "Unknown"} />
                 <MetadataRow label="AI provider" value={sourceLabel(session.sourceClient)} />
                 <MetadataRow label="App / surface" value={session.sourceApp || surfaceLabel(session.detectedSurface)} />
+                <MetadataRow label="Service tier" value={sessionServiceTierMetadata(session)} />
                 <MetadataRow label="Source file" value={shortPath(session.sourcePath)} title={session.sourcePath} />
               </div>
             </SessionDetailCard>
@@ -2688,7 +2785,7 @@ function TokenBreakdownGrid({ session }: { session: Session }) {
   );
 }
 
-function MetadataRow({ label, value, title }: { label: string; value: React.ReactNode; title?: string }) {
+function MetadataRow({ label, value, title }: { label: string; value: React.ReactNode; title?: string | undefined }) {
   return (
     <div className="metadata-row">
       <span>{label}</span>
@@ -2702,7 +2799,7 @@ function sessionSummarySentence(session: Session): string {
   if (session.totalTokens >= 1_000_000) descriptors.push("High-token session");
   else descriptors.push(`${tokens(session.totalTokens)} session`);
   descriptors.push(`with ${cacheReuseLabel(session)} cache reuse`);
-  descriptors.push(importantCommandFailures(session) === 0 ? "and no command issues" : `and ${count(importantCommandFailures(session), "command issue")}`);
+  descriptors.push(importantCommandFailures(session) === 0 ? "and no possible failed commands" : `and ${count(importantCommandFailures(session), "possible failed command")}`);
   return `${descriptors.join(" ")}.`;
 }
 
@@ -2732,11 +2829,11 @@ function costDriverExplanation(session: Session): string {
   return `The largest token bucket was ${top.label} at ${tokens(top.value)}. Cost is estimated from local token counts and the local pricing table, so it is an API-equivalent estimate rather than an invoice.`;
 }
 
-function SessionDetailPage({ session, onBack }: { session: Session | undefined; onBack: () => void }) {
+function SessionDetailPage({ session, initialTab, onBack }: { session: Session | undefined; initialTab: SessionDetailTab; onBack: () => void }) {
   return (
     <section className="mt-4 space-y-4">
       <button className="text-button" type="button" onClick={onBack}>Back to sessions</button>
-      <SessionDetailPanel session={session} />
+      <SessionDetailPanel session={session} initialTab={initialTab} />
     </section>
   );
 }
@@ -2769,7 +2866,7 @@ function SortableTh<T extends string>({
 }
 
 function EmptyState({ data, onRefresh }: { data: ApiData; onRefresh: () => void }) {
-  const sourceLabels = data.sources.map((source) => source.label).join(", ") || "Codex, Claude Code";
+  const sourceLabels = data.sources.map((source) => source.label).join(", ") || "Codex, Claude Code, GitHub Copilot";
   const sourcePaths = data.sources.flatMap((source) => source.paths);
   return (
     <div className="panel mt-4 p-6">
@@ -2777,7 +2874,7 @@ function EmptyState({ data, onRefresh }: { data: ApiData; onRefresh: () => void 
         <Search className="mt-1 h-5 w-5 text-amber" aria-hidden />
         <div>
           <h2 className="text-base font-semibold">RepoSpend could not find local usage sessions yet.</h2>
-          <p className="mt-1 text-sm text-slate-600">Providers scanned: {sourceLabels}. Run Codex or Claude Code locally, then refresh the scan. RepoSpend reads local files read-only and never mutates source data.</p>
+          <p className="mt-1 text-sm text-slate-600">Providers scanned: {sourceLabels}. Run Codex, Claude Code, or GitHub Copilot locally, then refresh the scan. RepoSpend reads local files read-only and never mutates source data.</p>
           <div className="source-checklist mt-4">
             {data.sourceStats.map((source) => (
               <div className="source-check-row" key={source.sourceId ?? source.homePath ?? source.sessionsPath ?? source.statePath ?? "source"}>
@@ -2821,7 +2918,7 @@ function LoadingState({ compact = false, data }: { compact?: boolean; data?: Api
   const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
   const cursorEnabled = cursorSourceEnabled(data);
   const stages = [
-    { label: "Discovering local source files", detail: cursorEnabled ? "Codex, Claude Code, Cursor, and RTK paths" : "Codex, Claude Code, and RTK paths" },
+    { label: "Discovering local source files", detail: cursorEnabled ? "Codex, Claude Code, GitHub Copilot, Cursor, and RTK paths" : "Codex, Claude Code, GitHub Copilot, and RTK paths" },
     { label: "Parsing sessions and token checkpoints", detail: "Reading transcripts and local SQLite/vscdb data" },
     { label: "Grouping by repo or inferred folder", detail: "Resolving cwd paths, models, warnings, and surfaces" },
     { label: "Estimating API-equivalent cost", detail: "Applying local pricing and dashboard filters" },
@@ -2830,6 +2927,7 @@ function LoadingState({ compact = false, data }: { compact?: boolean; data?: Api
   const sourceRows = [
     { id: "codex", label: "Codex", detail: "CLI sessions and token checkpoints", count: data ? sourceImportedSessions(data, "codex") : 0 },
     { id: "claude", label: "Claude Code", detail: "Project JSONL transcripts and history", count: data ? sourceImportedSessions(data, "claude") : 0 },
+    { id: "copilot", label: "GitHub Copilot", detail: "OpenTelemetry exports and VS Code chat transcripts", count: data ? sourceImportedSessions(data, "copilot") : 0 },
     ...(cursorEnabled ? [{ id: "cursor", label: "Cursor", detail: "Experimental JSONL and SQLite/vscdb discovery", count: data ? sourceImportedSessions(data, "cursor") : 0 }] : []),
     { id: "rtk", label: "RTK", detail: "Local token-savings report when available", count: data?.rtkGain?.available ? 1 : 0 },
   ];
@@ -2879,18 +2977,20 @@ function LoadingState({ compact = false, data }: { compact?: boolean; data?: Api
 const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
   { id: "pricing", label: "Pricing" },
   { id: "sources", label: "Data Sources" },
+  { id: "doctor", label: "Data Doctor" },
   { id: "tokens", label: "Token Counting" },
   { id: "privacy", label: "Privacy" },
   { id: "advanced", label: "Advanced" },
 ];
 
-const apiEquivalentCopy = "RepoSpend shows API-equivalent cost estimates. This is not your actual bill. Local Codex and Claude Code logs may include token counts, but they do not always include your real subscription, credit, cache, or provider billing details.";
+const apiEquivalentCopy = "RepoSpend shows API-equivalent cost estimates. This is not your actual bill. Local Codex, Claude Code, and GitHub Copilot data may include token counts, but they do not always include your real subscription, credit, cache, or provider billing details.";
 
 function SettingsStatusBanner({ data, onRescan }: { data: ApiData; onRescan: () => void }) {
   const codex = sourceImportedSessions(data, "codex");
   const claude = sourceImportedSessions(data, "claude");
+  const copilot = sourceImportedSessions(data, "copilot");
   const cursor = sourceImportedSessions(data, "cursor");
-  const sourceCounts = [count(codex, "Codex session"), count(claude, "Claude Code session")];
+  const sourceCounts = [count(codex, "Codex session"), count(claude, "Claude Code session"), count(copilot, "Copilot session")];
   if (cursorSourceEnabled(data)) sourceCounts.push(count(cursor, "Cursor session"));
   return (
     <div className="settings-status-banner">
@@ -2908,6 +3008,106 @@ function SettingsStatusBanner({ data, onRescan }: { data: ApiData; onRescan: () 
   );
 }
 
+type PricingGapReason = "missingPrice" | "missingTokenDetail" | "missingModel" | "other";
+type PricingGapSummary = {
+  total: number;
+  missingPrice: number;
+  missingTokenDetail: number;
+  missingModel: number;
+  other: number;
+  missingPriceModels: string[];
+};
+
+function PricingGapPanel({ gap, onReviewUnpricedSessions }: { gap: PricingGapSummary; onReviewUnpricedSessions: () => void }) {
+  const hasGaps = gap.total > 0;
+  const modelText = gap.missingPriceModels.length ? ` for ${listText(gap.missingPriceModels.slice(0, 3))}${gap.missingPriceModels.length > 3 ? " and more" : ""}` : "";
+  return (
+    <div className={`pricing-gap-panel ${hasGaps ? "pricing-gap-attention" : "pricing-gap-good"}`}>
+      <div>
+        <div className="pricing-gap-eyebrow">{hasGaps ? "Pricing gap triage" : "Pricing coverage"}</div>
+        <h3>{hasGaps ? `${count(gap.total, "token-bearing session")} cannot show API-equivalent cost` : "All token-bearing sessions can be priced"}</h3>
+        <p>
+          {gap.missingPrice > 0
+            ? `${count(gap.missingPrice, "session")} need usable model rates${modelText}.`
+            : "Every used model with detailed token data has a usable rate."}
+          {" "}
+          {gap.missingTokenDetail > 0
+            ? `${count(gap.missingTokenDetail, "session")} are missing detailed token splits, so adding prices will not fix those rows.`
+            : "No token-split gaps were detected."}
+          {" "}
+          {gap.other > 0 ? `${count(gap.other, "session")} need session review after the next scan because the model rate looks usable but no cost was produced.` : null}
+        </p>
+      </div>
+      <div className="pricing-gap-stats" aria-label="Unpriced session causes">
+        <PricingGapStat label="Missing rates" value={gap.missingPrice} />
+        <PricingGapStat label="Token detail" value={gap.missingTokenDetail} />
+        <PricingGapStat label="Model missing" value={gap.missingModel} />
+        <PricingGapStat label="Review" value={gap.other} />
+      </div>
+      {hasGaps ? (
+        <button className="button" type="button" onClick={onReviewUnpricedSessions}>
+          Review unpriced sessions
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function PricingGapStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="pricing-gap-stat">
+      <span>{label}</span>
+      <strong>{compactNumber(value)}</strong>
+    </div>
+  );
+}
+
+function pricingGapSummary(sessions: Session[], draft: Record<string, ModelPricing>): PricingGapSummary {
+  const summary: PricingGapSummary = {
+    total: 0,
+    missingPrice: 0,
+    missingTokenDetail: 0,
+    missingModel: 0,
+    other: 0,
+    missingPriceModels: [],
+  };
+  const modelIds = new Set<string>();
+  for (const session of sessions) {
+    if (session.estimatedCostUsd !== undefined || session.totalTokens <= 0) continue;
+    summary.total += 1;
+    const reason = pricingGapReason(session, draft);
+    if (reason === "missingPrice") {
+      summary.missingPrice += 1;
+      if (session.model) modelIds.add(session.model);
+    } else if (reason === "missingTokenDetail") {
+      summary.missingTokenDetail += 1;
+    } else if (reason === "missingModel") {
+      summary.missingModel += 1;
+    } else {
+      summary.other += 1;
+    }
+  }
+  summary.missingPriceModels = [...modelIds].sort();
+  return summary;
+}
+
+function pricingGapReason(session: Session, draft: Record<string, ModelPricing>): PricingGapReason {
+  if (session.warnings.includes("missing_token_breakdown") || session.warnings.includes("unknown_cost") || session.warnings.includes("cursor_cost_not_estimated_from_prompt_tokens") || session.warnings.includes("copilot_partial_token_breakdown") || !sessionHasDetailedTokenInputs(session)) {
+    return "missingTokenDetail";
+  }
+  const model = session.model?.trim();
+  if (!model || model === "unknown-model") return "missingModel";
+  return isUsableModelPricing(resolvePricingForModel(model, draft).pricing) ? "other" : "missingPrice";
+}
+
+function sessionHasDetailedTokenInputs(session: Session): boolean {
+  return session.inputTokens > 0
+    || session.cachedInputTokens > 0
+    || (session.cacheCreationInputTokens ?? 0) > 0
+    || session.outputTokens > 0
+    || session.reasoningTokens > 0;
+}
+
 function SettingsPricingTab({
   data,
   draft,
@@ -2915,6 +3115,7 @@ function SettingsPricingTab({
   status,
   onSave,
   onReset,
+  onReviewUnpricedSessions,
 }: {
   data: ApiData;
   draft: Record<string, ModelPricing>;
@@ -2922,6 +3123,7 @@ function SettingsPricingTab({
   status: string | null;
   onSave: () => Promise<void>;
   onReset: () => void;
+  onReviewUnpricedSessions: () => void;
 }) {
   const [newModel, setNewModel] = React.useState("");
   const [search, setSearch] = React.useState("");
@@ -2930,6 +3132,7 @@ function SettingsPricingTab({
   const usedModels = React.useMemo(() => new Set(data.models.map((model) => model.id)), [data.models]);
   const usageCounts = React.useMemo(() => new Map(data.models.map((model) => [model.id, model.sessionCount])), [data.models]);
   const rows = pricingRows(draft, data.models);
+  const pricingGap = React.useMemo(() => pricingGapSummary(data.sessions, draft), [data.sessions, draft]);
 
   const updatePrice = (model: string, key: keyof ModelPricing, value: string) => {
     const parsed = value === "" ? undefined : Number(value);
@@ -2967,7 +3170,7 @@ function SettingsPricingTab({
     if (!matchesSearch) return false;
     if (providerFilter !== "all" && provider !== providerFilter) return false;
     if (viewFilter === "used" && !used) return false;
-    if (viewFilter === "missing" && !missing) return false;
+    if (viewFilter === "missing" && (!missing || !used)) return false;
     return true;
   });
   const hiddenUnused = rows.filter((row) => !usedModels.has(row.model)).length;
@@ -2987,16 +3190,20 @@ function SettingsPricingTab({
         </div>
       </div>
 
+      <PricingGapPanel gap={pricingGap} onReviewUnpricedSessions={onReviewUnpricedSessions} />
+
       <div className="pricing-toolbar">
         <label className="search-field pricing-search">
           <Search className="h-4 w-4" aria-hidden />
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search model names" />
         </label>
-        <div className="pricing-filter-group" aria-label="Provider filter">
+        <div className="pricing-filter-group" aria-label="Model family filter">
           {([
-            ["all", "All providers"],
+            ["all", "All families"],
             ["openai", "OpenAI"],
             ["claude", "Claude"],
+            ["google", "Google"],
+            ["copilot", "GitHub-tuned"],
             ["custom", "Custom"],
           ] as Array<[PricingProviderFilter, string]>).map(([filter, label]) => (
             <button key={filter} className={`quick-filter ${providerFilter === filter ? "active" : ""}`} type="button" onClick={() => setProviderFilter(filter)}>
@@ -3007,7 +3214,7 @@ function SettingsPricingTab({
         <div className="pricing-filter-group" aria-label="Model view">
           {([
             ["used", "Used models"],
-            ["missing", "Missing prices"],
+            ["missing", "Used missing prices"],
             ["all", "All models"],
           ] as Array<[PricingViewFilter, string]>).map(([filter, label]) => (
             <button key={filter} className={`quick-filter ${viewFilter === filter ? "active" : ""}`} type="button" onClick={() => setViewFilter(filter)}>
@@ -3064,7 +3271,13 @@ function SettingsPricingTab({
           </tbody>
         </table>
       </div>
-      {visibleRows.length === 0 ? <p className="settings-empty-note">No models match the current filters.</p> : null}
+      {visibleRows.length === 0 ? (
+        <p className="settings-empty-note">
+          {viewFilter === "missing"
+            ? "No used models are missing usable rates. If sessions still cannot be priced, review them for missing token splits or missing model metadata."
+            : "No models match the current filters."}
+        </p>
+      ) : null}
       <div className="settings-supporting-copy">
         <p>Rates are USD per 1M tokens. Saving writes local RepoSpend settings under <code>~/.repospend/</code> unless <code>repospend.config.json</code> sets <code>pricingPath</code>.</p>
         {(data.pricing.info.sourceUrls ?? [{ label: data.pricing.info.sourceName, url: data.pricing.info.sourceUrl }]).map((source) => (
@@ -3091,7 +3304,7 @@ function SettingsDataSourcesTab({ data, status, onSaveConfig }: { data: ApiData;
       <div className="settings-section-header">
         <div>
           <h2>Data sources</h2>
-          <p>RepoSpend reads Codex and Claude Code local data read-only, then groups sessions by Git repo where possible and folder/path fallback otherwise.</p>
+          <p>RepoSpend reads Codex, Claude Code, and GitHub Copilot local data read-only, then groups sessions by Git repo where possible and folder/path fallback otherwise.</p>
         </div>
       </div>
       <label className="settings-toggle-card">
@@ -3122,6 +3335,10 @@ function SettingsDataSourcesTab({ data, status, onSaveConfig }: { data: ApiData;
               <MiniStat label="Parse issues" value={source.parseFailureCount ? <CountValue value={source.parseFailureCount} noun="issue" /> : "None"} />
               <MiniStat label="Primary data" value={sourcePrimaryDataFound(source) ? "Found" : "Not found"} />
               {source.sourceId === "cursor" ? <MiniStat label="SQLite/vscdb files" value={<CountValue value={source.databaseFileCount ?? 0} noun="file" />} /> : null}
+              {source.sourceId === "copilot" ? <MiniStat label="OTEL files" value={<CountValue value={source.otelFileCount ?? 0} noun="file" />} /> : null}
+              {source.sourceId === "copilot" ? <MiniStat label="VS Code transcripts" value={<CountValue value={source.transcriptFileCount ?? 0} noun="file" />} /> : null}
+              {source.sourceId === "copilot" ? <MiniStat label="CLI state files" value={<CountValue value={source.sessionStateFileCount ?? 0} noun="file" />} /> : null}
+              {source.serviceTier ? <MiniStat label="Service tier" value={<Badge label={serviceTierLabel(source.serviceTier)} title={source.serviceTierDetail} tone={serviceTierTone(source.serviceTier)} />} /> : null}
               <MiniStat label="Read-only status" value="Read only" />
               <MiniStat label="Last scan" value={formatDateTime(source.lastScannedAt)} />
             </div>
@@ -3169,6 +3386,54 @@ function SettingsTokenCountingTab({ data }: { data: ApiData }) {
           ))}
         </div>
       </details>
+    </div>
+  );
+}
+
+function SettingsDataDoctorTab({ data }: { data: ApiData }) {
+  const confidence = data.confidence;
+  const issueSummary = confidence.issues.length === 1
+    ? "1 item needs attention before this scan is fully trustworthy."
+    : `${count(confidence.issues.length, "item")} need attention before this scan is fully trustworthy.`;
+  return (
+    <div className="settings-tab-panel">
+      <div className="settings-section-header">
+        <div>
+          <h2>Data doctor</h2>
+          <p>Scan confidence is based on local source discovery, token coverage, pricing coverage, repo grouping, parser issues, and token-counting confidence.</p>
+        </div>
+        <Badge label={`${confidence.label} confidence`} />
+      </div>
+      <div className="doctor-score-panel">
+        <div>
+          <span className="doctor-score-label">Confidence score</span>
+          <strong>{confidence.score}/100</strong>
+        </div>
+        <p>{confidence.issues.length ? issueSummary : "No data-confidence issues detected in the current filtered view."}</p>
+      </div>
+      <div className="settings-detail-grid">
+        <MiniStat label="Token coverage" value={<span>{percent(confidence.tokenDataPct)} · {confidence.tokenDataSessions}/{confidence.sessionCount}</span>} />
+        <MiniStat label="Pricing coverage" value={<span>{percent(confidence.pricingCoveragePct)} · {confidence.pricedTokenSessions}/{confidence.tokenDataSessions}</span>} />
+        <MiniStat label="High-confidence tokens" value={<span>{percent(confidence.highConfidenceTokenPct)} · {confidence.highConfidenceTokenSessions}/{confidence.tokenDataSessions}</span>} />
+        <MiniStat label="Verified repo grouping" value={<span>{percent(confidence.verifiedRepoPct)} · {confidence.verifiedRepoSessions}/{confidence.sessionCount}</span>} />
+        <MiniStat label="Unpriced token sessions" value={<CountValue value={confidence.unpricedTokenSessions} noun="session" />} />
+        <MiniStat label="Missing token sessions" value={<CountValue value={confidence.missingTokenSessions} noun="session" />} />
+        <MiniStat label="Unknown surfaces" value={<CountValue value={confidence.unknownSurfaceSessions} noun="session" />} />
+        <MiniStat label="Source warnings" value={<CountValue value={confidence.sourceWarningCount} noun="warning" />} />
+      </div>
+      <div className="confidence-issue-list">
+        {confidence.issues.map((issue) => (
+          <div className={`confidence-issue-row confidence-${issue.tone}`} key={issue.id}>
+            <Badge label={issue.tone} />
+            <div>
+              <strong>{issue.title}</strong>
+              <p>{issue.detail}</p>
+              {issue.affectedSessionIds.length ? <span>{count(issue.affectedSessionIds.length, "affected session")}</span> : null}
+            </div>
+          </div>
+        ))}
+        {!confidence.issues.length ? <p className="settings-empty-note">Everything RepoSpend can verify locally looks healthy for this filtered view.</p> : null}
+      </div>
     </div>
   );
 }
@@ -3334,6 +3599,7 @@ function SettingsPage({
   onSaveConfig,
   onClearLocalData,
   onClearParseCache,
+  onReviewUnpricedSessions,
   onRescan,
 }: {
   data: ApiData;
@@ -3349,6 +3615,7 @@ function SettingsPage({
   onSaveConfig: (config: RepoSpendConfig) => Promise<void>;
   onClearLocalData: () => Promise<void>;
   onClearParseCache: () => Promise<void>;
+  onReviewUnpricedSessions: () => void;
   onRescan: () => void;
 }) {
   const [activeTab, setActiveTab] = React.useState<SettingsTab>("pricing");
@@ -3372,9 +3639,10 @@ function SettingsPage({
       </div>
       <div className="panel settings-panel">
         {activeTab === "pricing" ? (
-          <SettingsPricingTab data={data} draft={draft} setDraft={setDraft} status={status} onSave={onSave} onReset={onReset} />
+          <SettingsPricingTab data={data} draft={draft} setDraft={setDraft} status={status} onSave={onSave} onReset={onReset} onReviewUnpricedSessions={onReviewUnpricedSessions} />
         ) : null}
         {activeTab === "sources" ? <SettingsDataSourcesTab data={data} status={status} onSaveConfig={onSaveConfig} /> : null}
+        {activeTab === "doctor" ? <SettingsDataDoctorTab data={data} /> : null}
         {activeTab === "tokens" ? <SettingsTokenCountingTab data={data} /> : null}
         {activeTab === "privacy" ? <SettingsPrivacyTab /> : null}
         {activeTab === "advanced" ? (
@@ -3441,10 +3709,16 @@ function SessionColumnPicker({ columns, setColumns }: { columns: SessionColumnKe
   );
 }
 
-function SessionsPage({ data, displaySettings, setDisplaySettings, onOpenSession }: { data: ApiData; displaySettings: DisplaySettings; setDisplaySettings: (settings: Partial<DisplaySettings>) => void; onOpenSession: (sessionId: string) => void }) {
+function SessionsPage({ data, displaySettings, setDisplaySettings, onOpenSession, searchIntent, onSearchIntentConsumed }: { data: ApiData; displaySettings: DisplaySettings; setDisplaySettings: (settings: Partial<DisplaySettings>) => void; onOpenSession: (sessionId: string) => void; searchIntent?: SessionSearchIntent | null; onSearchIntentConsumed: () => void }) {
   const [search, setSearch] = React.useState("");
   const [quickFilter, setQuickFilter] = React.useState<QuickSessionFilter | "">("");
   const [visibleColumns, setVisibleColumns] = React.useState<SessionColumnKey[]>(defaultSessionColumns);
+  React.useEffect(() => {
+    if (!searchIntent) return;
+    setSearch(searchIntent.search);
+    setQuickFilter("");
+    onSearchIntentConsumed();
+  }, [onSearchIntentConsumed, searchIntent]);
   const filteredSessions = React.useMemo(
     () => data.sessions.filter((session) => sessionMatchesSearch(session, search) && sessionMatchesQuickFilter(session, quickFilter)),
     [data.sessions, quickFilter, search],
@@ -3457,9 +3731,11 @@ function SessionsPage({ data, displaySettings, setDisplaySettings, onOpenSession
   const filteredCommands = filteredSessions.reduce((sum, session) => sum + (session.shellCommandCount ?? 0), 0);
   const filteredEdits = filteredSessions.reduce((sum, session) => sum + (session.fileEditCount ?? 0), 0);
   const filteredReviewSessions = filteredSessions.filter(sessionNeedsCommandReview).length;
+  const costOutlierThreshold = React.useMemo(() => sessionCostOutlierThreshold(filteredSessions), [filteredSessions]);
+  const costOutlierCount = filteredSessions.filter((session) => isCostOutlier(session, costOutlierThreshold)).length;
   const quickOptions: Array<{ value: QuickSessionFilter; label: string }> = [
     { value: "highToken", label: "High token" },
-    { value: "failedCommands", label: "Command issues" },
+    { value: "failedCommands", label: "Possible failed commands" },
     { value: "noEdits", label: "No edits" },
     { value: "completed", label: "Completed" },
     { value: "partial", label: "Partial" },
@@ -3516,6 +3792,14 @@ function SessionsPage({ data, displaySettings, setDisplaySettings, onOpenSession
             })}
           </div>
           <ResultsSummary shown={filteredSessions.length} total={data.sessions.length} itemLabel="sessions" />
+          {costOutlierCount > 0 ? (
+            <div className="session-table-legend" aria-label="Session table legend">
+              <span className="session-legend-item">
+                <span className="session-legend-swatch session-legend-cost" aria-hidden />
+                {count(costOutlierCount, "cost outlier")}
+              </span>
+            </div>
+          ) : null}
         </div>
         {filteredSessions.length ? (
           <SessionsTable
@@ -3543,7 +3827,7 @@ function ReposPage({ data, onSelectRepo, selectedRepo, displaySettings, setDispl
         <MiniStat label="Repos / folders discovered" value={<CountValue value={rows.length} noun="item" />} />
         <MiniStat label="Top estimated cost repo / folder" value={topRepo ? topRepo.label : "None"} />
         <MiniStat label="Top repo/folder share" value={<PercentValue value={topRepoShare} />} />
-        <MiniStat label="Repos / folders with command issues" value={<CountValue value={reposWithIssues} noun="item" />} />
+        <MiniStat label="Repos / folders with possible failed commands" value={<CountValue value={reposWithIssues} noun="item" />} />
         <MiniStat label="Unpriced token sessions" value={<CountValue value={missingPricingSessions} noun="session" />} />
       </div>
       <div className="panel overflow-hidden">
@@ -3572,13 +3856,6 @@ function ReposPage({ data, onSelectRepo, selectedRepo, displaySettings, setDispl
   );
 }
 
-type ModelUsageRow = UsageGroup & {
-  providerLabel: string;
-  cacheRate: number;
-  averageCostUsd: number | undefined;
-  topRepo: RepoRow | undefined;
-  latestSession: Session | undefined;
-};
 
 function ModelsPage({
   data,
@@ -3765,21 +4042,156 @@ function activateClickableRow(event: React.KeyboardEvent, action: () => void) {
   action();
 }
 
-function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, setDisplaySettings }: { data: ApiData; onOpenRepo: (repoId: string) => void; onOpenSession: (sessionId: string) => void; displaySettings: DisplaySettings; setDisplaySettings: (settings: Partial<DisplaySettings>) => void }) {
+type CommandIssueSampleView = NonNullable<Session["commandIssueSamples"]>[number];
+
+function primaryCommandIssue(session: Session): CommandIssueSampleView | undefined {
+  const samples = session.commandIssueSamples ?? [];
+  return samples.find((issue) => issue.severity === "critical" || issue.severity === "warning") ?? samples[0];
+}
+
+function sortCommandReviewSessions(sessions: Session[]): Session[] {
+  return [...sessions].sort((a, b) => {
+    const issueDelta = importantCommandFailures(b) - importantCommandFailures(a);
+    if (issueDelta !== 0) return issueDelta;
+    const clusterDelta = (b.repeatedFailureClusters ?? 0) - (a.repeatedFailureClusters ?? 0);
+    if (clusterDelta !== 0) return clusterDelta;
+    return b.totalTokens - a.totalTokens;
+  });
+}
+
+function knownCostTotal(sessions: Session[]): number | undefined {
+  const known = sessions.filter((session) => session.estimatedCostUsd !== undefined);
+  if (!known.length) return undefined;
+  return Number(known.reduce((sum, session) => sum + (session.estimatedCostUsd ?? 0), 0).toFixed(6));
+}
+
+function commandIssueDisplayText(issue: CommandIssueSampleView): string {
+  const command = issue.command.trim();
+  if (!command || command.startsWith("{") || command.startsWith("[") || command.includes('"timestamp"')) {
+    return `${failureTypeLabel(issue.category)} signal`;
+  }
+  return shortCommand(command);
+}
+
+function commandIssueTitle(issue: CommandIssueSampleView): string {
+  const command = issue.command.trim();
+  if (!command || command.startsWith("{") || command.startsWith("[") || command.includes('"timestamp"')) {
+    return issue.reason;
+  }
+  return `${command}\n${issue.reason}`;
+}
+
+function CommandReviewEvidence({ session, issues }: { session: Session; issues: CommandIssueSampleView[] }) {
+  const possibleFailures = importantCommandFailures(session);
+  return (
+    <div className="command-review-evidence">
+      <p>
+        RepoSpend flagged {count(possibleFailures, "possible failed command")} from local command/tool records. Review this evidence before treating it as a repo bug.
+      </p>
+      {issues.length ? (
+        <div className="space-y-2">
+          {issues.map((issue, index) => (
+            <div className="issue-row" key={`${issue.command}-${index}`}>
+              <div>
+                <div className="font-mono text-xs text-slate-100" title={commandIssueTitle(issue)}>{commandIssueDisplayText(issue)}</div>
+                <p className="mt-1 text-xs text-slate-500">{issue.reason}</p>
+              </div>
+              <div className="issue-row-badges">
+                <Badge label={readableIssueLabel(issue.category)} />
+                <Badge label={readableIssueLabel(issue.severity)} />
+                <Badge label={`${issue.impact} impact`} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="detail-muted">No command evidence was available in this local session log.</p>
+      )}
+      <p className="command-review-note">
+        This is a triage signal, not a verdict. If the evidence is a search miss or unrelated output text, treat it as harmless.
+      </p>
+    </div>
+  );
+}
+
+function AgentFrictionActionPanel({
+  topRepo,
+  topSession,
+  reviewCost,
+  onOpenRepo,
+  onOpenSession,
+}: {
+  topRepo: AgentFrictionRepo | undefined;
+  topSession: Session | undefined;
+  reviewCost: number | undefined;
+  onOpenRepo: (repoId: string) => void;
+  onOpenSession: (sessionId: string, initialTab?: SessionDetailTab) => void;
+}) {
+  const topIssue = topSession ? primaryCommandIssue(topSession) : undefined;
+  const hasReview = Boolean(topRepo || topSession);
+  const failureLabel = failureTypeLabel(topRepo?.topFailureType ?? topIssue?.category);
+  return (
+    <div className={`friction-action-panel ${hasReview ? "friction-action-attention" : "friction-action-good"}`}>
+      <div className="friction-action-copy">
+        <div className="friction-action-eyebrow">{hasReview ? "Start with this repo" : "No action needed"}</div>
+        <h2>
+          {topRepo
+            ? `Possible ${failureLabel} failures in ${topRepo.repoName}`
+            : topSession
+              ? `Possible ${failureLabel} failure in ${topSession.repoName}`
+            : "No possible failed commands detected"}
+        </h2>
+        <p>
+          {hasReview
+            ? `${count(topRepo?.importantFailures ?? importantCommandFailures(topSession!), "flagged command")} across ${count(topRepo?.sessionsNeedingReview ?? 1, "session")}. Known API-equivalent cost in sessions to review: ${money(reviewCost)}.`
+            : "Non-zero shell exits in this filtered view are either absent or classified as harmless exploration."}
+        </p>
+        {topIssue ? <p className="friction-action-command" title={commandIssueTitle(topIssue)}>{commandIssueDisplayText(topIssue)}</p> : null}
+      </div>
+      {hasReview ? (
+        <div className="friction-action-buttons">
+          {topRepo ? <button className="button" type="button" onClick={() => onOpenRepo(topRepo.repoRoot)}>Open repo</button> : null}
+          {topSession ? <button className="button active-button" type="button" onClick={() => onOpenSession(topSession.id, "files")}>Open evidence</button> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CommandSignalCell({ session }: { session: Session }) {
+  const issue = primaryCommandIssue(session);
+  if (!issue) {
+    return <span className="text-xs text-slate-500">Review command evidence</span>;
+  }
+  return (
+    <div className="command-signal-cell">
+      <div className="command-signal-command" title={commandIssueTitle(issue)}>{commandIssueDisplayText(issue)}</div>
+      <p>{issue.reason}</p>
+    </div>
+  );
+}
+
+function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, setDisplaySettings }: { data: ApiData; onOpenRepo: (repoId: string) => void; onOpenSession: (sessionId: string, initialTab?: SessionDetailTab) => void; displaySettings: DisplaySettings; setDisplaySettings: (settings: Partial<DisplaySettings>) => void }) {
   const reviewSessions = data.sessions.filter(sessionNeedsCommandReview);
+  const sortedReviewSessions = sortCommandReviewSessions(reviewSessions);
   const harmlessSessions = data.sessions.filter((session) => importantCommandFailures(session) === 0 && ((session.harmlessNonZeroEvents ?? 0) > 0 || (session.exploratoryMisses ?? 0) > 0));
   const affectedRepos = agentFrictionRepos(data.sessions);
   const repoPager = usePagination(affectedRepos, displaySettings.tablePageSize);
-  const reviewPager = usePagination(reviewSessions, displaySettings.tablePageSize);
+  const reviewPager = usePagination(sortedReviewSessions, displaySettings.tablePageSize);
   const harmlessPager = usePagination(harmlessSessions, displaySettings.tablePageSize);
   const topRepo = affectedRepos[0];
+  const topReviewRepo = affectedRepos.find((repo) => repo.importantFailures > 0 || repo.repeatedFailureClusters > 0 || repo.sessionsNeedingReview > 0);
+  const topReviewSession = topReviewRepo ? sortedReviewSessions.find((session) => session.repoRoot === topReviewRepo.repoRoot) ?? sortedReviewSessions[0] : sortedReviewSessions[0];
+  const reviewCost = knownCostTotal(reviewSessions);
   return (
     <section className="mt-4 space-y-4">
+      <AgentFrictionActionPanel topRepo={topReviewRepo} topSession={topReviewSession} reviewCost={reviewCost} onOpenRepo={onOpenRepo} onOpenSession={onOpenSession} />
       <div className="page-summary-panel">
-        <MiniStat label="Important failures" value={<CountValue value={data.summary.importantCommandFailures} noun="issue" />} />
+        <MiniStat label="Possible failed commands" value={<CountValue value={data.summary.importantCommandFailures} noun="command" />} />
         <MiniStat label="Repeated failure clusters" value={<CountValue value={data.summary.repeatedFailureClusters} noun="cluster" />} />
         <MiniStat label="Harmless non-zero exits" value={<CountValue value={data.summary.harmlessNonZeroEvents + data.summary.exploratoryMisses} noun="event" />} />
         <MiniStat label="Sessions needing review" value={<CountValue value={reviewSessions.length} noun="session" />} />
+        <MiniStat label="Known cost under review" value={<CostValue value={reviewCost} />} />
         <MiniStat label="Top affected repo / folder" value={topRepo ? topRepo.repoName : "None"} />
       </div>
       <p className="text-xs text-slate-500">Total non-zero command events: {count(data.summary.nonZeroCommandEvents, "event")}.</p>
@@ -3788,12 +4200,12 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
         <summary className="advanced-summary">
           <span className="inline-flex items-center gap-2">
             <TriangleAlert className="h-4 w-4 text-amber" aria-hidden />
-            How Agent Friction is classified
+            How possible failed commands are classified
           </span>
         </summary>
         <div className="command-health-note-body">
           <p>
-            Many shell commands return a non-zero exit during normal exploration. RepoSpend separates blocking failures from harmless non-zero exits and focuses on repeated, blocking, or token-expensive command issues.
+            Many shell commands return a non-zero exit during normal exploration. RepoSpend separates blocking failures from harmless non-zero exits and focuses on repeated, blocking, or token-expensive command failures.
           </p>
           <p>
             Search misses, optional file probes, and Git diff checks are treated as low severity unless other evidence suggests they blocked progress. Builds, tests, installs, permissions, auth, database, deploy, and repeated failures are treated as important signals.
@@ -3805,7 +4217,7 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
         <div className="panel-heading">
           <div>
             <h2>Command signals by repo / folder</h2>
-            <p className="text-sm text-slate-600">Repos or folders where important command issues, harmless exits, or repeated clusters appear in the current filtered view.</p>
+            <p className="text-sm text-slate-600">Repos or folders where possible failed commands, harmless exits, or repeated clusters appear in the current filtered view.</p>
           </div>
           <div className="panel-actions">
             <LimitSelect label="Rows" value={displaySettings.tablePageSize} options={pageSizeOptions} onChange={(value) => setDisplaySettings({ tablePageSize: value })} />
@@ -3817,11 +4229,11 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
               <thead>
                 <tr>
                   <th>Repo / folder</th>
-                  <th>Important failures</th>
+                  <th>Possible failed commands</th>
                   <th>Harmless non-zero exits</th>
                   <th>Repeated clusters</th>
                   <th>Sessions needing review</th>
-                  <th>Top failure type</th>
+                  <th>Start here</th>
                   <th>Impact</th>
                   <th>API-equivalent cost</th>
                 </tr>
@@ -3834,7 +4246,12 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
                     <td><CountValue value={repo.harmlessNonZeroEvents} noun="event" showUnit={false} /></td>
                     <td><CountValue value={repo.repeatedFailureClusters} noun="cluster" showUnit={false} /></td>
                     <td><CountValue value={repo.sessionsNeedingReview} noun="session" showUnit={false} /></td>
-                    <td>{failureTypeLabel(repo.topFailureType)}</td>
+                    <td>
+                      <div className="friction-inspect-cell">
+                        <span>{failureTypeLabel(repo.topFailureType)}</span>
+                        <small>{repo.sessionsNeedingReview > 0 ? `Review ${count(repo.sessionsNeedingReview, "session")}` : "Mostly harmless exits"}</small>
+                      </div>
+                    </td>
                     <td><Badge label={issueImpactLabel(repo.impact)} /></td>
                     <td><CostValue value={repo.estimatedCostUsd} /></td>
                   </tr>
@@ -3845,7 +4262,7 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
           </div>
         ) : (
           <div className="p-4">
-            <p className="text-sm text-slate-600">No important command issues detected. Some harmless non-zero shell exits may still exist.</p>
+            <p className="text-sm text-slate-600">No possible failed commands detected. Some harmless non-zero shell exits may still exist.</p>
           </div>
         )}
       </div>
@@ -3853,8 +4270,8 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
       <div className="panel overflow-hidden">
         <div className="panel-heading">
           <div>
-            <h2>Sessions Needing Review</h2>
-            <p className="text-sm text-slate-600">Sessions with important failures, repeated clusters, high non-zero rates, or command issues in high-token work.</p>
+            <h2>Sessions to Review</h2>
+            <p className="text-sm text-slate-600">Sessions with possible failed commands, repeated clusters, high non-zero rates, or command signals in high-token work.</p>
           </div>
         </div>
         {reviewSessions.length ? (
@@ -3864,8 +4281,9 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
                 <tr>
                   <th>Session</th>
                   <th>Repo / folder</th>
+                  <th>Flagged command evidence</th>
                   <th>Outcome</th>
-                  <th>Important failures</th>
+                  <th>Possible failed commands</th>
                   <th>Harmless exits</th>
                   <th>Top failure type</th>
                   <th>Impact</th>
@@ -3875,9 +4293,10 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
               </thead>
               <tbody>
                 {reviewPager.items.map((session) => (
-                  <tr className="clickable-row" key={session.id} role="button" tabIndex={0} onClick={() => onOpenSession(session.id)} onKeyDown={(event) => activateClickableRow(event, () => onOpenSession(session.id))}>
+                  <tr className="clickable-row" key={session.id} role="button" tabIndex={0} onClick={() => onOpenSession(session.id, "files")} onKeyDown={(event) => activateClickableRow(event, () => onOpenSession(session.id, "files"))}>
                     <td className="max-w-80 truncate font-medium" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</td>
                     <td><RepoLabel name={session.repoName} verified={sessionIsRepoVerified(session)} /></td>
+                    <td><CommandSignalCell session={session} /></td>
                     <td><OutcomeBadge outcome={session.sessionOutcome} /></td>
                     <td><CountValue value={importantCommandFailures(session)} noun="issue" showUnit={false} /></td>
                     <td><CountValue value={(session.harmlessNonZeroEvents ?? 0) + (session.exploratoryMisses ?? 0)} noun="event" showUnit={false} /></td>
@@ -3891,7 +4310,7 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
             </table>
             <PaginationControls page={reviewPager.page} pageCount={reviewPager.pageCount} total={reviewSessions.length} pageSize={displaySettings.tablePageSize} onPageChange={reviewPager.setPage} />
           </div>
-        ) : <p className="p-4 text-sm text-slate-600">No important command issues detected. Some harmless non-zero shell exits may still exist.</p>}
+        ) : <p className="p-4 text-sm text-slate-600">No possible failed commands detected. Some harmless non-zero shell exits may still exist.</p>}
       </div>
 
       <details className="panel overflow-hidden">
@@ -3928,30 +4347,6 @@ function AgentFrictionPage({ data, onOpenRepo, onOpenSession, displaySettings, s
   );
 }
 
-function KeyInsightsPanel({ insights, compact = false }: { insights: KeyInsight[]; compact?: boolean }) {
-  return (
-    <section className="panel overflow-hidden">
-      <div className="panel-heading">
-        <div>
-          <h2>Key Insights</h2>
-          {!compact ? <p className="text-sm text-slate-600">The fastest read on where usage went and what to inspect first.</p> : null}
-        </div>
-      </div>
-      <div className={`${compact ? "key-insights-list" : "key-insights-grid"} p-4`}>
-        {insights.length ? insights.map((insight) => (
-          <div className={`key-insight key-insight-${insight.tone ?? "neutral"}`} key={insight.text}>
-            <div className="key-insight-topline">
-              <span>{insight.label}</span>
-              {insight.metric ? <strong>{insight.metric}</strong> : null}
-            </div>
-            <p>{insight.text}</p>
-          </div>
-        )) : <p className="text-sm text-slate-600">No insights available for this filtered view yet.</p>}
-      </div>
-    </section>
-  );
-}
-
 function WasteSignalsSection({ data, onOpenSessions }: { data: ApiData; onOpenSessions: () => void }) {
   const signals = data.health.wasteSignals;
   return (
@@ -3982,62 +4377,17 @@ function WasteSignalsSection({ data, onOpenSessions }: { data: ApiData; onOpenSe
   );
 }
 
-function ExpensiveSessionsTable({ sessions, pageSize, onOpenSession, onOpenRepo }: { sessions: Session[]; pageSize: number; onOpenSession: (sessionId: string) => void; onOpenRepo: (repoId: string) => void }) {
-  const [sort, setSort] = React.useState<{ key: SessionSortKey; direction: SortDirection }>({ key: "cost", direction: "desc" });
-  const sortedSessions = React.useMemo(() => sortSessionRows(sessions, sort), [sessions, sort]);
-  const pager = usePagination(sortedSessions, pageSize);
-  return (
-    <div className="table-wrap">
-      <table className="expensive-table">
-        <thead>
-          <tr>
-            <SortableTh label="Repo / folder" column="repo" sort={sort} setSort={setSort} />
-            <SortableTh label="Session" column="session" sort={sort} setSort={setSort} />
-            <SortableTh label="Provider / app/surface" column="app" sort={sort} setSort={setSort} />
-            <th>Outcome</th>
-            <SortableTh label="Model" column="model" sort={sort} setSort={setSort} />
-            <SortableTh label="Started" column="started" sort={sort} setSort={setSort} />
-            <SortableTh label="Duration" column="duration" sort={sort} setSort={setSort} />
-            <SortableTh label="API-equivalent cost" column="cost" sort={sort} setSort={setSort} />
-            <SortableTh label="Total tokens" column="tokens" sort={sort} setSort={setSort} />
-            <SortableTh label="Files edited" column="files" sort={sort} setSort={setSort} />
-            <SortableTh label="Command issues" column="failed" sort={sort} setSort={setSort} />
-            <th>Warnings</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pager.items.map((session) => (
-            <tr className="clickable-row" key={session.id} role="button" tabIndex={0} onClick={() => onOpenSession(session.id)} onKeyDown={(event) => activateClickableRow(event, () => onOpenSession(session.id))}>
-              <td>
-                <button className="row-link-button" type="button" onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenRepo(session.repoRoot || session.repoName);
-                }}><RepoLabel name={session.repoName} verified={sessionIsRepoVerified(session)} /></button>
-              </td>
-              <td className="max-w-80 truncate font-medium" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</td>
-              <td><div className="source-app-cell"><SourceBadge source={session.sourceClient} /><AppLabel app={session.sourceApp} surface={session.detectedSurface} /></div></td>
-              <td><OutcomeBadge outcome={session.sessionOutcome} /></td>
-              <td><ModelLabel model={session.model} /></td>
-              <td>{session.startedAt ? session.startedAt.slice(0, 10) : "Unknown"}</td>
-              <td>{formatDuration(session.durationMs)}</td>
-              <td><CostValue value={session.estimatedCostUsd} session={session} /></td>
-              <td><TokenValue value={session.totalTokens} showUnit={false} /></td>
-              <td><CountValue value={session.fileEditCount ?? 0} noun="file" showUnit={false} /></td>
-              <td><CountValue value={importantCommandFailures(session)} noun="issue" showUnit={false} /></td>
-              <td><BadgeRow labels={sessionBadges(session).filter((label) => label !== outcomeLabel(session.sessionOutcome))} /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <PaginationControls page={pager.page} pageCount={pager.pageCount} total={sortedSessions.length} pageSize={pageSize} onPageChange={pager.setPage} />
-    </div>
-  );
-}
-
-function InsightsPage({ data, onNavigate }: { data: ApiData; onNavigate: (view: ViewKey) => void }) {
+function InsightsPage({ data, onNavigate, onReviewUnpricedSessions }: { data: ApiData; onNavigate: (view: ViewKey) => void; onReviewUnpricedSessions: () => void }) {
   const insights = data.health.signals;
   const good = insights.filter((item) => item.tone === "good");
   const attention = insights.filter((item) => item.tone === "attention");
+  const handleAction = (item: InsightItem) => {
+    if (item.id === "unknown-cost") {
+      onReviewUnpricedSessions();
+      return;
+    }
+    if (item.actionTarget) onNavigate(item.actionTarget);
+  };
   return (
     <section className="mt-4 space-y-4">
       <div className="page-summary-panel">
@@ -4055,15 +4405,15 @@ function InsightsPage({ data, onNavigate }: { data: ApiData; onNavigate: (view: 
           <span className="text-xs text-slate-500">Based on the current dashboard filters</span>
         </div>
         <div className="insights-grid p-4">
-          <InsightColumn title="Already healthy" empty="No healthy signals yet. Load usage or widen the filters." items={good} onNavigate={onNavigate} />
-          <InsightColumn title="Needs attention" empty="No major issues detected in this filtered view." items={attention} onNavigate={onNavigate} />
+          <InsightColumn title="Already healthy" empty="No healthy signals yet. Load usage or widen the filters." items={good} onAction={handleAction} />
+          <InsightColumn title="Needs attention" empty="No major issues detected in this filtered view." items={attention} onAction={handleAction} />
         </div>
       </div>
     </section>
   );
 }
 
-function InsightColumn({ title, empty, items, onNavigate }: { title: string; empty: string; items: InsightItem[]; onNavigate: (view: ViewKey) => void }) {
+function InsightColumn({ title, empty, items, onAction }: { title: string; empty: string; items: InsightItem[]; onAction: (item: InsightItem) => void }) {
   return (
     <div>
       <h3 className="mb-2 text-sm font-semibold">{title}</h3>
@@ -4083,7 +4433,7 @@ function InsightColumn({ title, empty, items, onNavigate }: { title: string; emp
               </div>
               {item.action ? <p className="mt-2 text-xs font-semibold text-slate-700">{polishCostLanguage(item.action)}</p> : null}
               {item.actionTarget ? (
-                <button className="text-button mt-2" type="button" onClick={() => onNavigate(item.actionTarget!)}>
+                <button className="text-button mt-2" type="button" onClick={() => onAction(item)}>
                   {item.actionLabel ?? "Open"}
                 </button>
               ) : null}
@@ -4432,6 +4782,11 @@ function ModelLabel({ model }: { model?: string | undefined }) {
   );
 }
 
+function sessionDisplayModel(session: Session): string | undefined {
+  if (!session.model && session.warnings.includes("claude_synthetic_zero_usage")) return "Claude synthetic / no usage";
+  return session.model;
+}
+
 function sessionIsRepoVerified(session: Session): boolean {
   return !session.warnings.includes("repo_unverified_no_git_root");
 }
@@ -4464,6 +4819,7 @@ function ProviderIcon({ provider, label }: { provider?: Session["sourceClient"];
   const kind = (label || provider || "").toLowerCase();
   if (provider === "codex" || kind.includes("codex") || kind.includes("openai")) return <CodexIcon />;
   if (provider === "claude" || kind.includes("claude") || kind.includes("anthropic")) return <ClaudeIcon />;
+  if (provider === "copilot" || kind.includes("copilot") || kind.includes("github")) return <Github className="h-4 w-4" aria-hidden />;
   if (provider === "cursor" || kind.includes("cursor")) return <Code2 className="h-4 w-4" aria-hidden />;
   if (provider === "gemini-cli" || kind.includes("gemini")) return <Sparkles className="h-4 w-4" aria-hidden />;
   if (provider === "opencode" || kind.includes("opencode")) return <Code2 className="h-4 w-4" aria-hidden />;
@@ -4476,7 +4832,10 @@ function SurfaceIcon({ app, surface }: { app?: string; surface?: Session["detect
   if (kind.includes("codex on terminal") || kind.includes("codex on cli")) return <CompositeAppIcon source="codex" surface="terminal" />;
   if (kind.includes("claude code on vs code") || kind.includes("claude code on vscode")) return <CompositeAppIcon source="claude" surface="vscode" />;
   if (kind.includes("claude code on terminal") || kind.includes("claude code on cli")) return <CompositeAppIcon source="claude" surface="terminal" />;
+  if (kind.includes("github copilot on vs code") || kind.includes("github copilot on vscode") || kind.includes("copilot on vs code") || kind.includes("copilot on vscode")) return <CompositeAppIcon source="copilot" surface="vscode" />;
+  if (kind.includes("github copilot cli") || kind.includes("copilot cli") || kind.includes("copilot on terminal")) return <CompositeAppIcon source="copilot" surface="terminal" />;
   if (kind.includes("cursor")) return <Code2 className="h-4 w-4" aria-hidden />;
+  if (kind.includes("copilot")) return <Github className="h-4 w-4" aria-hidden />;
   if (kind.includes("desktop local agent") || kind.includes("desktop app") || surface === "local_agent") return <AppWindow className="h-4 w-4" aria-hidden />;
   if (kind.includes("claude")) return <ClaudeIcon />;
   if (kind.includes("vs code") || kind.includes("vscode") || surface === "vscode_extension") return <VsCodeIcon />;
@@ -4497,14 +4856,14 @@ function ModelIcon({ model }: { model?: string | undefined }) {
   return <BrainCircuit className="h-4 w-4" aria-hidden />;
 }
 
-function CompositeAppIcon({ source, surface }: { source: "codex" | "claude"; surface: "vscode" | "terminal" }) {
+function CompositeAppIcon({ source, surface }: { source: "codex" | "claude" | "copilot"; surface: "vscode" | "terminal" }) {
   return (
     <span className={`combo-icon combo-icon-${source}-${surface}`} aria-hidden>
       <span className="combo-icon-main">
         {surface === "vscode" ? <VsCodeIcon /> : <SquareTerminal className="brand-icon terminal-combo-icon" aria-hidden />}
       </span>
       <span className="combo-icon-corner">
-        {source === "codex" ? <CodexIcon /> : <ClaudeIcon />}
+        {source === "codex" ? <CodexIcon /> : source === "claude" ? <ClaudeIcon /> : <Github className="brand-icon" aria-hidden />}
       </span>
     </span>
   );
@@ -4829,9 +5188,13 @@ function TokenIntensityValue({ label, title }: { label: string; title: string })
   );
 }
 
-function Badge({ label, title }: { label: string; title?: string }) {
+type BadgeTone = "critical" | "warning" | "info" | "good" | "neutral";
+type WarningBadgeItem = { label: string; title: string; tone: BadgeTone };
+
+function Badge({ label, title, tone }: { label: string; title?: string | undefined; tone?: BadgeTone | undefined }) {
   const className = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  return <span className={`status-badge status-${className}`} title={title}>{label.replaceAll("_", " ")}</span>;
+  const toneClass = tone ? ` badge-${tone}` : "";
+  return <span className={`status-badge status-${className}${toneClass}`} title={title}>{label.replaceAll("_", " ")}</span>;
 }
 
 function OutcomeBadge({ outcome }: { outcome: Session["sessionOutcome"] }) {
@@ -4857,19 +5220,81 @@ function BadgeRow({ labels }: { labels: string[] }) {
 }
 
 function RepoWarningBadges({ warnings, commandIssueCount }: { warnings: string[]; commandIssueCount: number }) {
-  const labels = warnings.map(readableWarning).filter((warning) => warning !== "Command issues detected");
-  if (commandIssueCount > 0) labels.unshift(`${count(commandIssueCount, "command issue")} detected`);
-  if (!labels.length) return <span className="text-xs text-slate-500">None</span>;
-  return <BadgeRow labels={labels} />;
+  let badges = warnings.map(repoWarningBadgeItem);
+  if (commandIssueCount > 0) {
+    badges = badges.filter((badge) => badge.label !== "Command issues" && badge.label !== "Possible failed commands");
+    badges.unshift({
+      label: count(commandIssueCount, "possible failed command"),
+      title: `${count(commandIssueCount, "possible failed command")} detected in this repo or folder.`,
+      tone: "critical",
+    });
+  }
+  const prioritized = prioritizeWarningBadges(badges);
+  if (!prioritized.length) return <span className="text-xs text-slate-500">None</span>;
+  const visibleCount = prioritized.length > 3 ? 2 : 3;
+  const visible = prioritized.slice(0, visibleCount);
+  const hidden = prioritized.slice(visible.length);
+  const hiddenLabel = hidden.length === 1 ? hidden[0] : undefined;
+  return (
+    <div className="badge-row warning-badge-row">
+      {visible.map((badge) => (
+        <Badge key={`${badge.label}-${badge.tone}`} label={badge.label} title={badge.title} tone={badge.tone} />
+      ))}
+      {hiddenLabel ? <Badge label={hiddenLabel.label} title={hiddenLabel.title} tone={hiddenLabel.tone} /> : null}
+      {hidden.length > 1 ? (
+        <Badge
+          label={`+${hidden.length} more`}
+          title={hidden.map((badge) => `${badge.label}: ${badge.title}`).join("\n")}
+          tone="neutral"
+        />
+      ) : null}
+    </div>
+  );
 }
 
 function prioritizeBadges(labels: string[]): string[] {
-  const priority = ["Command issue", "Command issues detected", "High token", "No edits", "Unknown repo/folder", "Repo/folder unverified", "Unknown surface", "Files edited", "Partial", "Completed"];
+  const priority = ["Possible failed command", "Command issue", "Command issues detected", "High token", "No edits", "Unknown repo/folder", "Repo/folder unverified", "Unknown surface", "Files edited", "Partial", "Completed"];
   return [...new Set(labels)].sort((a, b) => {
     const aIndex = priority.indexOf(a);
     const bIndex = priority.indexOf(b);
     return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex) || a.localeCompare(b);
   });
+}
+
+function repoWarningBadgeItem(warning: string): WarningBadgeItem {
+  const normalized = warning.toLowerCase().replace(/[:_]+/g, " ");
+  const title = readableWarning(warning);
+  if (normalized === "expensive session concentration") return { label: "Cost concentration", title, tone: "warning" };
+  if (normalized === "failed commands" || normalized === "command issues") return { label: "Possible failed commands", title, tone: "critical" };
+  if (normalized === "repo unverified no git root") return { label: "Repo unverified", title, tone: "info" };
+  if (normalized === "copilot missing cwd") return { label: "Missing workspace", title, tone: "info" };
+  if (normalized === "claude synthetic zero usage") return { label: "Synthetic marker", title, tone: "warning" };
+  if (normalized === "unknown pricing" || normalized === "unknown cost") return { label: "Unpriced", title, tone: "warning" };
+  if (normalized === "missing token breakdown") return { label: "Missing token split", title, tone: "warning" };
+  if (normalized === "low cache rate") return { label: "Low cache", title, tone: "warning" };
+  if (normalized === "output heavy sessions") return { label: "Output heavy", title, tone: "info" };
+  if (normalized === "high-token no-edit") return { label: "High-token no-edit", title, tone: "warning" };
+  if (normalized === "duplicate or stale token snapshots skipped") return { label: "Stale snapshots", title, tone: "info" };
+  if (normalized === "token direct usage ignored after cumulative snapshot") return { label: "Token snapshots", title, tone: "info" };
+  if (normalized.startsWith("invalid token snapshots")) return { label: "Invalid snapshots", title, tone: "warning" };
+  if (normalized === "copilot partial token breakdown") return { label: "Partial token split", title, tone: "warning" };
+  if (normalized === "copilot duplicate session merged") return { label: "Merged duplicate", title, tone: "info" };
+  if (normalized === "model inferred from import source") return { label: "Inferred model", title, tone: "info" };
+  return { label: capitalizeSentence(warning.replaceAll("_", " ")), title, tone: "info" };
+}
+
+function prioritizeWarningBadges(badges: WarningBadgeItem[]): WarningBadgeItem[] {
+  const priority: Record<BadgeTone, number> = { critical: 0, warning: 1, info: 2, good: 3, neutral: 4 };
+  const unique = new Map<string, WarningBadgeItem>();
+  badges.forEach((badge) => {
+    if (!unique.has(badge.label)) unique.set(badge.label, badge);
+  });
+  return [...unique.values()].sort((a, b) => priority[a.tone] - priority[b.tone] || a.label.localeCompare(b.label));
+}
+
+function capitalizeSentence(value: string): string {
+  const trimmed = value.trim();
+  return trimmed ? `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}` : trimmed;
 }
 
 function CompactionSummary({ compaction }: { compaction: Session["compaction"] }) {
@@ -4915,11 +5340,12 @@ function CompactionEventList({ compaction }: { compaction: NonNullable<Session["
   );
 }
 
-function MiniStat({ label, value, help }: { label: string; value: React.ReactNode; help?: React.ReactNode }) {
+function MiniStat({ label, value, help, detail }: { label: string; value: React.ReactNode; help?: React.ReactNode; detail?: React.ReactNode }) {
   return (
     <div className="mini-stat">
       <div className="mini-stat-label">{label}{help}</div>
       <div className="mini-stat-value">{value}</div>
+      {detail ? <div className="mini-stat-detail">{detail}</div> : null}
     </div>
   );
 }
@@ -4934,93 +5360,6 @@ function buildWarnings(repo: UsageGroup, sessions: Session[]): string[] {
   if (repo.totalTokens > 0 && repo.outputTokens / repo.totalTokens > 0.5) warnings.add("output_heavy_sessions");
   if (sessions.some((session) => session.estimatedCostUsd === undefined)) warnings.add("unknown_pricing");
   return [...warnings].sort();
-}
-
-function importantCommandFailures(session: Session): number {
-  return session.importantCommandFailures ?? session.failedToolCallCount ?? 0;
-}
-
-function sessionDisplayTitle(session: Session): string {
-  const explicitTitle = session.title?.trim();
-  if (explicitTitle) return explicitTitle;
-  const firstPrompt = session.promptTimeline?.find((item) => item.role === "user" && item.text.trim())?.text.trim();
-  if (firstPrompt) return truncateText(firstPrompt.replace(/\s+/g, " "), 120);
-  return `Session ${session.id.slice(0, 8)}`;
-}
-
-function polishCostLanguage(value: string): string {
-  return value
-    .replace(/\bSpend is concentrated\b/g, "Estimated API-equivalent cost is concentrated")
-    .replace(/\bspend is concentrated\b/g, "estimated API-equivalent cost is concentrated")
-    .replace(/\bSpend\b/g, "Estimated API-equivalent cost")
-    .replace(/\bspend\b/g, "estimated API-equivalent cost")
-    .replace(/\bspent\b/g, "estimated");
-}
-
-function truncateText(value: string, maxLength: number): string {
-  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
-}
-
-function relativeTimeLabel(value: string | undefined): string {
-  if (!value) return "Unknown";
-  const date = new Date(value);
-  const timestamp = date.getTime();
-  if (Number.isNaN(timestamp)) return value.slice(0, 10);
-  const diffMs = Date.now() - timestamp;
-  const absMs = Math.abs(diffMs);
-  const units: Array<{ label: Intl.RelativeTimeFormatUnit; ms: number }> = [
-    { label: "day", ms: 86_400_000 },
-    { label: "hour", ms: 3_600_000 },
-    { label: "minute", ms: 60_000 },
-  ];
-  const unit = units.find((item) => absMs >= item.ms) ?? { label: "minute" as const, ms: 60_000 };
-  const amount = Math.round(diffMs / unit.ms);
-  return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(-amount, unit.label);
-}
-
-function sessionNeedsCommandReview(session: Session): boolean {
-  const important = importantCommandFailures(session);
-  const nonZero = session.nonZeroCommandEvents ?? important;
-  const commandCount = session.shellCommandCount ?? 0;
-  const nonZeroRate = commandCount > 0 ? nonZero / commandCount : 0;
-  return important > 0
-    || (session.repeatedFailureClusters ?? 0) > 0
-    || (commandCount >= 4 && nonZeroRate >= 0.5)
-    || (session.totalTokens >= 1_000_000 && nonZero > 0)
-    || ((session.sessionOutcome === "partial" || session.sessionOutcome === "failed") && nonZero > 0);
-}
-
-function issueImpactLabel(impact: Session["commandIssueImpact"] | undefined): string {
-  if (impact === "high") return "High";
-  if (impact === "medium") return "Medium";
-  if (impact === "low") return "Low";
-  return "None";
-}
-
-function rtkHookLabel(status: RtkGain["rtkCodexHookStatus"]): string {
-  if (status === "active") return "Active";
-  if (status === "not_detected") return "Not detected";
-  return "Unknown";
-}
-
-function failureTypeLabel(type: string | undefined): string {
-  if (!type) return "None";
-  return type
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function strongerImpact(current: Session["commandIssueImpact"] | undefined, next: Session["commandIssueImpact"] | undefined): Session["commandIssueImpact"] {
-  const order = { none: 0, low: 1, medium: 2, high: 3 };
-  const currentValue = order[current ?? "none"];
-  const nextValue = order[next ?? "none"];
-  return nextValue > currentValue ? (next ?? "none") : (current ?? "none");
-}
-
-function dominantFailureType(current: string | undefined, next: string | undefined): string | undefined {
-  if (!current) return next;
-  if (!next) return current;
-  return current;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -5067,948 +5406,6 @@ async function warmParseCache({ preset, splitSourceApps }: { preset: "last30"; s
   await fetch(`/api/cache/warm?${params}`, { method: "POST" });
 }
 
-function repoRows(data: ApiData): RepoRow[] {
-  return data.repos.map((repo) => ({
-    ...repo,
-    sessions: repo.sessions ?? data.sessions.filter((session) => session.repoRoot === repo.id),
-    fileEditCount: repo.fileEditCount ?? 0,
-    failedCommandCount: repo.failedCommandCount ?? 0,
-    tokenRoiLabel: repo.tokenRoiLabel ?? "No edits",
-    tokenRoiTitle: repo.tokenRoiTitle ?? "Tokens per edit cannot be computed because no file edits were detected for this repo or folder.",
-  }));
-}
-
-function repoRowsFromGroup(repo: UsageGroup, sessions: Session[]): RepoRow {
-  const fileEditCount = sessions.reduce((sum, session) => sum + (session.fileEditCount ?? 0), 0);
-  const failedCommandCount = sessions.reduce((sum, session) => sum + importantCommandFailures(session), 0);
-  const tokensPerEdit = fileEditCount > 0 ? Math.round(repo.totalTokens / fileEditCount) : undefined;
-  const warnings = [...new Set([...repo.warnings, ...sessions.flatMap((session) => session.warnings), ...repoProductWarnings(repo, sessions)])];
-  return {
-    ...repo,
-    warnings,
-    fileEditCount,
-    failedCommandCount,
-    tokenRoiLabel: tokensPerEdit === undefined ? "No edits" : `${tokens(tokensPerEdit)} / edit`,
-    tokenRoiTitle: tokensPerEdit === undefined
-      ? "Tokens per edit cannot be computed because no file edits were detected for this repo or folder."
-      : "Tokens per edit estimates how much token volume was used for each detected file edit. Lower is usually more efficient.",
-  };
-}
-
-function modelUsageRows(data: ApiData): ModelUsageRow[] {
-  const repos = repoRows(data);
-  return data.models.filter((model) => model.totalTokens > 0 || model.estimatedCostUsd !== undefined).map((model) => {
-    const sessions = data.sessions.filter((session) => (session.model ?? "unknown-model") === model.id);
-    const topRepo = repos
-      .map((repo) => ({
-        repo,
-        cost: sessions.filter((session) => session.repoRoot === repo.id).reduce((sum, session) => sum + (session.estimatedCostUsd ?? 0), 0),
-        tokens: sessions.filter((session) => session.repoRoot === repo.id).reduce((sum, session) => sum + session.totalTokens, 0),
-      }))
-      .filter((item) => item.tokens > 0 || item.cost > 0)
-      .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens)[0]?.repo;
-    const latestSession = recentSessions(sessions)[0];
-    return {
-      ...model,
-      providerLabel: modelProviderLabel(model.id),
-      cacheRate: model.inputTokens > 0 ? model.cachedInputTokens / model.inputTokens : 0,
-      averageCostUsd: model.estimatedCostUsd !== undefined && model.sessionCount > 0 ? model.estimatedCostUsd / model.sessionCount : undefined,
-      topRepo,
-      latestSession,
-    };
-  }).sort((a, b) => nullableNumber(b.estimatedCostUsd) - nullableNumber(a.estimatedCostUsd) || b.totalTokens - a.totalTokens || a.label.localeCompare(b.label));
-}
-
-function modelProviderLabel(model: string): string {
-  const provider = pricingProvider(model);
-  if (provider === "openai") return "OpenAI";
-  if (provider === "claude") return "Claude";
-  return "Custom";
-}
-
-function topDashboardActions(data: ApiData): Array<{ label: string; detail: string; icon: React.ReactElement; tone: "attention" | "good" | "neutral"; view: ViewKey; repoId?: string; sessionId?: string }> {
-  const actions: Array<{ label: string; detail: string; icon: React.ReactElement; tone: "attention" | "good" | "neutral"; view: ViewKey; repoId?: string; sessionId?: string }> = [];
-  const topIssueSession = [...data.sessions].sort((a, b) => importantCommandFailures(b) - importantCommandFailures(a) || b.totalTokens - a.totalTokens)[0];
-  const topRepo = repoRows(data)[0];
-  const unpriced = data.sessions.filter((session) => session.estimatedCostUsd === undefined && session.totalTokens > 0).length;
-  if (topIssueSession && importantCommandFailures(topIssueSession) > 0) {
-    actions.push({
-      label: "Review command friction",
-      detail: `${count(importantCommandFailures(topIssueSession), "issue")} in ${topIssueSession.repoName}`,
-      icon: <TriangleAlert />,
-      tone: "attention",
-      view: "commands",
-      sessionId: topIssueSession.id,
-    });
-  }
-  if (topRepo) {
-    actions.push({
-      label: "Inspect top repo / folder",
-      detail: `${topRepo.label} has ${tokens(topRepo.totalTokens)} and ${money(topRepo.estimatedCostUsd)} API-equivalent cost`,
-      icon: <FolderGit2 />,
-      tone: "neutral",
-      view: "repoDetail",
-      repoId: topRepo.id,
-    });
-  }
-  if (unpriced > 0) {
-    actions.push({
-      label: "Check pricing coverage",
-      detail: `${count(unpriced, "token-bearing session")} cannot show API-equivalent cost`,
-      icon: <CircleDollarSign />,
-      tone: "attention",
-      view: "settings",
-    });
-  }
-  if (actions.length < 3 && data.health.attentionCount > 0) {
-    actions.push({
-      label: "Open usage health",
-      detail: `${count(data.health.attentionCount, "attention item")} in the current filter`,
-      icon: <Info />,
-      tone: "attention",
-      view: "insights",
-    });
-  }
-  if (actions.length < 3) {
-    actions.push({
-      label: "Scan recent sessions",
-      detail: `${count(data.sessions.length, "session")} loaded for this filter`,
-      icon: <Terminal />,
-      tone: "good",
-      view: "sessions",
-    });
-  }
-  return actions.slice(0, 3);
-}
-
-function repoCostConcentration(repo: RepoRow, sessions: Session[]): RepoCostConcentration {
-  const knownCostSessions = topSessions(sessions.filter((session) => session.estimatedCostUsd !== undefined), true);
-  const totalCost = repo.estimatedCostUsd ?? knownCostSessions.reduce((sum, session) => sum + (session.estimatedCostUsd ?? 0), 0);
-  const topSessionCost = knownCostSessions[0]?.estimatedCostUsd;
-  const topThree = knownCostSessions.slice(0, 3);
-  const topThreeCostValue = topThree.reduce((sum, session) => sum + (session.estimatedCostUsd ?? 0), 0);
-  const topSessionShare = totalCost > 0 && topSessionCost !== undefined ? topSessionCost / totalCost : 0;
-  const topThreeShare = totalCost > 0 ? topThreeCostValue / totalCost : 0;
-  return {
-    topSessionCost,
-    topSessionShare,
-    topThreeCost: topThree.length ? Number(topThreeCostValue.toFixed(6)) : undefined,
-    topThreeShare,
-    topSessions: knownCostSessions.length ? topThree : topSessions(sessions, false).slice(0, 3),
-    extreme: topSessionShare >= 0.5,
-  };
-}
-
-function topSessionsToReview(sessions: Session[], repo: RepoRow): RepoReviewSession[] {
-  const picks = new Map<string, RepoReviewSession>();
-  const add = (session: Session | undefined, reason: string) => {
-    if (!session) return;
-    const existing = picks.get(session.id);
-    picks.set(session.id, { session, reason: existing ? `${existing.reason}; ${reason.toLowerCase()}` : reason });
-  };
-  const costSorted = topSessions(sessions, sessions.some((session) => session.estimatedCostUsd !== undefined));
-  add(costSorted[0], "Highest estimated cost");
-  add([...sessions].sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0))[0], "Longest duration");
-  add(sessions.find((session) => session.sessionOutcome === "partial" || session.sessionOutcome === "failed"), "Partial or failed outcome");
-  add([...sessions].sort((a, b) => importantCommandFailures(b) - importantCommandFailures(a))[0], "Command issues");
-  const tokenOutlier = [...sessions].sort((a, b) => b.totalTokens - a.totalTokens)[0];
-  if (tokenOutlier && isTokenOutlier(tokenOutlier, sessions)) add(tokenOutlier, "Unusual token volume");
-  return [...picks.values()]
-    .filter(({ session }) => session.totalTokens > 0 || session.estimatedCostUsd !== undefined || session.durationMs !== undefined || sessionNeedsCommandReview(session))
-    .sort((a, b) => reviewReasonPriority(a.reason) - reviewReasonPriority(b.reason) || nullableNumber(b.session.estimatedCostUsd) - nullableNumber(a.session.estimatedCostUsd))
-    .slice(0, Math.min(6, Math.max(repo.sessionCount, 0)));
-}
-
-function reviewReasonPriority(reason: string): number {
-  if (reason.includes("Highest")) return 0;
-  if (reason.includes("Command")) return 1;
-  if (reason.includes("Partial")) return 2;
-  if (reason.includes("Unusual")) return 3;
-  return 4;
-}
-
-function isTokenOutlier(session: Session, sessions: Session[]): boolean {
-  if (session.totalTokens >= 1_000_000) return true;
-  const average = sessions.length ? sessions.reduce((sum, item) => sum + item.totalTokens, 0) / sessions.length : 0;
-  return average > 0 && session.totalTokens >= average * 2.5;
-}
-
-function repoModelBreakdown(sessions: Session[], repo: RepoRow): RepoModelSpend[] {
-  const rows = new Map<string, RepoModelSpend>();
-  const totalCost = repo.estimatedCostUsd ?? sessions.reduce((sum, session) => sum + (session.estimatedCostUsd ?? 0), 0);
-  for (const session of sessions) {
-    const id = session.model ?? "unknown-model";
-    const row = rows.get(id) ?? { id, label: session.model ?? "Model not recorded", sessionCount: 0, totalTokens: 0, estimatedCostUsd: undefined, costShare: 0 };
-    row.sessionCount += 1;
-    row.totalTokens += session.totalTokens;
-    if (session.estimatedCostUsd !== undefined) row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));
-    rows.set(id, row);
-  }
-  return [...rows.values()]
-    .map((row) => ({ ...row, costShare: totalCost > 0 && row.estimatedCostUsd !== undefined ? row.estimatedCostUsd / totalCost : 0 }))
-    .sort((a, b) => nullableNumber(b.estimatedCostUsd) - nullableNumber(a.estimatedCostUsd) || b.totalTokens - a.totalTokens);
-}
-
-function repoDailyBreakdown(sessions: Session[]): Array<{ id: string; label: string; estimatedCostUsd: number; totalTokens: number }> {
-  const rows = new Map<string, { id: string; label: string; estimatedCostUsd: number; totalTokens: number }>();
-  for (const session of sessions) {
-    const id = (session.startedAt ?? session.endedAt ?? "Unknown").slice(0, 10);
-    const row = rows.get(id) ?? { id, label: id, estimatedCostUsd: 0, totalTokens: 0 };
-    row.estimatedCostUsd += session.estimatedCostUsd ?? 0;
-    row.totalTokens += session.totalTokens;
-    rows.set(id, row);
-  }
-  return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id)).map((row) => ({ ...row, estimatedCostUsd: Number(row.estimatedCostUsd.toFixed(6)) }));
-}
-
-function repoCommandTotals(sessions: Session[]): RepoCommandTotals {
-  return {
-    important: sessions.reduce((sum, session) => sum + importantCommandFailures(session), 0),
-    harmless: sessions.reduce((sum, session) => sum + (session.harmlessNonZeroEvents ?? 0) + (session.exploratoryMisses ?? 0), 0),
-    repeated: sessions.reduce((sum, session) => sum + (session.repeatedFailureClusters ?? 0), 0),
-  };
-}
-
-function repoDiagnosisSentence(repo: RepoRow, sessions: Session[], concentration: RepoCostConcentration, topModel: RepoModelSpend | undefined): string {
-  const parts: string[] = [];
-  if (concentration.extreme) {
-    parts.push("Most estimated API-equivalent cost came from one expensive session");
-  } else if (topModel) {
-    parts.push(`Most estimated API-equivalent cost is driven by ${topModel.label}`);
-  } else {
-    parts.push("Estimated API-equivalent cost is spread across the loaded sessions");
-  }
-  if (topModel && concentration.extreme) parts.push(`running ${topModel.label}`);
-  const commandText = repo.failedCommandCount > 0 ? `${count(repo.failedCommandCount, "important command issue")} were detected` : "No important command issues were detected";
-  const fileText = repo.fileEditCount > 0
-    ? "File path analysis is limited because this log format may not include stable file paths"
-    : "No file edits were detected in this filtered view";
-  if (!sessions.length) return "No sessions matched this repo or folder in the current filters.";
-  return `${parts.join(" ")}. ${commandText}. ${fileText}.`;
-}
-
-function tokenIntensityInterpretation(repo: RepoRow): string {
-  if (repo.fileEditCount <= 0) return "No file edits detected";
-  const value = repo.totalTokens / repo.fileEditCount;
-  if (value >= 1_000_000) return "High token use per file edit";
-  if (value <= 100_000) return "Low token use per file edit";
-  return "Moderate token use per file edit";
-}
-
-function repoCostDriverExplanation(repo: RepoRow, topModel: RepoModelSpend | undefined): string {
-  if (repo.estimatedCostUsd === undefined) return "API-equivalent cost is unavailable because this repo or folder is missing pricing coverage or token splits.";
-  if (topModel && topModel.costShare >= 0.5) {
-    return `${topModel.label} is the main cost driver at ${money(topModel.estimatedCostUsd)} across ${count(topModel.sessionCount, "session")}, representing ${percent(topModel.costShare)} of known repo cost.`;
-  }
-  const dominantToken = [
-    { label: "input", value: repo.inputTokens },
-    { label: "cached input", value: repo.cachedInputTokens },
-    { label: "output", value: repo.outputTokens },
-    { label: "reasoning", value: repo.reasoningTokens },
-  ].sort((a, b) => b.value - a.value)[0] ?? { label: "tokens", value: repo.totalTokens };
-  return `No single model dominates known cost. The largest token bucket is ${dominantToken.label} at ${tokens(dominantToken.value)}.`;
-}
-
-function agentFrictionRepos(sessions: Session[]): AgentFrictionRepo[] {
-  const groups = new Map<string, AgentFrictionRepo>();
-  for (const session of sessions) {
-    const importantFailures = importantCommandFailures(session);
-    const harmlessNonZeroEvents = (session.harmlessNonZeroEvents ?? 0) + (session.exploratoryMisses ?? 0);
-    const repeatedFailureClusters = session.repeatedFailureClusters ?? 0;
-    if (importantFailures === 0 && harmlessNonZeroEvents === 0 && repeatedFailureClusters === 0) continue;
-    const existing = groups.get(session.repoRoot) ?? {
-      repoRoot: session.repoRoot,
-      repoName: session.repoName,
-      importantFailures: 0,
-      harmlessNonZeroEvents: 0,
-      repeatedFailureClusters: 0,
-      sessionsNeedingReview: 0,
-      topFailureType: undefined,
-      impact: "none",
-      totalTokens: 0,
-      estimatedCostUsd: undefined,
-    };
-    existing.importantFailures += importantFailures;
-    existing.harmlessNonZeroEvents += harmlessNonZeroEvents;
-    existing.repeatedFailureClusters += repeatedFailureClusters;
-    existing.sessionsNeedingReview += sessionNeedsCommandReview(session) ? 1 : 0;
-    existing.totalTokens += session.totalTokens;
-    existing.topFailureType = dominantFailureType(existing.topFailureType, session.topFailureType);
-    existing.impact = strongerImpact(existing.impact, session.commandIssueImpact);
-    if (session.estimatedCostUsd !== undefined) {
-      existing.estimatedCostUsd = Number(((existing.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));
-    }
-    groups.set(session.repoRoot, existing);
-  }
-  return [...groups.values()].sort((a, b) => b.importantFailures - a.importantFailures || b.repeatedFailureClusters - a.repeatedFailureClusters || b.totalTokens - a.totalTokens);
-}
-
-function repoProductWarnings(repo: UsageGroup, sessions: Session[]): string[] {
-  const warnings: string[] = [];
-  if (sessions.some((session) => (session.fileEditCount ?? 0) === 0 && session.totalTokens >= 1_000_000)) warnings.push("high-token no-edit");
-  if (sessions.some((session) => importantCommandFailures(session) > 0)) warnings.push("command issues");
-  if (repo.estimatedCostUsd === undefined && repo.totalTokens > 0) warnings.push("unknown pricing");
-  if (repo.inputTokens > 0 && repo.cachedInputTokens / repo.inputTokens < 0.1) warnings.push("low cache rate");
-  return warnings;
-}
-
-function sessionBadges(session: Session): string[] {
-  const badges: string[] = [];
-  const outcome = outcomeLabel(session.sessionOutcome);
-  if (importantCommandFailures(session) > 0) badges.push("Command issue");
-  if (session.totalTokens >= 1_000_000) badges.push("High token");
-  if ((session.fileEditCount ?? 0) === 0 && outcome !== "No edits") badges.push("No edits");
-  if (session.warnings.includes("repo_unverified_no_git_root")) badges.push("Unknown repo/folder");
-  if ((session.detectedSurface ?? "unknown") === "unknown") badges.push("Unknown surface");
-  if ((session.fileEditCount ?? 0) > 0) badges.push("Files edited");
-  badges.push(outcome);
-  if (session.estimatedCostUsd === undefined && session.totalTokens > 0) badges.push("Unknown pricing");
-  if (session.warnings.includes("missing_token_breakdown")) badges.push("Unknown tokens");
-  return [...new Set(badges)].filter((badge) => badge && badge !== "Unknown");
-}
-
-function readableWarning(warning: string): string {
-  const normalized = warning.toLowerCase();
-  if (normalized === "expensive_session_concentration") return "Cost concentration is very high. One session accounts for most of this repo or folder’s estimated cost.";
-  if (normalized === "failed commands" || normalized === "command issues") return "Important command issues were detected in this repo or folder.";
-  if (normalized === "repo_unverified_no_git_root") return "Repo/folder grouping is unverified because no Git root was detected.";
-  if (normalized === "unknown_pricing") return "Some sessions cannot be priced because token splits or pricing coverage are missing.";
-  if (normalized === "missing_token_breakdown") return "Some sessions are missing detailed token breakdowns.";
-  if (normalized === "low_cache_rate") return "Cache reuse is low, so input tokens may be driving more estimated cost.";
-  if (normalized === "output_heavy_sessions") return "Output tokens are unusually high compared with total token volume.";
-  if (normalized === "high-token no-edit") return "A high-token session had no detected file edits.";
-  return warning.replaceAll("_", " ");
-}
-
-function pricingRows(draft: Record<string, ModelPricing>, models: UsageGroup[]): PricingRow[] {
-  const usedModels = models.map((model) => model.id).filter((model) => model !== "unknown-model");
-  const modelNames = [...new Set([...usedModels, ...Object.keys(draft).sort()])];
-  return modelNames.map((model) => ({ model, ...resolvePricingForModel(model, draft) }));
-}
-
-function pricingProvider(model: string): "openai" | "claude" | "custom" {
-  const normalized = model.toLowerCase();
-  if (normalized.includes("claude")) return "claude";
-  if (normalized.startsWith("gpt-") || normalized.startsWith("o1") || normalized.startsWith("o3") || normalized.startsWith("o4") || normalized.startsWith("codex") || normalized.includes("openai")) return "openai";
-  return "custom";
-}
-
-function pricingMissing(row: PricingRow): boolean {
-  const pricing = row.pricing;
-  return !positiveRate(pricing.inputPerMillion) || !positiveRate(pricing.outputPerMillion);
-}
-
-function positiveRate(value: number | undefined): boolean {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-function resolvePricingForModel(model: string, draft: Record<string, ModelPricing>): Omit<PricingRow, "model"> {
-  const lower = model.toLowerCase();
-  const exactModel = draft[model] ? model : draft[lower] ? lower : undefined;
-  const exactPricing = exactModel ? draft[exactModel] : undefined;
-  if (isUsableModelPricing(exactPricing)) {
-    return { pricing: exactPricing, sourceModel: exactModel, inherited: false };
-  }
-  const familyModel = claudePricingFamily(lower, draft);
-  if (familyModel) {
-    return { pricing: draft[familyModel]!, sourceModel: familyModel, inherited: familyModel !== model && familyModel !== lower };
-  }
-  return {
-    pricing: exactPricing ?? {
-      inputPerMillion: 0,
-      cacheCreationInputPerMillion: 0,
-      cachedInputPerMillion: 0,
-      outputPerMillion: 0,
-      reasoningOutputPerMillion: 0,
-    },
-    sourceModel: exactModel,
-    inherited: false,
-  };
-}
-
-function claudePricingFamily(model: string, draft: Record<string, ModelPricing>): string | undefined {
-  const families = [
-    "claude-opus-4-7",
-    "claude-opus-4-6",
-    "claude-opus-4-5",
-    "claude-opus-4-1",
-    "claude-opus-4",
-    "claude-sonnet-4-6",
-    "claude-sonnet-4-5",
-    "claude-sonnet-4",
-    "claude-haiku-4-5",
-    "claude-3-5-haiku",
-  ];
-  return families.find((candidate) => (model === candidate || model.startsWith(`${candidate}-`)) && isUsableModelPricing(draft[candidate]));
-}
-
-function compactModelLabel(model: string): string {
-  const normalized = model.toLowerCase();
-  const claudeBase = [
-    "claude-opus-4-7",
-    "claude-opus-4-6",
-    "claude-opus-4-5",
-    "claude-opus-4-1",
-    "claude-opus-4",
-    "claude-sonnet-4-6",
-    "claude-sonnet-4-5",
-    "claude-sonnet-4",
-    "claude-haiku-4-5",
-    "claude-3-5-haiku",
-  ].find((candidate) => normalized === candidate || normalized.startsWith(`${candidate}-`));
-  if (claudeBase) return claudeBase.replace("claude-", "").replace(/-/g, " ");
-  return model.length > 24 ? `${model.slice(0, 21)}...` : model;
-}
-
-function isUsableModelPricing(pricing: ModelPricing | undefined): pricing is ModelPricing {
-  return positiveRate(pricing?.inputPerMillion) && positiveRate(pricing?.outputPerMillion);
-}
-
-function sourceImportedSessions(data: ApiData, sourceId: "codex" | "claude" | "cursor"): number {
-  return data.sourceStats
-    .filter((source) => source.sourceId === sourceId)
-    .reduce((sum, source) => sum + (source.sessionsImported ?? 0), 0);
-}
-
-function cursorSourceEnabled(data: ApiData | null | undefined): boolean {
-  return data?.config.experimentalSources?.cursor === true;
-}
-
-function sourceHomePath(source: ApiData["sourceStats"][number]): string {
-  return source.homePath ?? source.codexHome ?? source.claudeHome ?? source.cursorHome ?? "Unknown";
-}
-
-function sourcePrimaryDataFound(source: ApiData["sourceStats"][number]): boolean {
-  return Boolean(source.stateExists || source.sessionsExists || source.projectsExists || source.historyExists || (source.databaseFileCount ?? 0) > 0);
-}
-
-function sourceEmptyFix(source: ApiData["sourceStats"][number]): string {
-  if (!sourcePrimaryDataFound(source)) return "Install or run the local source once, then refresh.";
-  if ((source.sessionsImported ?? 0) === 0) {
-    if (source.sourceId === "cursor") return "Open Cursor chat or agent sessions locally, then rescan.";
-    if (source.sourceId === "claude") return "Run Claude Code in a repo with local history enabled, then rescan.";
-    return "Run Codex in a repo so local session files can be imported.";
-  }
-  if ((source.parseFailureCount ?? 0) > 0) return "Some files were skipped; check Settings for parse warnings.";
-  return "Ready.";
-}
-
-function sourceDetectedPaths(source: ApiData["sourceStats"][number], data: ApiData): string[] {
-  const statusPaths = data.sources.find((status) => status.id === source.sourceId)?.paths ?? [];
-  const paths = [
-    source.homePath,
-    source.codexHome,
-    source.claudeHome,
-    source.cursorHome,
-    source.statePath,
-    source.sessionsPath,
-    source.projectsPath,
-    source.historyPath,
-    source.globalStoragePath,
-    source.workspaceStoragePath,
-    ...statusPaths,
-  ].filter((value): value is string => Boolean(value));
-  return [...new Set(paths)];
-}
-
-function tokenStats(data: ApiData): TokenStats {
-  const methodCounts: Record<string, number> = {};
-  const confidenceCounts: Record<string, number> = {};
-  let tokenSnapshots = 0;
-  let sessionsWithTokenData = 0;
-  for (const session of data.sessions) {
-    const method = session.tokenAggregationMethod ?? "unknown";
-    const confidence = session.tokenConfidence ?? "low";
-    methodCounts[method] = (methodCounts[method] ?? 0) + 1;
-    confidenceCounts[confidence] = (confidenceCounts[confidence] ?? 0) + 1;
-    tokenSnapshots += session.tokenSnapshotCount ?? 0;
-    if (session.totalTokens > 0) sessionsWithTokenData += 1;
-  }
-  const topMethod = topEntry(methodCounts)?.[0] ?? "unknown";
-  const topConfidence = topEntry(confidenceCounts)?.[0] ?? "low";
-  return {
-    methodLabel: aggregationMethodLabel(topMethod),
-    confidenceLabel: confidenceLabel(topConfidence),
-    tokenSnapshots,
-    sessionsWithTokenData,
-    sessionsMissingTokenData: Math.max(data.scan.rawSessionCount - sessionsWithTokenData, 0),
-    methodCounts,
-    confidenceCounts,
-  };
-}
-
-function usageBreakdownRows(data: ApiData, tab: BreakdownTab): BreakdownRow[] {
-  if (tab === "apps") return usageByApp(data);
-  return usageBySource(data);
-}
-
-function usageBySource(data: ApiData): BreakdownRow[] {
-  const labels = new Map(data.sources.map((source) => [source.id, source.label]));
-  const rows = new Map<string, BreakdownRow>();
-  for (const source of data.sources) {
-    rows.set(source.id, { id: source.id, label: source.label, source: source.id, sessionCount: 0, totalTokens: 0, estimatedCostUsd: undefined, knownCostSessions: 0, unknownCostSessions: 0, missingTokenSessions: 0 });
-  }
-  for (const session of data.sessions) {
-    const row = rows.get(session.sourceClient) ?? {
-      id: session.sourceClient,
-      label: labels.get(session.sourceClient) ?? sourceLabel(session.sourceClient),
-      source: session.sourceClient,
-      sessionCount: 0,
-      totalTokens: 0,
-      estimatedCostUsd: undefined,
-      knownCostSessions: 0,
-      unknownCostSessions: 0,
-      missingTokenSessions: 0,
-    };
-    row.sessionCount += 1;
-    row.totalTokens += session.totalTokens;
-    row.missingTokenSessions += session.totalTokens > 0 ? 0 : 1;
-    if (session.estimatedCostUsd !== undefined) {
-      row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));
-      row.knownCostSessions += 1;
-    } else {
-      row.unknownCostSessions += 1;
-    }
-    rows.set(session.sourceClient, row);
-  }
-  return [...rows.values()];
-}
-
-function usageByApp(data: ApiData): BreakdownRow[] {
-  return groupSessionsForBreakdown(data.sessions, (session) => session.sourceApp || surfaceLabel(session.detectedSurface), (session) => session.sourceApp || surfaceLabel(session.detectedSurface));
-}
-
-function groupSessionsForBreakdown(sessions: Session[], keyFn: (session: Session) => string, labelFn: (session: Session) => string, iconLabelFn = labelFn): BreakdownRow[] {
-  const rows = new Map<string, BreakdownRow>();
-  for (const session of sessions) {
-    const id = keyFn(session);
-    const row = rows.get(id) ?? {
-      id,
-      label: labelFn(session),
-      iconLabel: iconLabelFn(session),
-      sessionCount: 0,
-      totalTokens: 0,
-      estimatedCostUsd: undefined,
-      knownCostSessions: 0,
-      unknownCostSessions: 0,
-      missingTokenSessions: 0,
-    };
-    row.sessionCount += 1;
-    row.totalTokens += session.totalTokens;
-    row.missingTokenSessions += session.totalTokens > 0 ? 0 : 1;
-    if (session.estimatedCostUsd !== undefined) {
-      row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));
-      row.knownCostSessions += 1;
-    } else {
-      row.unknownCostSessions += 1;
-    }
-    rows.set(id, row);
-  }
-  return [...rows.values()].sort((a, b) => b.totalTokens - a.totalTokens || a.label.localeCompare(b.label));
-}
-
-function breakdownCostLabel(row: BreakdownRow): string {
-  if (row.knownCostSessions === 0) return "Not priced";
-  const label = money(row.estimatedCostUsd);
-  return row.unknownCostSessions > 0 ? `Known ${label}` : label;
-}
-
-function topEntry(record: Record<string, number>): [string, number] | undefined {
-  return Object.entries(record).sort((a, b) => b[1] - a[1])[0];
-}
-
-function aggregationMethodLabel(method: string): string {
-  if (method === "final_snapshot") return "Final checkpoint";
-  if (method === "delta_sum") return "Delta sum";
-  if (method === "direct_usage") return "Direct usage";
-  if (method === "estimated") return "Estimated";
-  return "Unknown";
-}
-
-function confidenceLabel(confidence: string): string {
-  if (confidence === "high") return "High";
-  if (confidence === "medium") return "Medium";
-  return "Low";
-}
-
-function cacheRate(repo: UsageGroup): number {
-  return repo.inputTokens > 0 ? repo.cachedInputTokens / repo.inputTokens : 0;
-}
-
-function sortRepoRows(repos: RepoRow[], sort: { key: RepoSortKey; direction: SortDirection }): RepoRow[] {
-  return [...repos].sort((a, b) => applyDirection(compareRepo(a, b, sort.key), sort.direction));
-}
-
-function sortModelRows(models: ModelUsageRow[], sort: { key: ModelSortKey; direction: SortDirection }): ModelUsageRow[] {
-  return [...models].sort((a, b) => applyDirection(compareModel(a, b, sort.key), sort.direction));
-}
-
-function compareModel(a: ModelUsageRow, b: ModelUsageRow, key: ModelSortKey): number {
-  if (key === "model") return a.label.localeCompare(b.label);
-  if (key === "cost") return nullableNumber(a.estimatedCostUsd) - nullableNumber(b.estimatedCostUsd);
-  if (key === "tokens") return a.totalTokens - b.totalTokens;
-  if (key === "input") return a.inputTokens - b.inputTokens;
-  if (key === "cached") return a.cachedInputTokens - b.cachedInputTokens;
-  if (key === "output") return a.outputTokens - b.outputTokens;
-  if (key === "reasoning") return a.reasoningTokens - b.reasoningTokens;
-  if (key === "sessions") return a.sessionCount - b.sessionCount;
-  if (key === "cache") return a.cacheRate - b.cacheRate;
-  if (key === "repo") return (a.topRepo?.label ?? "").localeCompare(b.topRepo?.label ?? "");
-  return latestActivityTimestamp(a) - latestActivityTimestamp(b);
-}
-
-function latestActivityTimestamp(row: ModelUsageRow): number {
-  const raw = row.latestSession?.startedAt ?? row.latestSession?.endedAt;
-  if (!raw) return Number.NEGATIVE_INFINITY;
-  const ms = Date.parse(raw);
-  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
-}
-
-function compareRepo(a: RepoRow, b: RepoRow, key: RepoSortKey): number {
-  if (key === "repo") return a.label.localeCompare(b.label);
-  if (key === "cost") return nullableNumber(a.estimatedCostUsd) - nullableNumber(b.estimatedCostUsd);
-  if (key === "tokens") return a.totalTokens - b.totalTokens;
-  if (key === "input") return a.inputTokens - b.inputTokens;
-  if (key === "cached") return a.cachedInputTokens - b.cachedInputTokens;
-  if (key === "output") return a.outputTokens - b.outputTokens;
-  if (key === "reasoning") return a.reasoningTokens - b.reasoningTokens;
-  if (key === "sessions") return a.sessionCount - b.sessionCount;
-  if (key === "files") return a.fileEditCount - b.fileEditCount;
-  if (key === "failed") return a.failedCommandCount - b.failedCommandCount;
-  if (key === "roi") return tokenRoiSortValue(a) - tokenRoiSortValue(b);
-  if (key === "warnings") return a.warnings.length - b.warnings.length;
-  return cacheRate(a) - cacheRate(b);
-}
-
-function tokenRoiSortValue(repo: RepoRow): number {
-  if (repo.fileEditCount === 0) return Number.POSITIVE_INFINITY;
-  return repo.totalTokens / repo.fileEditCount;
-}
-
-function sortSessionRows(sessions: Session[], sort: { key: SessionSortKey; direction: SortDirection }): Session[] {
-  return [...sessions].sort((a, b) => applyDirection(compareSession(a, b, sort.key), sort.direction));
-}
-
-function compareSession(a: Session, b: Session, key: SessionSortKey): number {
-  if (key === "repo") return a.repoName.localeCompare(b.repoName);
-  if (key === "app") return `${sourceLabel(a.sourceClient)} ${a.sourceApp}`.localeCompare(`${sourceLabel(b.sourceClient)} ${b.sourceApp}`);
-  if (key === "session") return (a.title ?? a.id).localeCompare(b.title ?? b.id);
-  if (key === "model") return (a.model ?? "Unknown").localeCompare(b.model ?? "Unknown");
-  if (key === "started") return (a.startedAt ?? "").localeCompare(b.startedAt ?? "");
-  if (key === "cost") return nullableNumber(a.estimatedCostUsd) - nullableNumber(b.estimatedCostUsd);
-  if (key === "tokens") return a.totalTokens - b.totalTokens;
-  if (key === "input") return a.inputTokens - b.inputTokens;
-  if (key === "cached") return a.cachedInputTokens - b.cachedInputTokens;
-  if (key === "output") return a.outputTokens - b.outputTokens;
-  if (key === "reasoning") return a.reasoningTokens - b.reasoningTokens;
-  if (key === "duration") return (a.durationMs ?? 0) - (b.durationMs ?? 0);
-  if (key === "prompts") return (a.userPromptCount ?? 0) - (b.userPromptCount ?? 0);
-  if (key === "commands") return (a.shellCommandCount ?? 0) - (b.shellCommandCount ?? 0);
-  if (key === "files") return (a.fileEditCount ?? 0) - (b.fileEditCount ?? 0);
-  if (key === "failed") return importantCommandFailures(a) - importantCommandFailures(b);
-  if (key === "warnings") return a.warnings.length - b.warnings.length;
-  return a.messageCount - b.messageCount;
-}
-
-function sessionMatchesSearch(session: Session, search: string): boolean {
-  const query = search.trim().toLowerCase();
-  if (!query) return true;
-  const haystack = [
-    session.title,
-    session.id,
-    session.repoName,
-    session.sourceApp,
-    surfaceLabel(session.detectedSurface),
-    session.model,
-    outcomeLabel(session.sessionOutcome),
-    ...session.warnings.map(readableWarning),
-  ].filter(Boolean).join(" ").toLowerCase();
-  return haystack.includes(query);
-}
-
-function sessionMatchesQuickFilter(session: Session, filter: QuickSessionFilter | ""): boolean {
-  if (!filter) return true;
-  if (filter === "highToken") return session.totalTokens >= 1_000_000;
-  if (filter === "failedCommands") return importantCommandFailures(session) > 0;
-  if (filter === "noEdits") return (session.fileEditCount ?? 0) === 0;
-  if (filter === "completed") return session.sessionOutcome === "completed";
-  if (filter === "partial") return session.sessionOutcome === "partial";
-  if (filter === "vscode") return session.detectedSurface === "vscode_extension" || session.sourceApp.toLowerCase().includes("vs code");
-  if (filter === "terminal") return session.detectedSurface === "terminal_cli" || session.sourceApp.toLowerCase().includes("terminal");
-  return (session.detectedSurface ?? "unknown") === "unknown";
-}
-
-function sessionMatchesRepoQuickFilter(session: Session, filter: RepoSessionQuickFilter | "", sessions: Session[]): boolean {
-  if (!filter) return true;
-  if (filter === "expensive") return isCostOutlier(session, sessionCostOutlierThreshold(sessions));
-  if (filter === "partial") return session.sessionOutcome === "partial" || session.sessionOutcome === "failed";
-  if (filter === "longRunning") return isLongRunningSession(session, sessions);
-  if (filter === "commandIssues") return importantCommandFailures(session) > 0 || (session.repeatedFailureClusters ?? 0) > 0;
-  return (session.model ?? "").toLowerCase().includes("opus");
-}
-
-function sessionCostOutlierThreshold(sessions: Session[]): number | undefined {
-  const costs = sessions.map((session) => session.estimatedCostUsd).filter((value): value is number => value !== undefined).sort((a, b) => a - b);
-  if (costs.length < 3) return costs.at(-1);
-  const average = costs.reduce((sum, value) => sum + value, 0) / costs.length;
-  return Math.max(average * 2, costs[Math.floor(costs.length * 0.75)] ?? average);
-}
-
-function isCostOutlier(session: Session, threshold: number | undefined): boolean {
-  return threshold !== undefined && session.estimatedCostUsd !== undefined && session.estimatedCostUsd >= threshold && session.estimatedCostUsd > 0;
-}
-
-function isLongRunningSession(session: Session, sessions: Session[]): boolean {
-  const durations = sessions.map((item) => item.durationMs ?? 0).filter((value) => value > 0);
-  if (!session.durationMs || !durations.length) return false;
-  const average = durations.reduce((sum, value) => sum + value, 0) / durations.length;
-  return session.durationMs >= Math.max(60 * 60_000, average * 1.75);
-}
-
-function insightSeverity(item: InsightItem): "Info" | "Warning" | "Critical" {
-  if (item.critical) return "Critical";
-  if (item.tone === "attention") return "Warning";
-  return "Info";
-}
-
-function applyDirection(value: number, direction: SortDirection): number {
-  return direction === "asc" ? value : -value;
-}
-
-function nullableNumber(value: number | undefined): number {
-  return value ?? Number.NEGATIVE_INFINITY;
-}
-
-function usePagination<T>(items: T[], pageSize: number): { page: number; pageCount: number; items: T[]; setPage: (page: number) => void } {
-  const safePageSize = Math.max(1, pageSize);
-  const [page, setPageState] = React.useState(1);
-  const pageCount = Math.max(1, Math.ceil(items.length / safePageSize));
-  React.useEffect(() => {
-    setPageState(1);
-  }, [items.length, safePageSize]);
-  const setPage = React.useCallback((nextPage: number) => {
-    setPageState(Math.min(Math.max(1, nextPage), pageCount));
-  }, [pageCount]);
-  const safePage = Math.min(page, pageCount);
-  return {
-    page: safePage,
-    pageCount,
-    items: items.slice((safePage - 1) * safePageSize, safePage * safePageSize),
-    setPage,
-  };
-}
-
-function topSessions(sessions: Session[], hasKnownCost: boolean): Session[] {
-  return [...sessions].sort((a, b) => (hasKnownCost ? nullableNumber(b.estimatedCostUsd) - nullableNumber(a.estimatedCostUsd) : b.totalTokens - a.totalTokens));
-}
-
-function recentSessions(sessions: Session[]): Session[] {
-  return [...sessions].sort((a, b) => (b.startedAt ?? b.endedAt ?? "").localeCompare(a.startedAt ?? a.endedAt ?? ""));
-}
-
-function findSessionById(data: ApiData, sessionId: string | null): Session | undefined {
-  if (!sessionId) return undefined;
-  return data.sessions.find((session) => session.id === sessionId);
-}
-
-function exportSessionsCsv(sessions: Session[]): void {
-  const rows = sessions.map((session) => ({
-    repo: session.repoName,
-    repoRoot: session.repoRoot,
-    source: sourceLabel(session.sourceClient),
-    app: session.sourceApp ?? surfaceLabel(session.detectedSurface),
-    session: sessionDisplayTitle(session),
-    sessionId: session.id,
-    model: session.model ?? "Unknown",
-    startedAt: session.startedAt ?? "",
-    durationMs: session.durationMs ?? "",
-    estimatedCostUsd: session.estimatedCostUsd ?? "",
-    totalTokens: session.totalTokens,
-    inputTokens: session.inputTokens,
-    cachedInputTokens: session.cachedInputTokens,
-    outputTokens: session.outputTokens,
-    reasoningTokens: session.reasoningTokens,
-    messages: session.messageCount,
-    prompts: session.userPromptCount ?? 0,
-    commands: session.shellCommandCount ?? 0,
-    commandIssues: importantCommandFailures(session),
-    fileEdits: session.fileEditCount ?? 0,
-    outcome: session.sessionOutcome ?? "unknown",
-    tokenConfidence: session.tokenConfidence ?? "unknown",
-  }));
-  downloadText(`repospend-sessions-${new Date().toISOString().slice(0, 10)}.csv`, objectsToCsv(rows));
-}
-
-function exportReposCsv(repos: RepoRow[]): void {
-  const rows = repos.map((repo) => ({
-    repo: repo.label,
-    repoRoot: repo.id,
-    estimatedCostUsd: repo.estimatedCostUsd ?? "",
-    totalTokens: repo.totalTokens,
-    inputTokens: repo.inputTokens,
-    cachedInputTokens: repo.cachedInputTokens,
-    outputTokens: repo.outputTokens,
-    reasoningTokens: repo.reasoningTokens,
-    sessions: repo.sessionCount,
-    fileEdits: repo.fileEditCount,
-    commandIssues: repo.failedCommandCount,
-    tokenRoi: repo.tokenRoiLabel,
-    warnings: repo.warnings.join("; "),
-  }));
-  downloadText(`repospend-repos-${new Date().toISOString().slice(0, 10)}.csv`, objectsToCsv(rows));
-}
-
-function objectsToCsv(rows: Array<Record<string, string | number>>): string {
-  if (!rows.length) return "";
-  const headers = Object.keys(rows[0]!);
-  return [
-    headers.join(","),
-    ...rows.map((row) => headers.map((header) => csvCell(row[header] ?? "")).join(",")),
-  ].join("\n");
-}
-
-function csvCell(value: string | number): string {
-  const text = String(value);
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-function parseTokenAmount(value?: string): number | undefined {
-  if (!value) return undefined;
-  const match = value.replaceAll(",", "").match(/([\d.]+)\s*([kmb])?/i);
-  if (!match?.[1]) return undefined;
-  const base = Number(match[1]);
-  if (!Number.isFinite(base)) return undefined;
-  const unit = match[2]?.toLowerCase();
-  const multiplier = unit === "b" ? 1_000_000_000 : unit === "m" ? 1_000_000 : unit === "k" ? 1_000 : 1;
-  return Math.round(base * multiplier);
-}
-
-function parseDurationAmount(value?: string): number {
-  if (!value) return 0;
-  const normalized = value.trim().toLowerCase();
-  const minutesSeconds = normalized.match(/([\d.]+)m(?:(\d+(?:\.\d+)?)s)?/);
-  if (minutesSeconds?.[1]) {
-    return Number(minutesSeconds[1]) * 60_000 + Number(minutesSeconds[2] ?? 0) * 1000;
-  }
-  const match = normalized.match(/([\d.]+)\s*(ms|s|m|h)?/);
-  if (!match?.[1]) return 0;
-  const base = Number(match[1]);
-  const unit = match[2] ?? "ms";
-  if (unit === "h") return base * 3_600_000;
-  if (unit === "m") return base * 60_000;
-  if (unit === "s") return base * 1000;
-  return base;
-}
-
-function rtkAvoidedCostRate(pricing: PricingResponse): number {
-  return pricing.models["gpt-5.5"]?.inputPerMillion ?? pricing.models["gpt-5"]?.inputPerMillion ?? Object.values(pricing.models)[0]?.inputPerMillion ?? 5;
-}
-
-function estimateAvoidedCostUsd(tokensAvoided: number | undefined, pricing: PricingResponse): number | undefined {
-  if (tokensAvoided === undefined) return undefined;
-  return Number(((tokensAvoided / 1_000_000) * rtkAvoidedCostRate(pricing)).toFixed(6));
-}
-
-function readableCommandName(command: string): string {
-  return command.replace(/\s+/g, " ").trim();
-}
-
-function shortCommand(command: string): string {
-  const readable = readableCommandName(command);
-  return readable.length > 96 ? `${readable.slice(0, 96)}...` : readable;
-}
-
-function readableIssueLabel(value: string): string {
-  return value
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function sortedRtkCommands(commands: RtkCommand[], sort: { key: RtkCommandSortKey; direction: SortDirection }): RtkCommand[] {
-  return [...commands].sort((a, b) => {
-    let value = 0;
-    if (sort.key === "command") value = a.command.localeCompare(b.command);
-    if (sort.key === "count") value = (a.count ?? 0) - (b.count ?? 0);
-    if (sort.key === "saved") value = (parseTokenAmount(a.saved) ?? 0) - (parseTokenAmount(b.saved) ?? 0);
-    if (sort.key === "reduction") value = (a.averageSavedPercent ?? -1) - (b.averageSavedPercent ?? -1);
-    if (sort.key === "runtime") value = parseDurationAmount(a.time) - parseDurationAmount(b.time);
-    return sort.direction === "asc" ? value : -value;
-  });
-}
-
-function listText(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
-}
-
-function parseRecentRtkCommand(line: string): { time?: string; command: string; savings?: string } {
-  const [time, rest = line] = line.split("•").map((part) => part.trim());
-  const savings = rest.match(/(-?\d+(?:\.\d+)?%\s*\([^)]+\))$/)?.[1];
-  const command = savings ? rest.slice(0, -savings.length).trim() : rest;
-  return {
-    ...(time && time !== rest ? { time } : {}),
-    command: readableCommandName(command),
-    ...(savings ? { savings } : {}),
-  };
-}
-
-function rtkRecommendedActions({
-  gain,
-  topCommand,
-  commandsProcessed,
-  savingsRate,
-  coverageGaps,
-}: {
-  gain: RtkGain;
-  topCommand: RtkCommand | undefined;
-  commandsProcessed: number | undefined;
-  savingsRate: number | undefined;
-  coverageGaps: RtkCoverageGap[];
-}): string[] {
-  const actions: string[] = [];
-  const topGap = [...coverageGaps].sort((a, b) => (parseTokenAmount(b.estimatedSavings) ?? 0) - (parseTokenAmount(a.estimatedSavings) ?? 0))[0];
-  if (topGap) {
-    actions.push(`${topGap.command} is the biggest discovered coverage gap; use ${topGap.rtkEquivalent ?? "the matching RTK wrapper"} when possible.`);
-  } else if (gain.rtkDiscoverAvailable === false) {
-    actions.push("Coverage discovery could not run locally, so RepoSpend can only show RTK gain data for now.");
-  }
-  if (gain.rtkCodexHookStatus === "unknown" || gain.rtkCodexHookStatus === undefined) {
-    actions.push("Codex hook status is unknown; check RTK hook setup if Codex commands are not being compressed.");
-  }
-  if (topCommand?.count && topCommand.count >= 25) {
-    actions.push(`${readableCommandName(topCommand.command)} appears often; review whether agents are repeating that command more than needed.`);
-  }
-  if (commandsProcessed && savingsRate !== undefined && savingsRate >= 50) {
-    actions.push("RTK savings are high, so your local command proxy setup appears to be working well.");
-  }
-  return actions;
-}
-
-function sessionPositiveSignals(session: Session): string[] {
-  const items: string[] = [];
-  if ((session.fileEditCount ?? 0) > 0) items.push(`${count(session.fileEditCount ?? 0, "file edit")} detected.`);
-  if (importantCommandFailures(session) === 0) items.push("No important command issues detected.");
-  if (session.parseStatus === "ok") items.push("Local session log parsed cleanly.");
-  if (session.tokenConfidence === "high") items.push("Token counting confidence is high.");
-  if (session.inputTokens > 0 && session.cachedInputTokens / session.inputTokens >= 0.5) items.push("Cached input reuse was strong.");
-  if (session.repoRoot && !session.repoRoot.includes("unverified")) items.push("Session resolved to a repo or folder.");
-  return items;
-}
-
-function sessionConcernSignals(session: Session): string[] {
-  const items: string[] = [];
-  const commandIssues = importantCommandFailures(session);
-  if (commandIssues > 0) items.push(`${count(commandIssues, "important command issue")} to inspect.`);
-  if (session.sessionOutcome === "partial" || session.sessionOutcome === "failed") items.push(`Outcome is ${outcomeLabel(session.sessionOutcome).toLowerCase()}; check whether the work completed.`);
-  if ((session.fileEditCount ?? 0) === 0 && session.totalTokens > 1_000_000) items.push("High-token session with no detected file edits.");
-  if (session.estimatedCostUsd === undefined && session.totalTokens > 0) items.push("API-equivalent cost unavailable because pricing or token split is missing.");
-  if (session.parseStatus && session.parseStatus !== "ok") items.push("Parser reported issues for this session.");
-  if (session.detectedSurface === "unknown") items.push("Surface could not be detected from local logs.");
-  if (session.repoName.toLowerCase().includes("unknown") || session.warnings.includes("repo_unverified_no_git_root")) items.push("Repo/folder grouping is unverified because no Git root was detected.");
-  if ((session.tokenSnapshotCount ?? 0) === 0 && session.totalTokens === 0) items.push("No token checkpoints were available.");
-  return items;
-}
 
 async function copyText(value: string, setStatus: (status: string | null) => void): Promise<void> {
   try {

@@ -67,9 +67,9 @@ export type SessionColumnKey = "input" | "cached" | "output" | "reasoning" | "me
 export type ViewKey = "dashboard" | "sessions" | "sessionDetail" | "repos" | "repoDetail" | "models" | "commands" | "insights" | "rtk" | "settings";
 export type SessionDetailTab = "overview" | "timeline" | "files" | "tokens" | "metadata";
 export type TimelineRoleFilter = "all" | "user" | "assistant";
-export type SettingsTab = "pricing" | "sources" | "tokens" | "privacy" | "advanced";
+export type SettingsTab = "pricing" | "sources" | "doctor" | "tokens" | "privacy" | "advanced";
 export type RepoDetailTab = "overview" | "sessions" | "cost" | "files" | "commands" | "metadata";
-export type PricingProviderFilter = "all" | "openai" | "claude" | "custom";
+export type PricingProviderFilter = "all" | "openai" | "claude" | "google" | "copilot" | "custom";
 export type PricingViewFilter = "used" | "missing" | "all";
 export type QuickSessionFilter = "highToken" | "failedCommands" | "noEdits" | "completed" | "partial" | "vscode" | "terminal" | "unknownSurface";
 export type RepoSessionQuickFilter = "expensive" | "partial" | "longRunning" | "commandIssues" | "opusOnly";
@@ -115,6 +115,13 @@ export type RepoCostConcentration = {
   extreme: boolean;
 };
 export type RepoReviewSession = { session: Session; reason: string };
+export type ModelUsageRow = UsageGroup & {
+  providerLabel: string;
+  cacheRate: number;
+  averageCostUsd: number | undefined;
+  topRepo: RepoRow | undefined;
+  latestSession: Session | undefined;
+};
 export type RepoModelSpend = { id: string; label: string; sessionCount: number; totalTokens: number; estimatedCostUsd: number | undefined; costShare: number };
 export type RepoCommandTotals = { important: number; harmless: number; repeated: number };
 export type PricingRow = { model: string; pricing: ModelPricing; sourceModel: string | undefined; inherited: boolean };
@@ -167,7 +174,7 @@ export const sessionColumnOptions: Array<{ key: SessionColumnKey; label: string;
   { key: "messages", label: "Messages", group: "Activity" },
   { key: "prompts", label: "Prompts", group: "Activity" },
   { key: "commands", label: "Commands", group: "Activity" },
-  { key: "commandIssues", label: "Command issues", group: "Activity" },
+  { key: "commandIssues", label: "Possible failed commands", group: "Activity" },
   { key: "edits", label: "Edits", group: "Activity" },
   { key: "parse", label: "Parse status", group: "Technical" },
   { key: "tokenMethod", label: "Token method", group: "Technical" },

@@ -143,6 +143,7 @@ describe("Codex adapter", () => {
         }),
       ].join("\n"),
     );
+    fs.writeFileSync(path.join(codexHome, "config.toml"), 'service_tier = "fast"\n');
 
     const db = new Database(path.join(codexHome, "state_5.sqlite"));
     db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT, created_at INTEGER, updated_at INTEGER, cwd TEXT, title TEXT, model_provider TEXT, model TEXT, tokens_used INTEGER, source TEXT, thread_source TEXT)");
@@ -189,6 +190,9 @@ describe("Codex adapter", () => {
     expect(result.stats.sessionFileCount).toBe(1);
     expect(result.stats.sessionsImported).toBe(1);
     expect(result.stats.parseFailureCount).toBe(0);
+    expect(result.stats.serviceTier).toBe("fast");
+    expect(result.stats.serviceTierSource).toBe("current_config");
+    expect(result.source.serviceTier).toBe("fast");
   });
 
   it("infers missing model metadata from imported Claude source sessions", () => {

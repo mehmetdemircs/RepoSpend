@@ -192,7 +192,7 @@ const healthSignalDetectors: HealthSignalDetector[] = [
       return {
       id: "command-friction",
       tone: "attention",
-      title: "Important command issue rate looks high",
+      title: "Possible failed command rate looks high",
       detail: `${percent(commandIssueRate)} of detected shell commands look like blocking, repeated, or token-expensive issues in this filtered view.`,
       action: "Look for repeated setup, dependency, permission, test, or build issues in the Sessions page.",
       actionTarget: "sessions",
@@ -263,9 +263,9 @@ const healthSignalDetectors: HealthSignalDetector[] = [
       tone: "attention",
       title: "Some sessions cannot be priced",
       detail: `${count(unknownCostSessions.length, "session")} are missing a model price or detailed token split.`,
-      action: "Open Settings and add model rates, or inspect older Codex sessions that only expose raw totals.",
-      actionTarget: "settings",
-      actionLabel: "Open settings",
+      action: "Review the affected sessions first. Add a model rate only when the session has token details but no usable price.",
+      actionTarget: "sessions",
+      actionLabel: "Review unpriced sessions",
       metric: count(unknownCostSessions.length, "session"),
       critical: true,
       affectedSessionIds: unknownCostSessions.map((session) => session.id),
@@ -366,7 +366,7 @@ interface WasteSignalDetector {
 const wasteSignalDetectors: WasteSignalDetector[] = [
   wasteSignalDetector("high-token-no-edit", "High-token no-edit sessions", "Large sessions where local events did not show file edits.", (session) => (session.fileEditCount ?? 0) === 0 && session.totalTokens >= 1_000_000),
   wasteSignalDetector("high-token-low-output", "High-token low-output sessions", "Large sessions where most tokens were input or cached context.", (session) => session.totalTokens >= 1_000_000 && session.outputTokens / Math.max(session.totalTokens, 1) < 0.03),
-  wasteSignalDetector("command-issue-sessions", "Command issue sessions", "Sessions with blocking, repeated, or token-expensive command issues.", (session) => importantCommandFailures(session) > 0),
+  wasteSignalDetector("command-issue-sessions", "Possible failed command sessions", "Sessions with blocking, repeated, or token-expensive command failures.", (session) => importantCommandFailures(session) > 0),
   wasteSignalDetector("unknown-repos", "Unknown repo sessions", "Repo root could not be verified from local Git metadata.", (session) => session.warnings.includes("repo_unverified_no_git_root")),
   wasteSignalDetector("unknown-surfaces", "Unknown surface sessions", "Local logs did not identify VS Code, terminal, exec, or app surface.", (session) => (session.detectedSurface ?? "unknown") === "unknown"),
   wasteSignalDetector("repeated-errors", "Repeated error signals", "Repeated-error hints found in session warnings.", (session) => session.warnings.some((warning) => warning.includes("repeated_error"))),
@@ -426,7 +426,20 @@ function percent(value: number): string {
 }
 
 function compactNumber(value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact" }).format(value);
+  if (!Number.isFinite(value)) return "0";
+  const sign = value < 0 ? "-" : "";
+  const absolute = Math.abs(value);
+  const units = [
+    { threshold: 1_000_000_000_000, suffix: "T" },
+    { threshold: 1_000_000_000, suffix: "B" },
+    { threshold: 1_000_000, suffix: "M" },
+    { threshold: 1_000, suffix: "K" },
+  ];
+  const unit = units.find((item) => absolute >= item.threshold);
+  if (!unit) return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value);
+  const scaled = absolute / unit.threshold;
+  const formatted = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(scaled);
+  return `${sign}${formatted}${unit.suffix}`;
 }
 
 function currency(value: number, minimumFractionDigits: number, maximumFractionDigits: number): string {

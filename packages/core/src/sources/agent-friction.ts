@@ -31,8 +31,9 @@ export interface AgentFrictionAnalysis {
 export function analyzeAgentFriction(records: unknown[], totalTokens: number): AgentFrictionAnalysis {
   const analysis = emptyAgentFrictionAnalysis();
   const messages: AgentMessage[] = [];
+  const toolCallsById = indexToolCallsById(records);
   for (const record of records) {
-    applyActionMetadata(analysis, record, messages);
+    applyActionMetadata(analysis, record, messages, toolCallsById);
   }
   finalizeCommandIssues(analysis, totalTokens);
   return analysis;
@@ -62,7 +63,7 @@ function emptyAgentFrictionAnalysis(): AgentFrictionAnalysis {
 
 type AgentMessage = { role: "user" | "assistant"; text: string; timestamp?: string | undefined };
 
-function applyActionMetadata(analysis: AgentFrictionAnalysis, record: unknown, messages: AgentMessage[]): void {
+function applyActionMetadata(analysis: AgentFrictionAnalysis, record: unknown, messages: AgentMessage[], toolCallsById: Map<string, string>): void {
   if (!record || typeof record !== "object") return;
   const object = record as Record<string, unknown>;
   const payload = firstObject(object.payload) ?? object;
@@ -74,11 +75,79 @@ function applyActionMetadata(analysis: AgentFrictionAnalysis, record: unknown, m
   const text = JSON.stringify(record).toLowerCase();
   const isTool = type?.includes("tool") || type?.includes("function_call") || text.includes("\"tool_call\"") || text.includes("\"function_call\"");
   if (isTool) analysis.toolCallCount += 1;
-  const isNonZeroCommand = text.includes("exit_code") && !text.includes("\"exit_code\":0") && !text.includes("\"exit_code\": 0");
-  if (isNonZeroCommand) analysis.commandIssues.push(classifyCommandIssue(record, analysis.commandIssues));
+  const isNonZeroCommand = hasNonZeroCommandExit(record);
+  if (isNonZeroCommand) analysis.commandIssues.push(classifyCommandIssue(record, analysis.commandIssues, commandTextForToolOutput(record, toolCallsById)));
   if (/\b(exec_command|shell|bash|zsh|command)\b/.test(text)) analysis.shellCommandCount += 1;
   if (/\b(read_file|view_image|cat |sed |rg |grep |open_file)\b/.test(text)) analysis.fileReadCount += 1;
   if (/\b(apply_patch|write_file|edit|patch|created|deleted)\b/.test(text)) analysis.fileEditCount += 1;
+}
+
+function indexToolCallsById(records: unknown[]): Map<string, string> {
+  const calls = new Map<string, string>();
+  const sessionCommands = new Map<string, string>();
+  for (const record of records) {
+    if (!record || typeof record !== "object") continue;
+    const object = record as Record<string, unknown>;
+    const payload = firstObject(object.payload) ?? object;
+    const type = `${stringValue(object.type) ?? ""} ${stringValue(payload.type) ?? ""}`.toLowerCase();
+    const callId = stringValue(payload.call_id ?? object.call_id ?? payload.callId ?? object.callId);
+    if (type.includes("function_call_output") || type.includes("custom_tool_call_output") || type.includes("tool_result")) {
+      const output = stringValue(payload.output ?? object.output);
+      const sessionId = output?.match(/\bProcess running with session ID\s+(\d+)\b/i)?.[1];
+      const command = callId ? calls.get(callId) : undefined;
+      if (sessionId && command) sessionCommands.set(sessionId, command);
+      continue;
+    }
+    if (!type.includes("function_call") && !type.includes("custom_tool_call") && !type.includes("tool_call")) continue;
+    const command = toolCallCommandText(payload, sessionCommands) ?? toolCallCommandText(object, sessionCommands);
+    if (callId && command) calls.set(callId, command);
+  }
+  return calls;
+}
+
+function commandTextForToolOutput(record: unknown, toolCallsById: Map<string, string>): string | undefined {
+  if (!record || typeof record !== "object") return undefined;
+  const object = record as Record<string, unknown>;
+  const payload = firstObject(object.payload) ?? object;
+  const callId = stringValue(payload.call_id ?? object.call_id ?? payload.callId ?? object.callId);
+  return callId ? toolCallsById.get(callId) : undefined;
+}
+
+function toolCallCommandText(object: Record<string, unknown>, sessionCommands: Map<string, string>): string | undefined {
+  const name = `${stringValue(object.name) ?? ""} ${stringValue(object.recipient_name) ?? ""}`.toLowerCase();
+  const args = object.arguments ?? object.args ?? object.input;
+  const parsedArgs = typeof args === "string" ? parseJsonObject(args) : firstObject(args);
+  const sessionId = parsedArgs ? idValue(parsedArgs.session_id) : undefined;
+  if (sessionId && sessionCommands.has(sessionId)) return sessionCommands.get(sessionId);
+  const command = parsedArgs ? extractCommandText(parsedArgs) : undefined;
+  if (command) return command;
+  if ((name.includes("exec_command") || name.includes("shell")) && typeof args === "string" && args.trim()) return args;
+  const toolName = stringValue(object.name) ?? stringValue(object.recipient_name);
+  if (!toolName) return undefined;
+  return sessionId ? `${toolName} session ${sessionId}` : toolName;
+}
+
+function hasNonZeroCommandExit(record: unknown): boolean {
+  if (!record || typeof record !== "object") return false;
+  const object = record as Record<string, unknown>;
+  const payload = firstObject(object.payload) ?? object;
+  const type = `${stringValue(object.type) ?? ""} ${stringValue(payload.type) ?? ""}`.toLowerCase();
+  const isCommandRecord = /(function_call_output|custom_tool_call_output|tool_result|exec_command|shell|command)/.test(type)
+    || Boolean(extractCommandText(payload) ?? extractCommandText(object));
+  const explicitExitCode = exitCodeValue(payload) ?? exitCodeValue(object);
+  if (explicitExitCode !== undefined) return isCommandRecord && explicitExitCode !== 0;
+
+  const output = stringValue(payload.output) ?? stringValue(object.output);
+  if (!output || !/(function_call_output|custom_tool_call_output|tool_result|exec_command)/.test(type)) return false;
+  const processExitCode = output.match(/\bProcess exited with code\s+(-?\d+)\b/i)?.[1];
+  return processExitCode !== undefined && Number(processExitCode) !== 0;
+}
+
+function exitCodeValue(object: Record<string, unknown>): number | undefined {
+  const value = object.exit_code ?? object.exitCode;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && /^-?\d+$/.test(value.trim())) return Number(value);
+  return undefined;
 }
 
 function finalizeCommandIssues(analysis: AgentFrictionAnalysis, totalTokens: number): void {
@@ -133,31 +202,40 @@ function issuePriority(issue: CommandIssue): number {
 }
 
 function commandIssueReason(issue: CommandIssue): string {
-  if (issue.severity === "critical") return "Repeated or blocking command issue that may have stopped progress.";
-  if (issue.severity === "warning") return "Non-zero command event classified as important for this session.";
+  if (issue.severity === "critical") return "Repeated or blocking command failure that may have stopped progress.";
+  if (issue.severity === "warning") return "Non-zero command event classified as worth reviewing for this session.";
   if (issue.classification === "exploratory_miss") return "Likely exploratory command that found no result.";
   if (issue.classification === "harmless_nonzero") return "Likely harmless non-zero exit during normal shell exploration.";
   return "Non-zero command event with limited local context.";
 }
 
-function classifyCommandIssue(record: unknown, previousIssues: CommandIssue[]): CommandIssue {
+function classifyCommandIssue(record: unknown, previousIssues: CommandIssue[], commandHint?: string | undefined): CommandIssue {
   const raw = JSON.stringify(record);
   const text = raw.toLowerCase();
-  const command = extractCommandText(record) ?? compactCommandText(raw);
-  const category = commandCategory(text);
+  const command = commandHint ?? extractCommandText(record) ?? compactCommandText(raw);
+  const commandText = command.toLowerCase();
+  const classificationText = commandHint ? `${commandText} ${commandOutputText(record) ?? ""}` : text;
+  const category = commandCategory(commandHint ? commandText : text);
   const commandKey = normalizeCommand(command);
   const repeated = previousIssues.filter((issue) => issue.command === commandKey).length + 1 >= 3;
 
-  if (isHarmlessNonZero(text)) {
-    return { command: commandKey, category, classification: isExploratoryMiss(text) ? "exploratory_miss" : "harmless_nonzero", severity: "ignored", impact: "low" };
+  if (isHarmlessNonZero(classificationText)) {
+    return { command: commandKey, category, classification: isExploratoryMiss(classificationText) ? "exploratory_miss" : "harmless_nonzero", severity: "ignored", impact: "low" };
   }
-  if (isImportantFailure(text, category) || repeated) {
-    return { command: commandKey, category, classification: "blocking_failure", severity: repeated ? "critical" : importantSeverity(text, category), impact: repeated ? "high" : importantImpact(category) };
+  if (isImportantFailure(classificationText, category) || repeated) {
+    return { command: commandKey, category, classification: "blocking_failure", severity: repeated ? "critical" : importantSeverity(classificationText, category), impact: repeated ? "high" : importantImpact(category) };
   }
   if (category === "search" || category === "filesystem") {
     return { command: commandKey, category, classification: "exploratory_miss", severity: "ignored", impact: "low" };
   }
   return { command: commandKey, category, classification: "unknown", severity: "info", impact: "low" };
+}
+
+function commandOutputText(record: unknown): string | undefined {
+  if (!record || typeof record !== "object") return undefined;
+  const object = record as Record<string, unknown>;
+  const payload = firstObject(object.payload) ?? object;
+  return stringValue(payload.output ?? object.output)?.toLowerCase().slice(0, 2000);
 }
 
 function isHarmlessNonZero(text: string): boolean {
@@ -264,8 +342,22 @@ function firstObject(...values: unknown[]): Record<string, unknown> | undefined 
   return values.find((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value));
 }
 
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  try {
+    return firstObject(JSON.parse(value));
+  } catch {
+    return undefined;
+  }
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function idValue(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
 }
 
 function applyMessageCount(analysis: AgentFrictionAnalysis, messages: AgentMessage[], role: AgentMessage["role"], payload: Record<string, unknown>, object: Record<string, unknown>): void {

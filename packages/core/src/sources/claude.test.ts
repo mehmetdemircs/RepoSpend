@@ -62,6 +62,8 @@ describe("Claude Code adapter", () => {
               cache_creation_input_tokens: 100_000,
               cache_read_input_tokens: 200_000,
               output_tokens: 300_000,
+              service_tier: "priority",
+              speed: "fast",
             },
           },
         }),
@@ -82,6 +84,10 @@ describe("Claude Code adapter", () => {
     expect(result.sessions[0]?.outputTokens).toBe(300_000);
     expect(result.sessions[0]?.totalTokens).toBe(1_600_000);
     expect(result.sessions[0]?.tokenAggregationMethod).toBe("direct_usage");
+    expect(result.sessions[0]?.serviceTier).toBe("priority");
+    expect(result.sessions[0]?.serviceTierSource).toBe("session_usage");
+    expect(result.sessions[0]?.serviceTierConfidence).toBe("high");
+    expect(result.sessions[0]?.sourceMetadata?.claude).toMatchObject({ serviceTiers: ["priority"], speeds: ["fast"] });
     expect(result.sessions[0]?.estimatedCostUsd).toBe(7.935);
     expect(result.sessions[0]?.messageCount).toBe(2);
     expect(result.sessions[0]?.fileEditCount).toBe(1);
@@ -90,6 +96,30 @@ describe("Claude Code adapter", () => {
       { role: "assistant", text: "synthetic assistant reply", timestamp: "2026-05-18T10:00:02.000Z" },
     ]);
     expect(result.sessions[0]?.title).toBe("Synthetic Claude session");
+    expect(result.stats.serviceTier).toBe("priority");
+  });
+
+  it("uses Claude usage speed when service_tier is absent", () => {
+    const claudeHome = makeTempDir();
+    const projectDir = path.join(claudeHome, "projects", "-tmp-speed-only");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "speed-only.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "speed-only",
+        timestamp: "2026-05-18T10:00:00.000Z",
+        cwd: "/tmp/speed-only",
+        message: { role: "assistant", model: "claude-haiku-4-5", usage: { input_tokens: 100, output_tokens: 20, speed: "fast" } },
+      }),
+    );
+
+    const result = scanClaude({ claudeHome, pricing: { "claude-haiku-4-5": { inputPerMillion: 1, outputPerMillion: 5 } } });
+
+    expect(result.sessions[0]?.serviceTier).toBe("fast");
+    expect(result.sessions[0]?.serviceTierDetail).toBe("Claude usage.speed: fast");
+    expect(result.sessions[0]?.sourceMetadata?.claude).toMatchObject({ serviceTiers: [], speeds: ["fast"], serviceTier: "fast", speed: "fast" });
+    expect(result.stats.serviceTier).toBe("fast");
   });
 
   it("imports desktop local-agent session files without a projects path segment", () => {
@@ -247,6 +277,27 @@ describe("Claude Code adapter", () => {
 
     expect(result.sessions[0]?.model).toBe("claude-opus-4-7");
     expect(result.sessions[0]?.tokenSnapshotCount).toBe(1);
+  });
+
+  it("labels synthetic-only Claude sessions as locally unavailable usage", () => {
+    const claudeHome = makeTempDir();
+    const projectDir = path.join(claudeHome, "projects", "-tmp-synthetic-only");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "synthetic-only.jsonl"),
+      [
+        JSON.stringify({ type: "user", sessionId: "synthetic-only", timestamp: "2026-05-18T10:00:00.000Z", message: { role: "user", content: "Review this repo" } }),
+        JSON.stringify({ type: "assistant", sessionId: "synthetic-only", timestamp: "2026-05-18T10:01:00.000Z", message: { role: "assistant", model: "<synthetic>", usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 } } }),
+      ].join("\n"),
+    );
+
+    const result = scanClaude({ claudeHome, pricing: {} });
+
+    expect(result.sessions[0]?.model).toBeUndefined();
+    expect(result.sessions[0]?.totalTokens).toBe(0);
+    expect(result.sessions[0]?.tokenSnapshotCount).toBe(0);
+    expect(result.sessions[0]?.warnings).toContain("claude_synthetic_zero_usage");
+    expect(result.sessions[0]?.warnings).toContain("missing_token_breakdown");
   });
 
   it("merges duplicate Claude streaming usage rows with per-field max", () => {

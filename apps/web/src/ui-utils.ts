@@ -42,9 +42,9 @@ export function buildSourcePickerOptions(sources: Source[], sessions: Session[],
 
 export function buildGroupPickerOptions(groups: UsageGroup[], selected: string[], sortMode: FilterSortMode, icon: PickerIcon): PickerOption[] {
   const options: PickerOption[] = groups
-    .filter((group) => icon !== "model" || group.totalTokens > 0 || selected.includes(group.label))
+    .filter((group) => icon !== "model" || group.sessionCount > 0 || group.totalTokens > 0 || selected.includes(group.id) || selected.includes(group.label))
     .map((group) => ({
-      value: icon === "repo" ? group.id : group.label,
+      value: icon === "repo" || icon === "model" ? group.id : group.label,
       label: group.label,
       icon,
       usage: group.totalTokens,
@@ -155,6 +155,7 @@ export function surfaceLabel(surface: Session["detectedSurface"]): string {
 export function sourceLabel(source: Session["sourceClient"]): string {
   if (source === "codex") return "Codex";
   if (source === "claude") return "Claude Code";
+  if (source === "copilot") return "GitHub Copilot";
   if (source === "gemini-cli") return "Gemini CLI";
   if (source === "opencode") return "OpenCode";
   if (source === "cursor") return "Cursor";
