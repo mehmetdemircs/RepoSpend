@@ -27,6 +27,8 @@ interface ClaudeTokenTotals {
   inputTokens: number;
   cachedInputTokens: number;
   cacheCreationInputTokens: number;
+  cacheCreationInputTokens5m: number;
+  cacheCreationInputTokens1h: number;
   outputTokens: number;
   totalTokens: number;
   usageCount: number;
@@ -282,6 +284,8 @@ function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options:
     inputTokens: breakdown.inputTokens,
     cachedInputTokens: breakdown.cachedInputTokens,
     cacheCreationInputTokens: breakdown.cacheCreationInputTokens,
+    cacheCreationInputTokens5m: breakdown.cacheCreationInputTokens5m,
+    cacheCreationInputTokens1h: breakdown.cacheCreationInputTokens1h,
     outputTokens: breakdown.outputTokens,
     reasoningTokens: 0,
     reasoningOutputTokens: 0,
@@ -304,13 +308,15 @@ function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options:
     serviceTierSource: serviceTierSummary.serviceTier ? "session_usage" : undefined,
     serviceTierConfidence: serviceTierSummary.serviceTier ? "high" : undefined,
     serviceTierDetail: serviceTierSummary.serviceTierDetail,
-    sourceMetadata: breakdown.serviceTiers.length || breakdown.serviceSpeeds.length
+    sourceMetadata: breakdown.serviceTiers.length || breakdown.serviceSpeeds.length || breakdown.cacheCreationInputTokens5m > 0 || breakdown.cacheCreationInputTokens1h > 0
       ? {
         claude: {
           serviceTiers: breakdown.serviceTiers,
           speeds: breakdown.serviceSpeeds,
           serviceTier: serviceTierSummary.serviceTier,
           speed: serviceSpeedSummary.serviceTier,
+          cacheCreationInputTokens5m: breakdown.cacheCreationInputTokens5m,
+          cacheCreationInputTokens1h: breakdown.cacheCreationInputTokens1h,
         },
       }
       : undefined,
@@ -456,10 +462,17 @@ function occurrenceKey(filePath: string, recordIndex: number): string {
 }
 
 function cloneUsage(usage: Record<string, unknown>): Record<string, unknown> {
+  const cacheCreation = firstObject(usage.cache_creation);
   return {
     input_tokens: numberValue(usage.input_tokens),
     cache_read_input_tokens: numberValue(usage.cache_read_input_tokens),
     cache_creation_input_tokens: numberValue(usage.cache_creation_input_tokens),
+    cache_creation: cacheCreation
+      ? {
+        ephemeral_5m_input_tokens: numberValue(cacheCreation.ephemeral_5m_input_tokens),
+        ephemeral_1h_input_tokens: numberValue(cacheCreation.ephemeral_1h_input_tokens),
+      }
+      : undefined,
     output_tokens: numberValue(usage.output_tokens),
     service_tier: stringValue(usage.service_tier),
     speed: stringValue(usage.speed),
@@ -467,9 +480,15 @@ function cloneUsage(usage: Record<string, unknown>): Record<string, unknown> {
 }
 
 function mergeUsageMax(target: Record<string, unknown>, usage: Record<string, unknown>): void {
+  const targetCacheCreation = firstObject(target.cache_creation) ?? {};
+  const usageCacheCreation = firstObject(usage.cache_creation) ?? {};
   target.input_tokens = Math.max(numberValue(target.input_tokens), numberValue(usage.input_tokens));
   target.cache_read_input_tokens = Math.max(numberValue(target.cache_read_input_tokens), numberValue(usage.cache_read_input_tokens));
   target.cache_creation_input_tokens = Math.max(numberValue(target.cache_creation_input_tokens), numberValue(usage.cache_creation_input_tokens));
+  target.cache_creation = {
+    ephemeral_5m_input_tokens: Math.max(numberValue(targetCacheCreation.ephemeral_5m_input_tokens), numberValue(usageCacheCreation.ephemeral_5m_input_tokens)),
+    ephemeral_1h_input_tokens: Math.max(numberValue(targetCacheCreation.ephemeral_1h_input_tokens), numberValue(usageCacheCreation.ephemeral_1h_input_tokens)),
+  };
   target.output_tokens = Math.max(numberValue(target.output_tokens), numberValue(usage.output_tokens));
   target.service_tier ??= stringValue(usage.service_tier);
   target.speed ??= stringValue(usage.speed);
@@ -478,11 +497,17 @@ function mergeUsageMax(target: Record<string, unknown>, usage: Record<string, un
 function applyUsage(breakdown: ClaudeSessionBreakdown, usage: Record<string, unknown>): void {
   const input = numberValue(usage.input_tokens);
   const cacheRead = numberValue(usage.cache_read_input_tokens);
-  const cacheCreation = numberValue(usage.cache_creation_input_tokens);
+  const cacheCreationBreakdown = firstObject(usage.cache_creation);
+  const cacheCreation5m = numberValue(cacheCreationBreakdown?.ephemeral_5m_input_tokens);
+  const cacheCreation1h = numberValue(cacheCreationBreakdown?.ephemeral_1h_input_tokens);
+  const splitCacheCreation = cacheCreation5m + cacheCreation1h;
+  const cacheCreation = Math.max(numberValue(usage.cache_creation_input_tokens), splitCacheCreation);
   const output = numberValue(usage.output_tokens);
   breakdown.inputTokens += input + cacheRead + cacheCreation;
   breakdown.cachedInputTokens += cacheRead;
   breakdown.cacheCreationInputTokens += cacheCreation;
+  breakdown.cacheCreationInputTokens5m += cacheCreation5m;
+  breakdown.cacheCreationInputTokens1h += cacheCreation1h;
   breakdown.outputTokens += output;
   breakdown.usageCount += 1;
   pushUnique(breakdown.serviceTiers, normalizedServiceTier(usage.service_tier));
@@ -547,7 +572,11 @@ function dateKey(timestamp: string | undefined): string {
 }
 
 function usageTotal(usage: Record<string, unknown>): number {
-  return numberValue(usage.input_tokens) + numberValue(usage.cache_read_input_tokens) + numberValue(usage.cache_creation_input_tokens) + numberValue(usage.output_tokens);
+  const cacheCreation = firstObject(usage.cache_creation);
+  return numberValue(usage.input_tokens)
+    + numberValue(usage.cache_read_input_tokens)
+    + Math.max(numberValue(usage.cache_creation_input_tokens), numberValue(cacheCreation?.ephemeral_5m_input_tokens) + numberValue(cacheCreation?.ephemeral_1h_input_tokens))
+    + numberValue(usage.output_tokens);
 }
 
 function applyContentSignals(breakdown: ClaudeSessionBreakdown, content: unknown): void {
@@ -597,6 +626,8 @@ function emptyBreakdown(): ClaudeSessionBreakdown {
     inputTokens: 0,
     cachedInputTokens: 0,
     cacheCreationInputTokens: 0,
+    cacheCreationInputTokens5m: 0,
+    cacheCreationInputTokens1h: 0,
     outputTokens: 0,
     totalTokens: 0,
     usageCount: 0,

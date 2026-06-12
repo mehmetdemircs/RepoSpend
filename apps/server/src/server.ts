@@ -197,21 +197,25 @@ function validatePricingBody(body: unknown) {
     throw new Error("Expected JSON body with a models object.");
   }
 
-  const validated: Record<string, { inputPerMillion: number; cachedInputPerMillion?: number; cacheCreationInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string }> = {};
+  const validated: Record<string, { inputPerMillion: number; cachedInputPerMillion?: number; cacheCreationInput5mPerMillion?: number; cacheCreationInput1hPerMillion?: number; cacheCreationInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string }> = {};
   for (const [model, value] of Object.entries(models as Record<string, unknown>)) {
     if (!model.trim() || !value || typeof value !== "object" || Array.isArray(value)) continue;
     const row = value as Record<string, unknown>;
     const inputPerMillion = finiteNumber(row.inputPerMillion);
     const outputPerMillion = finiteNumber(row.outputPerMillion);
     if (inputPerMillion === undefined || outputPerMillion === undefined) continue;
-    const modelPricing: { inputPerMillion: number; cachedInputPerMillion?: number; cacheCreationInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string } = {
+    const modelPricing: { inputPerMillion: number; cachedInputPerMillion?: number; cacheCreationInput5mPerMillion?: number; cacheCreationInput1hPerMillion?: number; cacheCreationInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string } = {
       inputPerMillion,
       outputPerMillion,
     };
     const cachedInputPerMillion = finiteNumber(row.cachedInputPerMillion);
+    const cacheCreationInput5mPerMillion = finiteNumber(row.cacheCreationInput5mPerMillion);
+    const cacheCreationInput1hPerMillion = finiteNumber(row.cacheCreationInput1hPerMillion);
     const cacheCreationInputPerMillion = finiteNumber(row.cacheCreationInputPerMillion);
     const reasoningOutputPerMillion = finiteNumber(row.reasoningOutputPerMillion);
     if (cachedInputPerMillion !== undefined) modelPricing.cachedInputPerMillion = cachedInputPerMillion;
+    if (cacheCreationInput5mPerMillion !== undefined) modelPricing.cacheCreationInput5mPerMillion = cacheCreationInput5mPerMillion;
+    if (cacheCreationInput1hPerMillion !== undefined) modelPricing.cacheCreationInput1hPerMillion = cacheCreationInput1hPerMillion;
     if (cacheCreationInputPerMillion !== undefined) modelPricing.cacheCreationInputPerMillion = cacheCreationInputPerMillion;
     if (reasoningOutputPerMillion !== undefined) modelPricing.reasoningOutputPerMillion = reasoningOutputPerMillion;
     if (typeof row.note === "string") modelPricing.note = row.note;

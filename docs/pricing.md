@@ -4,10 +4,20 @@ RepoSpend estimates API-equivalent cost from a local pricing table. The bundled 
 
 The bundled table is seeded from public OpenAI, Anthropic, Google, and GitHub Copilot model references and is expressed as USD per 1M tokens. Pricing changes over time, so treat RepoSpend costs as API-equivalent estimates rather than invoice-grade accounting.
 
+For Claude models, RepoSpend uses Anthropic's cache-write TTL split when local
+Claude Code usage reports expose it. Tokens recorded under
+`cache_creation.ephemeral_5m_input_tokens` use the 5-minute cache-write rate, and
+tokens recorded under `cache_creation.ephemeral_1h_input_tokens` use the 1-hour
+cache-write rate. If a source only exposes the older aggregate
+`cache_creation_input_tokens` field, RepoSpend falls back to the model's generic
+cache-write rate.
+
 Each model can define:
 
 - input tokens
-- cache write input tokens
+- 5-minute cache write input tokens
+- 1-hour cache write input tokens
+- generic cache write input tokens for sources without a TTL split
 - cached input tokens
 - output tokens
 - reasoning output tokens
@@ -25,7 +35,19 @@ from visible output before storing and pricing both buckets. If a comparison too
 shows output inclusive of reasoning and also prices reasoning separately, its
 cost will be higher because reasoning is counted twice.
 
+This is a known reason RepoSpend Codex API-equivalent cost can be lower than a
+tool whose output bucket remains inclusive of reasoning while also exposing a
+separate reasoning bucket. Compare visible output and reasoning separately before
+treating a cost delta as a pricing-table problem.
+
 See [token-accounting.md](token-accounting.md) for the detailed comparison model.
+
+This can differ from tools or older `ccusage` versions that price all Claude
+cache creation tokens with one cache-write rate. A single-rate calculation can
+understate sessions that mostly used Anthropic's 1-hour cache writes or overstate
+sessions that mostly used 5-minute cache writes. RepoSpend prices the buckets
+recorded in the local Claude transcript instead of forcing every cache write into
+one column.
 
 When an exact model id is not present in the pricing table, RepoSpend first tries conservative family matching for known provider naming patterns. For example, a nearby newer Claude Opus 4.x or GPT 5.x variant can inherit the closest older bundled rate so the dashboard stays useful while public rate cards catch up. Inherited rates are labeled in Settings.
 

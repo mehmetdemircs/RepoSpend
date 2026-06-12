@@ -5,6 +5,7 @@ RepoSpend uses one normalized token shape across local clients:
 - `inputTokens` is total input for the request/session. When a source reports cache reads or cache writes separately, RepoSpend includes them in `inputTokens` and also stores them in sub-buckets.
 - `cachedInputTokens` is the cache-read portion of input.
 - `cacheCreationInputTokens` is the cache-write portion of input, when the source exposes it.
+- `cacheCreationInputTokens5m` and `cacheCreationInputTokens1h` preserve Anthropic's Claude cache-write TTL split when local transcripts expose `usage.cache_creation`.
 - `outputTokens` is visible/non-reasoning output.
 - `reasoningTokens` is reasoning output, when the source exposes it.
 - `totalTokens = inputTokens + outputTokens + reasoningTokens`.
@@ -36,6 +37,39 @@ cache write input = cacheCreationInputTokens
 ```
 
 Adding cached tokens again would inflate token totals and double-charge cached input in API-equivalent cost.
+
+## Claude Source Scope
+
+RepoSpend scans both Claude project transcripts and Claude Desktop/local-agent
+session roots:
+
+```text
+~/.claude/projects
+~/.config/claude/projects
+~/Library/Application Support/Claude/local-agent-mode-sessions
+~/.config/Claude/local-agent-mode-sessions
+```
+
+Many terminal-first usage tools focus on `~/.claude/projects`. If local-agent
+session files exist, RepoSpend can show higher Claude totals than `ccusage` or
+Tokscale without a parser bug. When comparing tools, first check whether the
+same Claude roots are included.
+
+For Claude, RepoSpend also preserves the cache-write TTL split when it is present
+in local logs:
+
+```text
+5-minute cache write = cacheCreationInputTokens5m
+1-hour cache write = cacheCreationInputTokens1h
+unclassified cache write = cacheCreationInputTokens - cacheCreationInputTokens5m - cacheCreationInputTokens1h
+```
+
+This is one reason RepoSpend API-equivalent cost can differ from `ccusage`.
+Anthropic prices 5-minute cache writes at a different rate than 1-hour cache
+writes. RepoSpend applies the recorded TTL-specific rate for each bucket; tools
+that collapse all Claude cache creation tokens into a single cache-write column
+can drift when a session mixes TTLs or when the chosen single rate does not match
+the session's actual cache usage.
 
 ## Reasoning Tokens
 

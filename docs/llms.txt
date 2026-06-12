@@ -53,6 +53,7 @@ Positioning:
 - RepoSpend complements CLI tools such as ccusage.
 - ccusage is useful for terminal-first Claude Code totals and daily breakdowns.
 - RepoSpend is useful for visual repo-level analytics, session inspection, source/tool comparison, model mix, token shape, cache reuse, exports, and command/agent friction.
+- RepoSpend totals can intentionally differ from ccusage or Tokscale because it includes Claude Desktop/local-agent session roots when present, treats cache reads/writes as input sub-buckets, prices Claude cache writes by recorded 5-minute vs 1-hour TTL, and separates Codex visible output from reasoning output.
 
 Cost language:
 - RepoSpend shows estimated API-equivalent cost.

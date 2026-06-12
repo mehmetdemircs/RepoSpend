@@ -16,7 +16,7 @@ export const pricingInfo = {
     { label: "GitHub Copilot model pricing reference", url: "https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" },
   ],
   unit: "USD per 1M tokens",
-  updatedAt: "2026-05-18",
+  updatedAt: "2026-06-10",
   note: "RepoSpend estimates API-equivalent cost from local token counts and public API-style Standard pricing. This is not your actual bill; subscriptions, credits, provider terms, cache behavior, regional processing, or other billing factors can make your real cost different.",
 };
 
@@ -52,18 +52,20 @@ export const defaultPricing: PricingTable = {
   "oswe-vscode-prime": { inputPerMillion: 0.25, cachedInputPerMillion: 0.025, outputPerMillion: 2, note: "GitHub Copilot Raptor mini internal model id." },
   "lark": { inputPerMillion: 0.25, cachedInputPerMillion: 0.025, outputPerMillion: 2, note: "GitHub Copilot preview model; estimated with lightweight Copilot pricing." },
   "goldeneye": { inputPerMillion: 1.25, cachedInputPerMillion: 0.125, outputPerMillion: 10, note: "GitHub Copilot fine-tuned model using GPT-5.1-Codex pricing." },
-  "claude-opus-4-8": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
-  "claude-opus-4-7": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
-  "claude-opus-4-6": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
-  "claude-opus-4-6-fast-mode": { inputPerMillion: 0, cacheCreationInputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0, note: "GitHub Copilot supported model, but public per-token pricing is not listed separately. RepoSpend leaves API-equivalent pricing unset." },
-  "claude-opus-4-5": { inputPerMillion: 5, cacheCreationInputPerMillion: 6.25, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
-  "claude-opus-4-1": { inputPerMillion: 15, cacheCreationInputPerMillion: 18.75, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
-  "claude-opus-4": { inputPerMillion: 15, cacheCreationInputPerMillion: 18.75, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
-  "claude-sonnet-4-6": { inputPerMillion: 3, cacheCreationInputPerMillion: 3.75, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
-  "claude-sonnet-4-5": { inputPerMillion: 3, cacheCreationInputPerMillion: 3.75, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
-  "claude-sonnet-4": { inputPerMillion: 3, cacheCreationInputPerMillion: 3.75, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
-  "claude-haiku-4-5": { inputPerMillion: 1, cacheCreationInputPerMillion: 1.25, cachedInputPerMillion: 0.1, outputPerMillion: 5 },
-  "claude-3-5-haiku": { inputPerMillion: 0.8, cacheCreationInputPerMillion: 1, cachedInputPerMillion: 0.08, outputPerMillion: 4 },
+  "claude-fable-5": { inputPerMillion: 10, cacheCreationInput5mPerMillion: 12.5, cacheCreationInput1hPerMillion: 20, cacheCreationInputPerMillion: 20, cachedInputPerMillion: 1, outputPerMillion: 50 },
+  "claude-mythos-5": { inputPerMillion: 10, cacheCreationInput5mPerMillion: 12.5, cacheCreationInput1hPerMillion: 20, cacheCreationInputPerMillion: 20, cachedInputPerMillion: 1, outputPerMillion: 50, note: "Limited availability Anthropic model; same public API-equivalent pricing as Claude Fable 5." },
+  "claude-opus-4-8": { inputPerMillion: 5, cacheCreationInput5mPerMillion: 6.25, cacheCreationInput1hPerMillion: 10, cacheCreationInputPerMillion: 10, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+  "claude-opus-4-7": { inputPerMillion: 5, cacheCreationInput5mPerMillion: 6.25, cacheCreationInput1hPerMillion: 10, cacheCreationInputPerMillion: 10, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+  "claude-opus-4-6": { inputPerMillion: 5, cacheCreationInput5mPerMillion: 6.25, cacheCreationInput1hPerMillion: 10, cacheCreationInputPerMillion: 10, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+  "claude-opus-4-6-fast-mode": { inputPerMillion: 0, cacheCreationInput5mPerMillion: 0, cacheCreationInput1hPerMillion: 0, cacheCreationInputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0, note: "GitHub Copilot supported model, but public per-token pricing is not listed separately. RepoSpend leaves API-equivalent pricing unset." },
+  "claude-opus-4-5": { inputPerMillion: 5, cacheCreationInput5mPerMillion: 6.25, cacheCreationInput1hPerMillion: 10, cacheCreationInputPerMillion: 10, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
+  "claude-opus-4-1": { inputPerMillion: 15, cacheCreationInput5mPerMillion: 18.75, cacheCreationInput1hPerMillion: 30, cacheCreationInputPerMillion: 30, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
+  "claude-opus-4": { inputPerMillion: 15, cacheCreationInput5mPerMillion: 18.75, cacheCreationInput1hPerMillion: 30, cacheCreationInputPerMillion: 30, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
+  "claude-sonnet-4-6": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
+  "claude-sonnet-4-5": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
+  "claude-sonnet-4": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
+  "claude-haiku-4-5": { inputPerMillion: 1, cacheCreationInput5mPerMillion: 1.25, cacheCreationInput1hPerMillion: 2, cacheCreationInputPerMillion: 2, cachedInputPerMillion: 0.1, outputPerMillion: 5 },
+  "claude-3-5-haiku": { inputPerMillion: 0.8, cacheCreationInput5mPerMillion: 1, cacheCreationInput1hPerMillion: 1.6, cacheCreationInputPerMillion: 1.6, cachedInputPerMillion: 0.08, outputPerMillion: 4 },
 };
 
 export function loadPricingTable(pricingPath?: string): PricingTable {
@@ -92,7 +94,7 @@ export function repospendHome(): string {
   return process.env.REPOSPEND_HOME || path.join(os.homedir(), ".repospend");
 }
 
-export function calculateCostUsd(usage: Pick<NormalizedUsage, "model" | "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens" | "outputTokens" | "reasoningTokens">, pricing: PricingTable): number | undefined {
+export function calculateCostUsd(usage: Pick<NormalizedUsage, "model" | "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens" | "cacheCreationInputTokens5m" | "cacheCreationInputTokens1h" | "outputTokens" | "reasoningTokens">, pricing: PricingTable): number | undefined {
   if (!usage.model) {
     return undefined;
   }
@@ -100,17 +102,29 @@ export function calculateCostUsd(usage: Pick<NormalizedUsage, "model" | "inputTo
   if (!modelPricing) {
     return undefined;
   }
-  const cacheCreationInput = usage.cacheCreationInputTokens ?? 0;
+  const cacheCreationInput5m = usage.cacheCreationInputTokens5m ?? 0;
+  const cacheCreationInput1h = usage.cacheCreationInputTokens1h ?? 0;
+  const splitCacheCreationInput = cacheCreationInput5m + cacheCreationInput1h;
+  const cacheCreationInput = usage.cacheCreationInputTokens ?? splitCacheCreationInput;
+  const unclassifiedCacheCreationInput = Math.max(cacheCreationInput - splitCacheCreationInput, 0);
   // Normalized inputTokens are total input tokens; cache reads/writes are split out so each can use its own rate.
   const billableInput = Math.max(usage.inputTokens - usage.cachedInputTokens - cacheCreationInput, 0);
   const cachedRate = modelPricing.cachedInputPerMillion ?? modelPricing.inputPerMillion;
-  const cacheCreationRate = modelPricing.cacheCreationInputPerMillion ?? modelPricing.inputPerMillion;
+  const cacheCreationRate = firstPositiveRate(modelPricing.cacheCreationInputPerMillion, modelPricing.cacheCreationInput1hPerMillion, modelPricing.cacheCreationInput5mPerMillion, modelPricing.inputPerMillion);
+  const cacheCreation5mRate = firstPositiveRate(modelPricing.cacheCreationInput5mPerMillion, modelPricing.cacheCreationInputPerMillion, modelPricing.inputPerMillion);
+  const cacheCreation1hRate = firstPositiveRate(modelPricing.cacheCreationInput1hPerMillion, modelPricing.cacheCreationInputPerMillion, modelPricing.inputPerMillion);
   const reasoningRate = modelPricing.reasoningOutputPerMillion ?? modelPricing.outputPerMillion;
   const cost =
     (billableInput / 1_000_000) * modelPricing.inputPerMillion +
     (usage.cachedInputTokens / 1_000_000) * cachedRate +
-    (cacheCreationInput / 1_000_000) * cacheCreationRate +
+    (cacheCreationInput5m / 1_000_000) * cacheCreation5mRate +
+    (cacheCreationInput1h / 1_000_000) * cacheCreation1hRate +
+    (unclassifiedCacheCreationInput / 1_000_000) * cacheCreationRate +
     (usage.outputTokens / 1_000_000) * modelPricing.outputPerMillion +
     (usage.reasoningTokens / 1_000_000) * reasoningRate;
   return Number(cost.toFixed(6));
+}
+
+function firstPositiveRate(...rates: Array<number | undefined>): number {
+  return rates.find((rate) => typeof rate === "number" && Number.isFinite(rate) && rate > 0) ?? 0;
 }

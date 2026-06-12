@@ -441,6 +441,7 @@ export function readableWarning(warning: string): string {
   if (normalized === "repo_unverified_no_git_root") return "Repo/folder grouping is unverified because no Git root was detected.";
   if (normalized === "copilot_missing_cwd") return "GitHub Copilot did not include a local workspace path, so the session is grouped under Unknown repo/folder.";
   if (normalized === "claude_synthetic_zero_usage") return "Claude only persisted a synthetic zero-usage marker for this session, so the real model and token counts are unavailable locally.";
+  if (normalized === "claude_session_split_by_activity_day") return "Claude activity crossed day or model boundaries, so RepoSpend split it for more accurate daily totals.";
   if (normalized === "unknown_pricing" || normalized === "unknown_cost") return "Some sessions cannot be priced because token splits or pricing coverage are missing.";
   if (normalized === "missing_token_breakdown") return "Some sessions are missing detailed token breakdowns.";
   if (normalized === "low_cache_rate") return "Cache reuse is low, so input tokens may be driving more estimated cost.";

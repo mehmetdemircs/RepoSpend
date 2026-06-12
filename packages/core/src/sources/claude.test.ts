@@ -62,6 +62,10 @@ describe("Claude Code adapter", () => {
               cache_creation_input_tokens: 100_000,
               cache_read_input_tokens: 200_000,
               output_tokens: 300_000,
+              cache_creation: {
+                ephemeral_5m_input_tokens: 40_000,
+                ephemeral_1h_input_tokens: 60_000,
+              },
               service_tier: "priority",
               speed: "fast",
             },
@@ -70,7 +74,7 @@ describe("Claude Code adapter", () => {
       ].join("\n"),
     );
 
-    const result = scanClaude({ claudeHome, pricing: { "claude-sonnet-4-5": { inputPerMillion: 3, cacheCreationInputPerMillion: 3.75, cachedInputPerMillion: 0.3, outputPerMillion: 15 } } });
+    const result = scanClaude({ claudeHome, pricing: { "claude-sonnet-4-5": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 } } });
 
     expect(result.sessions).toHaveLength(1);
     expect(result.sessions[0]?.sourceClient).toBe("claude");
@@ -80,6 +84,8 @@ describe("Claude Code adapter", () => {
     expect(result.sessions[0]?.model).toBe("claude-sonnet-4-5-20250929");
     expect(result.sessions[0]?.inputTokens).toBe(1_300_000);
     expect(result.sessions[0]?.cacheCreationInputTokens).toBe(100_000);
+    expect(result.sessions[0]?.cacheCreationInputTokens5m).toBe(40_000);
+    expect(result.sessions[0]?.cacheCreationInputTokens1h).toBe(60_000);
     expect(result.sessions[0]?.cachedInputTokens).toBe(200_000);
     expect(result.sessions[0]?.outputTokens).toBe(300_000);
     expect(result.sessions[0]?.totalTokens).toBe(1_600_000);
@@ -87,8 +93,8 @@ describe("Claude Code adapter", () => {
     expect(result.sessions[0]?.serviceTier).toBe("priority");
     expect(result.sessions[0]?.serviceTierSource).toBe("session_usage");
     expect(result.sessions[0]?.serviceTierConfidence).toBe("high");
-    expect(result.sessions[0]?.sourceMetadata?.claude).toMatchObject({ serviceTiers: ["priority"], speeds: ["fast"] });
-    expect(result.sessions[0]?.estimatedCostUsd).toBe(7.935);
+    expect(result.sessions[0]?.sourceMetadata?.claude).toMatchObject({ serviceTiers: ["priority"], speeds: ["fast"], cacheCreationInputTokens5m: 40_000, cacheCreationInputTokens1h: 60_000 });
+    expect(result.sessions[0]?.estimatedCostUsd).toBe(8.07);
     expect(result.sessions[0]?.messageCount).toBe(2);
     expect(result.sessions[0]?.fileEditCount).toBe(1);
     expect(result.sessions[0]?.promptTimeline).toEqual([

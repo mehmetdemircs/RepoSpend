@@ -30,6 +30,13 @@ RepoSpend scans:
 
 Claude Code session transcripts are parsed from JSONL files. Useful fields include `sessionId`, `cwd`, `gitBranch`, `timestamp`, `entrypoint`, `message.model`, and `message.usage`. When `message.usage` is present, RepoSpend sums Claude assistant usage records directly. When token counts or model names are absent in a transcript, sessions remain visible with unknown cost.
 
+RepoSpend intentionally includes Claude Desktop/local-agent session roots when
+they exist. Tools such as `ccusage` and Tokscale commonly focus on
+`~/.claude/projects`, so RepoSpend's Claude totals can be higher when local-agent
+sessions are present. In one all-time local audit, RepoSpend's
+`~/.claude/projects` slice matched `ccusage`, while the difference came from
+`~/Library/Application Support/Claude/local-agent-mode-sessions`.
+
 RepoSpend checks `~/.claude/history.jsonl` only for source status/counting. History-only entries are not imported into usage analytics because they do not include reliable token, model, or transcript data.
 
 ## GitHub Copilot

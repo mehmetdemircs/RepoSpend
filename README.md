@@ -35,11 +35,11 @@ Best for developers who want to:
 
 ## Preview
 
-![RepoSpend overview dashboard with fictional Middle-earth usage data](docs/screenshots/dashboard-overview.png)
+![Animated RepoSpend overview and sessions tour with fictional Middle-earth usage data](docs/screenshots/overview-sessions-tour.gif)
 
-Screenshots use fictional Middle-earth demo data. The Lord of the Rings themed
-repo names, sessions, prompts, token counts, and costs are intentional; no private
-repository data is shown.
+Preview media uses fictional Middle-earth demo data. The Lord of the Rings themed
+repo names, sessions, prompts, token counts, models, and costs are intentional; no
+private repository data is shown.
 
 ## What is RepoSpend?
 
@@ -196,9 +196,12 @@ RepoSpend uses normalized model-work totals:
 totalTokens = inputTokens + outputTokens + reasoningTokens
 ```
 
-Cache reads and cache writes are kept as input sub-buckets and priced once. This
-means RepoSpend token totals may look lower than tools that display cache
-reads/writes as separate addable token columns.
+Cache reads and cache writes are kept as input sub-buckets and priced once. For
+Claude, RepoSpend also uses the 5-minute vs 1-hour cache-write split recorded in
+local transcripts when available. This means RepoSpend token totals may look
+lower than tools that display cache reads/writes as separate addable token
+columns, and Claude API-equivalent cost may differ from tools that collapse all
+cache writes into one rate.
 
 For the detailed accounting model and comparison with `ccusage` and Tokscale,
 see [docs/token-accounting.md](docs/token-accounting.md).
@@ -274,6 +277,17 @@ Use `ccusage` when you want fast Claude Code totals, daily breakdowns, or a CLI
 view that is close to Claude Code's local usage files. Use RepoSpend when you
 want a local dashboard that compares AI coding usage across repos, sessions,
 models, and tools.
+
+When comparing totals, expect some intentional differences:
+
+- RepoSpend includes Claude Desktop/local-agent session files when they exist;
+  many terminal-first tools count only `~/.claude/projects`.
+- RepoSpend keeps cached input and cache writes as input sub-buckets rather than
+  adding them again to headline token totals.
+- RepoSpend prices Claude cache writes by the recorded 5-minute vs 1-hour TTL
+  split when local transcripts expose it.
+- RepoSpend separates Codex visible output from reasoning output so reasoning is
+  priced once.
 
 Generic Claude Code monitors usually focus on one source. RepoSpend is designed
 as a repo-level AI coding cost tracker: it brings together local Codex, Claude

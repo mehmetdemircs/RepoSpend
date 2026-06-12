@@ -3,12 +3,7 @@ import type { DashboardSourceStats, NormalizedUsage, SourceStatus } from "@repos
 
 export const baseDate = "2026-05-18";
 
-export const demoPricing = {
-  ...defaultPricing,
-  "gpt-5.3-codex": { inputPerMillion: 1.75, cachedInputPerMillion: 0.175, outputPerMillion: 14, reasoningOutputPerMillion: 14 },
-  "gpt-5.3-codex-spark": { inputPerMillion: 1.75, cachedInputPerMillion: 0.175, outputPerMillion: 14, reasoningOutputPerMillion: 14 },
-  "claude-haiku-4-5-20251001": { inputPerMillion: 1, cacheCreationInputPerMillion: 1.25, cachedInputPerMillion: 0.1, outputPerMillion: 5 },
-};
+export const demoPricing = defaultPricing;
 
 export type DemoSessionInput = {
   id: string;
@@ -211,11 +206,11 @@ export const demoInputs: DemoSessionInput[] = [
   {
     id: "lotr-session-003",
     repo: "shire-mobile",
-    title: "Investigate token spike after second breakfast",
+    title: "Investigate Opus 4.8 token spike after second breakfast",
     sourceClient: "claude",
     sourceApp: "Claude Code",
     sourceAppRaw: "claude-code",
-    model: "claude-opus-4-7",
+    model: "claude-opus-4-8",
     provider: "anthropic",
     hour: 11,
     minute: 5,
@@ -294,11 +289,11 @@ export const demoInputs: DemoSessionInput[] = [
   {
     id: "lotr-session-006",
     repo: "rivendell-dashboard",
-    title: "Refactor the council-of-elrond planner",
+    title: "Refactor the council-of-elrond planner with Fable 5",
     sourceClient: "claude",
     sourceApp: "Claude Desktop App",
     sourceAppRaw: "claude-desktop-local-agent",
-    model: "claude-sonnet-4-6",
+    model: "claude-fable-5",
     provider: "anthropic",
     hour: 14,
     minute: 15,
@@ -430,11 +425,11 @@ export const demoInputs: DemoSessionInput[] = [
   {
     id: "lotr-session-009",
     repo: "minas-tirith-admin",
-    title: "Tighten city-gate roles before the beacons launch",
+    title: "Tighten city-gate roles with Mythos 5 before the beacons launch",
     sourceClient: "claude",
     sourceApp: "Claude Code",
     sourceAppRaw: "claude-code",
-    model: "claude-haiku-4-5-20251001",
+    model: "claude-mythos-5",
     provider: "anthropic",
     hour: 17,
     minute: 5,
@@ -586,11 +581,11 @@ export const demoInputs: DemoSessionInput[] = [
   {
     id: "lotr-session-014",
     repo: "shire-mobile",
-    title: "Make pantry sync work offline in Bag End",
+    title: "Make pantry sync work offline in Bag End with Sonnet 4.6",
     sourceClient: "claude",
     sourceApp: "Claude Code",
     sourceAppRaw: "claude-code",
-    model: "claude-haiku-4-5-20251001",
+    model: "claude-sonnet-4-6-20260601",
     provider: "anthropic",
     hour: 20,
     minute: 45,

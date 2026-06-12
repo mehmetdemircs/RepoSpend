@@ -123,7 +123,6 @@ import {
   repoCostConcentration,
   repoCostDriverExplanation,
   repoDailyBreakdown,
-  repoDiagnosisSentence,
   repoModelBreakdown,
   repoRows,
   repoRowsFromGroup,
@@ -149,7 +148,6 @@ import {
   sourceHomePath,
   sourceImportedSessions,
   sourcePrimaryDataFound,
-  tokenIntensityInterpretation,
   tokenStats,
   topDashboardActions,
   topSessionsToReview,
@@ -165,6 +163,7 @@ const chartTooltipStyle = {
 };
 const chartTooltipLabelStyle = { color: "#f8fafc", fontWeight: 700 };
 const chartTooltipItemStyle = { color: "#e5e7eb" };
+const positiveBarMinPointSize = (value: number | null | undefined) => (typeof value === "number" && value > 0 ? 3 : 0);
 
 const viewMeta: Record<ViewKey, { title: string; subtitle: string }> = {
   dashboard: { title: "Overview", subtitle: "Your local AI coding activity at a glance" },
@@ -192,6 +191,8 @@ const viewIcons: Record<ViewKey, React.ReactElement> = {
   settings: <Settings />,
 };
 
+const repoDetailSessionColumns: SessionColumnKey[] = ["commands", "commandIssues", "edits"];
+
 type SessionSearchIntent = { search: string; key: number };
 
 function App() {
@@ -213,6 +214,7 @@ function App() {
   const [filterSortMode, setFilterSortMode] = React.useState<FilterSortMode>(() => readFilterSortMode());
   const [displaySettings, setDisplaySettings] = React.useState<DisplaySettings>(() => readDisplaySettings());
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
+  const [refreshNonce, setRefreshNonce] = React.useState(0);
   const suppressNextUrlSync = React.useRef(false);
   const backgroundWarmStarted = React.useRef(false);
 
@@ -264,7 +266,7 @@ function App() {
     return () => {
       mounted = false;
     };
-  }, [filterOptionsQuery, query]);
+  }, [filterOptionsQuery, query, refreshNonce]);
 
   React.useEffect(() => {
     const repoSource = filterOptionsData ?? data;
@@ -349,11 +351,15 @@ function App() {
     setDisplaySettings((current) => ({ ...current, ...next }));
   }, []);
 
+  const refetchDashboard = React.useCallback(() => {
+    setRefreshNonce((current) => current + 1);
+  }, []);
+
   const rescanLocalLogs = React.useCallback(() => {
     setLoading(true);
     setError(null);
-    void clearParseCache().finally(() => window.location.reload());
-  }, []);
+    void clearParseCache().finally(refetchDashboard);
+  }, [refetchDashboard]);
 
   React.useEffect(() => {
     if (!data || backgroundWarmStarted.current || rangePreset !== "last7" || hasNonDateFilters(filters)) return;
@@ -370,6 +376,8 @@ function App() {
   const repoOptions = buildGroupPickerOptions(optionSource?.repos ?? [], filters.repo, pickerSortMode, "repo");
   const modelOptions = buildGroupPickerOptions(optionSource?.models ?? [], filters.model, pickerSortMode, "model");
   const appOptions = buildGroupPickerOptions(optionSource?.sourceApps ?? [], filters.sourceApp, pickerSortMode, "app");
+  const filterBarVisible = viewShowsFiltersBar(activeView);
+  const hiddenFilterNotice = !filterBarVisible ? compactHiddenFilterNotice(filters, rangePreset) : null;
 
   const navigateToView = React.useCallback((view: ViewKey) => setActiveView(view), []);
   const openSessionsWithSearch = React.useCallback((search: string) => {
@@ -435,6 +443,7 @@ function App() {
             <QuickLink href="https://github.com/settings/billing/summary" label="Copilot billing" icon={<Github className="h-4 w-4" aria-hidden />} tone="github" />
             {cursorSourceEnabled(data) ? <QuickLink href="https://cursor.com/dashboard/usage" label="Cursor usage" icon={<Code2 className="h-4 w-4" aria-hidden />} tone="cursor" /> : null}
             <QuickLink href="https://github.com/mehmetdemircs/RepoSpend" label="GitHub repo" icon={<Github className="h-4 w-4" aria-hidden />} tone="github" />
+            <QuickLink href="https://www.npmjs.com/package/repospend" label="npm package" icon={<NpmIcon />} tone="npm" />
           </div>
         </div>
 
@@ -454,12 +463,7 @@ function App() {
         <PageHeader
           view={activeView}
           data={data}
-          filters={filters}
-          rangePreset={rangePreset}
-          sources={sourceOptions}
-          sourceApps={appOptions}
-          repos={repoOptions}
-          models={modelOptions}
+          filterNotice={hiddenFilterNotice}
           onRefresh={rescanLocalLogs}
           onResetFilters={() => {
             setRangePreset("last7");
@@ -470,7 +474,7 @@ function App() {
             }
           }}
         />
-        {activeView === "dashboard" || activeView === "sessions" || activeView === "repos" || activeView === "repoDetail" || activeView === "models" || activeView === "commands" || activeView === "insights" ? (
+        {filterBarVisible ? (
           <FiltersBar
             filters={filters}
             setFilters={setFilters}
@@ -514,8 +518,9 @@ function App() {
               setPricingStatus("Saving local pricing...");
               const saved = await savePricing(pricingDraft);
               setData({ ...data, pricing: saved });
+              setPricingDraft(saved.models);
               setPricingStatus(`Saved pricing to ${saved.path ?? "local pricing file"}. Refreshing cost estimates...`);
-              window.setTimeout(() => window.location.reload(), 250);
+              refetchDashboard();
             }}
             onReset={() => {
               setPricingDraft(data.pricing.models);
@@ -525,8 +530,8 @@ function App() {
               setPricingStatus("Saving local source settings...");
               const saved = await saveConfig(nextConfig);
               setData({ ...data, config: saved.config, configPath: saved.path });
-              setPricingStatus(`Saved source settings to ${saved.path}. Reloading local scan...`);
-              window.setTimeout(() => window.location.reload(), 350);
+              setPricingStatus(`Saved source settings to ${saved.path}. Refreshing local scan...`);
+              refetchDashboard();
             }}
             onClearLocalData={async () => {
               setPricingStatus("Clearing RepoSpend local data...");
@@ -537,14 +542,16 @@ function App() {
               } catch {
                 // Local browser preferences are optional.
               }
-              setPricingStatus(`${result.removed ? "Removed" : "No local data found at"} ${result.path}. Reloading...`);
-              window.setTimeout(() => window.location.reload(), 350);
+              setFilterSortMode(readFilterSortMode());
+              setDisplaySettings(readDisplaySettings());
+              setPricingStatus(`${result.removed ? "Removed" : "No local data found at"} ${result.path}. Refreshing local scan...`);
+              refetchDashboard();
             }}
             onClearParseCache={async () => {
               setPricingStatus("Clearing RepoSpend parse cache...");
               const result = await clearParseCache();
-              setPricingStatus(`${result.removed ? "Removed parse cache at" : "No parse cache found at"} ${result.path}. Reloading full scan...`);
-              window.setTimeout(() => window.location.reload(), 350);
+              setPricingStatus(`${result.removed ? "Removed parse cache at" : "No parse cache found at"} ${result.path}. Refreshing full scan...`);
+              refetchDashboard();
             }}
             onReviewUnpricedSessions={() => openSessionsWithSearch("cannot be priced")}
             onRescan={rescanLocalLogs}
@@ -603,11 +610,6 @@ function App() {
         {!error && data && data.sessions.length > 0 && activeView === "dashboard" ? (
           <div className="mt-4 space-y-4">
             <OverviewKpis data={data} onOpenRepo={openRepo} />
-            <TopActionsCard data={data} onNavigate={navigateToView} onOpenRepo={openRepo} onOpenSession={openSession} />
-            <SecondaryMetrics summary={data.summary} />
-            <SourceBreakdownPanel data={data} />
-            <TopRepositoriesSection data={data} onOpenRepos={() => navigateToView("repos")} onOpenRepo={openRepo} pageSize={displaySettings.tablePageSize} />
-            <WasteSignalsSection data={data} onOpenSessions={() => navigateToView("sessions")} />
 
             <div className="panel p-3">
               <div className="display-control-row">
@@ -638,7 +640,7 @@ function App() {
                       <XAxis type="number" tickFormatter={(value) => metricTick(metric, Number(value))} tick={{ fill: "#94a3b8" }} />
                       <YAxis dataKey="label" type="category" width={170} tickFormatter={(value) => compactModelLabel(String(value))} tick={{ fontSize: 12, fill: "#94a3b8" }} />
                       <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} formatter={(value) => tooltipMetric(metric, Number(value))} />
-                      <Bar dataKey={metric} name={metricLabel(metric)} fill="#6d5dfc" />
+                      <Bar dataKey={metric} name={metricLabel(metric)} fill="#6d5dfc" minPointSize={positiveBarMinPointSize} />
                     </BarChart>
                   </ResponsiveContainer>
                 </ChartPanel>
@@ -650,9 +652,9 @@ function App() {
                       <XAxis dataKey="label" angle={-30} textAnchor="end" height={70} tick={{ fontSize: 12, fill: "#94a3b8" }} />
                       <YAxis tickFormatter={(value) => metricTick(metric, Number(value))} width={62} tick={{ fill: "#94a3b8" }} />
                       <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} formatter={(value) => tooltipMetric(metric, Number(value))} />
-                      <Bar dataKey={metric} name={metricLabel(metric)}>
-                        {groupUsageForChart(data.repos, metric, displaySettings.chartGroupLimit).map((_, index) => (
-                          <Cell key={index} fill={colors[index % colors.length]} />
+                      <Bar dataKey={metric} name={metricLabel(metric)} minPointSize={positiveBarMinPointSize}>
+                        {groupUsageForChart(data.repos, metric, displaySettings.chartGroupLimit).map((repo) => (
+                          <Cell key={repo.id} fill={stableEntityColor(repo.id)} />
                         ))}
                       </Bar>
                     </BarChart>
@@ -661,10 +663,11 @@ function App() {
               </div>
             </div>
 
-            <div className="grid gap-4 xl:grid-cols-2">
-              <DataHealthCard data={data} onOpenSettings={() => navigateToView("settings")} />
-              <TokenAccuracyCard data={data} compact />
-            </div>
+            <TopActionsCard data={data} onNavigate={navigateToView} onOpenRepo={openRepo} onOpenSession={openSession} />
+            <SecondaryMetrics summary={data.summary} />
+            <SourceBreakdownPanel data={data} />
+            <TopRepositoriesSection data={data} onOpenRepos={() => navigateToView("repos")} onOpenRepo={openRepo} pageSize={displaySettings.tablePageSize} />
+            <WasteSignalsSection data={data} onOpenSessions={() => navigateToView("sessions")} />
           </div>
         ) : null}
       </section>
@@ -727,9 +730,9 @@ function FiltersBar({
       <div className="panel repo-compact-filters filter-panel">
         <div className="repo-compact-filter-row">
           <DateRangePicker value={rangePreset} onChange={updatePreset} />
-          <FilterPillPicker icon={<Bot />} iconKind="source" label="AI providers" values={filters.source} onChange={(value) => toggleFilter("source", value)} options={sources} />
-          <FilterPillPicker icon={<LayoutPanelTop />} iconKind="app" label="Apps / surfaces" values={filters.sourceApp} onChange={(value) => toggleFilter("sourceApp", value)} options={sourceApps} collapsedLimit={8} />
-          <FilterPillPicker icon={<BrainCircuit />} iconKind="model" label="Model" values={filters.model} onChange={(value) => toggleFilter("model", value)} options={models} collapsedLimit={10} />
+          <FilterDropdown icon={<Bot />} iconKind="source" label="AI providers" values={filters.source} onChange={(value) => toggleFilter("source", value)} options={sources} />
+          <FilterDropdown icon={<LayoutPanelTop />} iconKind="app" label="Apps / surfaces" values={filters.sourceApp} onChange={(value) => toggleFilter("sourceApp", value)} options={sourceApps} collapsedLimit={8} />
+          <FilterDropdown icon={<BrainCircuit />} iconKind="model" label="Model" values={filters.model} onChange={(value) => toggleFilter("model", value)} options={models} collapsedLimit={10} align="end" />
           <details className="repo-more-filters">
             <summary>
               <Settings className="h-4 w-4" aria-hidden />
@@ -775,10 +778,10 @@ function FiltersBar({
   return (
     <div className="panel p-3 filter-panel">
       <div className="filter-grid">
-        <FilterPillPicker icon={<Bot />} iconKind="source" label="AI providers" values={filters.source} onChange={(value) => toggleFilter("source", value)} options={sources} />
-        <FilterPillPicker icon={<LayoutPanelTop />} iconKind="app" label="Apps / surfaces" values={filters.sourceApp} onChange={(value) => toggleFilter("sourceApp", value)} options={sourceApps} collapsedLimit={8} />
-        <FilterPillPicker icon={<FolderGit2 />} iconKind="repo" label="Repos / folders" values={repoNavigationMode && selectedRepo ? [selectedRepo] : filters.repo} onChange={(value) => toggleFilter("repo", value)} options={repos} collapsedLimit={12} />
-        <FilterPillPicker icon={<BrainCircuit />} iconKind="model" label="Model" values={filters.model} onChange={(value) => toggleFilter("model", value)} options={models} collapsedLimit={10} />
+        <FilterDropdown icon={<Bot />} iconKind="source" label="AI providers" values={filters.source} onChange={(value) => toggleFilter("source", value)} options={sources} />
+        <FilterDropdown icon={<LayoutPanelTop />} iconKind="app" label="Apps / surfaces" values={filters.sourceApp} onChange={(value) => toggleFilter("sourceApp", value)} options={sourceApps} collapsedLimit={8} />
+        <FilterDropdown icon={<FolderGit2 />} iconKind="repo" label="Repos / folders" values={repoNavigationMode && selectedRepo ? [selectedRepo] : filters.repo} onChange={(value) => toggleFilter("repo", value)} options={repos} collapsedLimit={12} />
+        <FilterDropdown icon={<BrainCircuit />} iconKind="model" label="Model" values={filters.model} onChange={(value) => toggleFilter("model", value)} options={models} collapsedLimit={10} align="end" />
         <DateRangePicker value={rangePreset} onChange={updatePreset} />
       </div>
       {rangePreset === "custom" ? (
@@ -816,29 +819,17 @@ function FiltersBar({
 function PageHeader({
   view,
   data,
-  filters,
-  rangePreset,
-  sources,
-  sourceApps,
-  repos,
-  models,
+  filterNotice,
   onRefresh,
   onResetFilters,
 }: {
   view: ViewKey;
   data: ApiData | null;
-  filters: Filters;
-  rangePreset: RangePreset;
-  sources: PickerOption[];
-  sourceApps: PickerOption[];
-  repos: PickerOption[];
-  models: PickerOption[];
+  filterNotice?: string | null;
   onRefresh: () => void;
   onResetFilters: () => void;
 }) {
   const meta = viewMeta[view];
-  const headerFilters = activeFilterSummary(filters, rangePreset, { sources, sourceApps, repos, models });
-  const hasFilters = hasActiveFilters(filters, rangePreset);
   return (
     <header className="page-header">
       <div className="page-title-lockup">
@@ -846,12 +837,12 @@ function PageHeader({
         <div>
           <h2>{meta.title}</h2>
           <p>{meta.subtitle}</p>
-          <div className="header-filter-strip" aria-label="Current dashboard filters">
-            <span className="header-filter-chip strong">{headerFilters.date}</span>
-            <span className={`header-filter-chip ${hasFilters ? "attention" : ""}`}>{headerFilters.countLabel}</span>
-            {headerFilters.preview.map((label) => <span className="header-filter-chip" key={label}>{label}</span>)}
-            {hasFilters ? <button className="text-button header-filter-reset" type="button" onClick={onResetFilters}>Reset</button> : null}
-          </div>
+          {filterNotice ? (
+            <div className="page-filter-notice" aria-label="Current dashboard filters">
+              <span>{filterNotice}</span>
+              <button className="text-button" type="button" onClick={onResetFilters}>Reset</button>
+            </div>
+          ) : null}
         </div>
       </div>
       <div className="page-header-actions">
@@ -905,7 +896,7 @@ function MetricTimelinePanel({ data, metric }: { data: ApiData; metric: MetricKe
               labelFormatter={(_, payload) => payload?.[0]?.payload?.fullLabel ?? ""}
               formatter={(value) => tooltipMetric(metric, Number(value))}
             />
-            <Bar dataKey="chartValue" name={metricName} radius={[5, 5, 0, 0]}>
+            <Bar dataKey="chartValue" name={metricName} radius={[5, 5, 0, 0]} minPointSize={positiveBarMinPointSize}>
               {timeline.rows.map((_, index) => (
                 <Cell key={index} fill={colors[index % colors.length]} />
               ))}
@@ -1271,21 +1262,19 @@ function DataHealthCard({ data, onOpenSettings }: { data: ApiData; onOpenSetting
   );
 }
 
-function TokenAccuracyCard({ data, compact = false }: { data: ApiData; compact?: boolean }) {
+function TokenAccuracyCard({ data }: { data: ApiData }) {
   const stats = tokenStats(data);
   return (
-    <section className={`panel token-accuracy-card ${compact ? "token-accuracy-compact" : ""}`}>
+    <section className="panel token-accuracy-card">
       <div className="token-accuracy-main">
         <div className="flex items-start gap-3">
           <Database className="mt-1 h-5 w-5 text-teal" aria-hidden />
           <div>
             <h2>Token Counting</h2>
             <p>Using provider-specific token records without summing repeated cumulative checkpoints.</p>
-            {!compact ? (
-              <p className="mt-1 text-xs text-slate-500">
-                Codex token_count events may be cumulative. RepoSpend avoids overcounting by using the final valid checkpoint per session when cumulative checkpoints are detected.
-              </p>
-            ) : null}
+            <p className="mt-1 text-xs text-slate-500">
+              Codex token_count events may be cumulative. RepoSpend avoids overcounting by using the final valid checkpoint per session when cumulative checkpoints are detected.
+            </p>
           </div>
         </div>
       </div>
@@ -1931,7 +1920,7 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
   const [activeTab, setActiveTab] = React.useState<RepoDetailTab>("overview");
   const [sessionSearch, setSessionSearch] = React.useState("");
   const [quickFilter, setQuickFilter] = React.useState<RepoSessionQuickFilter | "">("");
-  const [visibleColumns, setVisibleColumns] = React.useState<SessionColumnKey[]>(defaultSessionColumns);
+  const [visibleColumns, setVisibleColumns] = React.useState<SessionColumnKey[]>(repoDetailSessionColumns);
 
   React.useEffect(() => {
     setActiveTab("overview");
@@ -1950,42 +1939,32 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
   const row = repoRowsFromGroup(repo, sessions);
   const warnings = buildWarnings(row, sessions);
   const concentration = repoCostConcentration(row, sessions);
-  const topWarning = concentration.extreme ? "expensive_session_concentration" : warnings[0];
+  const primaryIssue = primaryRepoIssue(warnings, concentration);
   const reviewSessions = topSessionsToReview(sessions, row);
   const filteredSessions = sessions.filter((session) => sessionMatchesSearch(session, sessionSearch) && sessionMatchesRepoQuickFilter(session, quickFilter, sessions));
   const tabs: Array<{ key: RepoDetailTab; label: string }> = [
     { key: "overview", label: "Overview" },
     { key: "sessions", label: "Sessions" },
-    { key: "cost", label: "Cost & Tokens" },
-    { key: "files", label: "Files" },
     { key: "commands", label: "Commands" },
     { key: "metadata", label: "Metadata" },
   ];
   const commandTotals = repoCommandTotals(sessions);
   const topModel = repoModelBreakdown(sessions, row)[0];
-  const tokenIntensity = tokenIntensityInterpretation(row);
+  const warningDetails = prioritizeRepoWarningDetails(warnings.map(repoWarningDetail));
+  const quickFilterOptions: Array<{ value: RepoSessionQuickFilter; label: string; count: number }> = ([
+    ["expensive", "Expensive"],
+    ["partial", "Partial"],
+    ["longRunning", "Long-running"],
+    ["commandIssues", "Command issues"],
+    ["opusOnly", "Opus only"],
+  ] as Array<[RepoSessionQuickFilter, string]>).map(([value, label]) => ({
+    value,
+    label,
+    count: sessions.filter((session) => sessionMatchesRepoQuickFilter(session, value, sessions)).length,
+  }));
   return (
     <div className="repo-detail-page">
-      <section className="panel repo-hero">
-        <div className="repo-hero-main">
-          <div className="repo-hero-eyebrow">{dateRangeLabel}</div>
-          <h2><RepoLabel name={repo.label} verified={repo.verified === true} /></h2>
-          <p>
-            {repo.label} — {count(row.sessionCount, "session")} · {money(row.estimatedCostUsd)} estimated · {tokens(row.totalTokens)} · {count(row.fileEditCount, "file")} edited
-          </p>
-          <p className="repo-hero-warning">
-            <TriangleAlert className="h-4 w-4" aria-hidden />
-            Top warning: {topWarning ? readableWarning(topWarning) : "No major repo/folder warning detected in this filtered view."}
-          </p>
-          <p className="repo-cost-note">Estimated API-equivalent cost. This is not your actual subscription bill.</p>
-        </div>
-        <div className="repo-hero-metrics">
-          <MiniStat label="Estimated cost" value={<CostValue value={row.estimatedCostUsd} breakdown={row} />} />
-          <MiniStat label="Total tokens" value={<TokenValue value={row.totalTokens} />} />
-          <MiniStat label="Sessions" value={<CountValue value={row.sessionCount} noun="session" />} />
-          <MiniStat label="Files edited" value={<CountValue value={row.fileEditCount} noun="file" />} />
-        </div>
-      </section>
+      <RepoRecordHeader repo={row} dateRangeLabel={dateRangeLabel} primaryIssue={primaryIssue} topModel={topModel} commandTotals={commandTotals} />
 
       <div className="repo-detail-tabs" role="tablist" aria-label="Repo or folder detail sections">
         {tabs.map((tab) => (
@@ -2003,25 +1982,20 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
       </div>
 
       {activeTab === "overview" ? (
-        <div className="repo-tab-body">
-          <div className="repo-overview-grid">
-            <RepoDiagnosisCard repo={row} sessions={sessions} concentration={concentration} topModel={topModel} />
-            <RepoCostConcentrationCard concentration={concentration} sessions={sessions} {...(onOpenSession ? { onOpenSession } : {})} />
+        <div className="repo-tab-body repo-basic-overview">
+          <div className="repo-basic-workbench">
+            <RepoAttentionCard
+              repo={row}
+              concentration={concentration}
+              reviewSessions={reviewSessions}
+              warningDetails={warningDetails}
+              {...(onOpenSession ? { onOpenSession } : {})}
+              onSelectTab={setActiveTab}
+            />
+            <RepoFactsCard concentration={concentration} topModel={topModel} warningDetails={warningDetails} onSelectTab={setActiveTab} />
           </div>
-          <div className="repo-detail-summary">
-            <MiniStat label="Estimated cost" value={<CostValue value={row.estimatedCostUsd} breakdown={row} />} />
-            <MiniStat label="Total tokens" value={<TokenValue value={row.totalTokens} />} />
-            <MiniStat label="Files edited" value={<CountValue value={row.fileEditCount} noun="file" />} />
-            <MiniStat label="Possible failed commands" value={<CountValue value={row.failedCommandCount} noun="command" />} />
-            <MiniStat label="Tokens per edit" value={<TokenIntensityValue label={row.tokenRoiLabel} title={row.tokenRoiTitle} />} />
-            <MiniStat label="Interpretation" value={tokenIntensity} />
-            <MiniStat label="Top model" value={topModel ? topModel.label : "Unknown"} />
-            <MiniStat label="Cache reuse" value={<PercentValue value={row.inputTokens ? row.cachedInputTokens / row.inputTokens : 0} />} />
-          </div>
-          <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-            <TopSessionsToReviewCard sessions={reviewSessions} {...(onOpenSession ? { onOpenSession } : {})} />
-            <RepoWarningsCard warnings={warnings} />
-          </div>
+          <RepoCostTokensOverview repo={row} sessions={sessions} />
+          <TopSessionsToReviewCard sessions={reviewSessions.slice(0, 4)} compact {...(onOpenSession ? { onOpenSession } : {})} />
           <RepoComparisonCard repo={row} allRepos={allRepos} />
         </div>
       ) : null}
@@ -2039,26 +2013,21 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
           </div>
           <div className="session-controls">
             <label className="search-field">
+              <span className="sr-only">Search sessions</span>
               <Search className="h-4 w-4" aria-hidden />
               <input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="Search sessions..." />
             </label>
             <div className="quick-filter-row">
-              <button className={`quick-filter ${quickFilter === "" ? "active" : ""}`} type="button" onClick={() => setQuickFilter("")}>All</button>
-              {([
-                ["expensive", "Expensive"],
-                ["partial", "Partial"],
-                ["longRunning", "Long-running"],
-                ["commandIssues", "Possible failed commands"],
-                ["opusOnly", "Opus only"],
-              ] as Array<[RepoSessionQuickFilter, string]>).map(([value, label]) => (
+              <button className={`quick-filter ${quickFilter === "" ? "active" : ""}`} type="button" onClick={() => setQuickFilter("")}>All <span>{sessions.length}</span></button>
+              {quickFilterOptions.map(({ value, label, count: filterCount }) => (
                 <button
                   className={`quick-filter ${quickFilter === value ? "active" : ""}`}
-                  disabled={!sessions.some((session) => sessionMatchesRepoQuickFilter(session, value, sessions))}
+                  disabled={filterCount === 0}
                   key={value}
                   type="button"
                   onClick={() => setQuickFilter(value)}
                 >
-                  {label}
+                  {label} <span>{filterCount}</span>
                 </button>
               ))}
             </div>
@@ -2069,156 +2038,200 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
               pageSize={pageSize}
               {...(onOpenSession ? { onSelectSession: onOpenSession } : {})}
               visibleColumns={visibleColumns}
+              compact
             />
           ) : <EmptyPanel title="No sessions matched this filter." text="Try clearing search or quick filters." />}
         </div>
       ) : null}
 
-      {activeTab === "cost" ? <RepoCostTokensTab repo={row} sessions={sessions} /> : null}
-      {activeTab === "files" ? <RepoFilesTab repo={row} sessions={sessions} /> : null}
       {activeTab === "commands" ? <RepoCommandsTab sessions={sessions} commandTotals={commandTotals} {...(onOpenSession ? { onOpenSession } : {})} /> : null}
       {activeTab === "metadata" ? <RepoMetadataTab repo={row} sessions={sessions} data={data} /> : null}
       </div>
   );
 }
 
-function RepoDiagnosisCard({ repo, sessions, concentration, topModel }: { repo: RepoRow; sessions: Session[]; concentration: RepoCostConcentration; topModel: RepoModelSpend | undefined }) {
-  const sentence = repoDiagnosisSentence(repo, sessions, concentration, topModel);
+function RepoRecordHeader({
+  repo,
+  dateRangeLabel,
+  primaryIssue,
+  topModel,
+  commandTotals,
+}: {
+  repo: RepoRow;
+  dateRangeLabel: string;
+  primaryIssue: RepoWarningDetail | undefined;
+  topModel: RepoModelSpend | undefined;
+  commandTotals: RepoCommandTotals;
+}) {
+  const cacheReuse = repo.inputTokens ? repo.cachedInputTokens / repo.inputTokens : 0;
   return (
-    <div className="detail-card repo-diagnosis-card">
-      <h3>Repo diagnosis</h3>
-      <p className="repo-diagnosis-text">{sentence}</p>
-      <div className="repo-diagnosis-points">
-        <span>{topModel ? `${topModel.label} drives ${percent(topModel.costShare)} of known repo cost.` : "Model cost driver is unavailable."}</span>
-        <span>{repo.failedCommandCount > 0 ? `${count(repo.failedCommandCount, "possible failed command")} detected.` : "No possible failed commands were detected."}</span>
-        <span>{repo.fileEditCount > 0 ? "File edit counts were detected, but stable paths may be unavailable." : "No file edits were detected in this filtered view."}</span>
+    <section className="repo-record-header">
+      <div className="repo-record-main">
+        <div className="repo-record-eyebrow">{dateRangeLabel}</div>
+        <h2><RepoLabel name={repo.label} verified={repo.verified === true} /></h2>
+        <p>{count(repo.sessionCount, "session")} · {count(repo.fileEditCount, "file")} edited · {tokens(repo.totalTokens)}</p>
+        <p className={`repo-record-issue ${primaryIssue ? `repo-record-issue-${primaryIssue.tone}` : "repo-record-issue-good"}`}>
+          {primaryIssue ? <TriangleAlert className="h-4 w-4" aria-hidden /> : <Info className="h-4 w-4" aria-hidden />}
+          <span>{primaryIssue ? `${primaryIssue.title}: ${primaryIssue.detail}` : "No major review item detected in this filtered view."}</span>
+        </p>
       </div>
-    </div>
+      <dl className="repo-record-stats" aria-label="Repo summary">
+        <div>
+          <dt>Estimated cost</dt>
+          <dd><CostValue value={repo.estimatedCostUsd} breakdown={repo} /></dd>
+        </div>
+        <div>
+          <dt>Sessions</dt>
+          <dd><CountValue value={repo.sessionCount} noun="session" /></dd>
+        </div>
+        <div>
+          <dt>Cache reuse</dt>
+          <dd><PercentValue value={cacheReuse} /></dd>
+        </div>
+        <div>
+          <dt>Top model</dt>
+          <dd>{topModel ? compactModelLabel(topModel.label) : "Unknown"}</dd>
+        </div>
+        <div className={commandTotals.important > 0 ? "repo-record-stat-warning" : undefined}>
+          <dt>Command issues</dt>
+          <dd><CountValue value={commandTotals.important} noun="issue" /></dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 
-function RepoCostConcentrationCard({ concentration, sessions, onOpenSession }: { concentration: RepoCostConcentration; sessions: Session[]; onOpenSession?: (sessionId: string) => void }) {
-  const maxCost = Math.max(...concentration.topSessions.map((session) => session.estimatedCostUsd ?? 0), 0);
+function RepoAttentionCard({
+  repo,
+  concentration,
+  reviewSessions,
+  warningDetails,
+  onOpenSession,
+  onSelectTab,
+}: {
+  repo: RepoRow;
+  concentration: RepoCostConcentration;
+  reviewSessions: RepoReviewSession[];
+  warningDetails: RepoWarningDetail[];
+  onOpenSession?: (sessionId: string) => void;
+  onSelectTab: (tab: RepoDetailTab) => void;
+}) {
+  const topSession = concentration.topSessions[0] ?? reviewSessions[0]?.session;
+  const dataNoteCount = warningDetails.filter((warning) => warning.category === "data" || warning.category === "normalization").length;
+  const pricingCount = warningDetails.filter((warning) => warning.category === "pricing").length;
+  const hasReviewItems = repo.failedCommandCount > 0 || topSession || dataNoteCount > 0 || pricingCount > 0;
   return (
-    <div className={`detail-card repo-concentration-card ${concentration.extreme ? "repo-warning-card" : ""}`}>
-      <h3>Cost concentration</h3>
-      <div className="repo-concentration-stats">
-        <MiniStat label="Most expensive session" value={<CostValue value={concentration.topSessionCost} />} />
-        <MiniStat label="Top session share" value={<PercentValue value={concentration.topSessionShare} />} />
-        <MiniStat label="Top 3 sessions" value={<CostValue value={concentration.topThreeCost} />} />
-        <MiniStat label="Top 3 share" value={<PercentValue value={concentration.topThreeShare} />} />
-      </div>
-      {concentration.extreme ? <p className="warning-text mt-3">Cost concentration is very high. One session accounts for most of this repo or folder’s estimated cost.</p> : null}
-      <div className="repo-concentration-list">
-        {concentration.topSessions.map((session) => {
-          const width = maxCost > 0 && session.estimatedCostUsd !== undefined ? Math.max(4, (session.estimatedCostUsd / maxCost) * 100) : 0;
-          return (
-            <button className="repo-concentration-row" key={session.id} type="button" onClick={() => onOpenSession?.(session.id)}>
-              <span title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</span>
-              <strong><CostValue value={session.estimatedCostUsd} session={session} /></strong>
-              <div className="repo-bar"><div style={{ width: `${Math.min(width, 100)}%`, background: "#f59e0b" }} /></div>
-            </button>
-          );
-        })}
-        {!sessions.length ? <p className="text-sm text-slate-600">No sessions matched this repo or folder.</p> : null}
-      </div>
-    </div>
-  );
-}
-
-function TopSessionsToReviewCard({ sessions, onOpenSession }: { sessions: RepoReviewSession[]; onOpenSession?: (sessionId: string) => void }) {
-  return (
-    <div className="panel overflow-hidden">
+    <section className="repo-basic-panel repo-attention-card">
       <div className="panel-heading">
         <div>
-          <h2>Top sessions to review</h2>
-          <p className="text-sm text-slate-600">Picked by cost, duration, outcome, possible failed commands, and unusual token volume.</p>
+          <h2>Needs review</h2>
+          <p className="text-sm text-slate-600">The shortest path to what deserves attention in this repo or folder.</p>
         </div>
       </div>
-      <div className="repo-review-list">
-        {sessions.map(({ session, reason }) => (
-          <div className="repo-review-row" key={session.id}>
-            <div className="repo-review-main">
-              <strong title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</strong>
-              <span>{reason}</span>
+      {hasReviewItems ? (
+        <div className="repo-attention-list">
+          <div className={`repo-attention-row ${repo.failedCommandCount > 0 ? "attention-critical" : "attention-good"}`}>
+            <span className="attention-step">1</span>
+            <TriangleAlert className="h-4 w-4" aria-hidden />
+            <div>
+              <strong>{repo.failedCommandCount > 0 ? `Review ${count(repo.failedCommandCount, "possible failed command")}` : "No possible failed commands"}</strong>
+              <span>{repo.failedCommandCount > 0 ? "Start here because command failures are the clearest friction signal." : "No command review needed in this filtered view."}</span>
             </div>
-            <div className="repo-review-metrics">
-              <span><CostValue value={session.estimatedCostUsd} session={session} /></span>
-              <span><TokenValue value={session.totalTokens} /></span>
-              <span>{formatDuration(session.durationMs)}</span>
-              <OutcomeBadge outcome={session.sessionOutcome} />
-              <button className="button" type="button" onClick={() => onOpenSession?.(session.id)}>
-                <ExternalLink className="h-4 w-4" aria-hidden />
-                Open
-              </button>
+            <button className="button compact-button" type="button" onClick={() => onSelectTab("commands")} disabled={repo.failedCommandCount === 0}>Commands</button>
+          </div>
+          {topSession ? (
+            <div className={`repo-attention-row ${concentration.extreme ? "attention-warning" : ""}`}>
+              <span className="attention-step">2</span>
+              <CircleDollarSign className="h-4 w-4" aria-hidden />
+              <div>
+                <strong>Open top cost session <CostValue value={topSession.estimatedCostUsd} session={topSession} /></strong>
+                <span title={sessionDisplayTitle(topSession)}>{sessionDisplayTitle(topSession)}</span>
+              </div>
+              <button className="button compact-button" type="button" onClick={() => onOpenSession?.(topSession.id)}>Open</button>
             </div>
-          </div>
-        ))}
-        {!sessions.length ? <p className="p-4 text-sm text-slate-600">No sessions need review in this filtered view.</p> : null}
-      </div>
-    </div>
+          ) : null}
+          {pricingCount > 0 ? (
+            <div className="repo-attention-row attention-warning">
+              <span className="attention-step">{topSession ? "3" : "2"}</span>
+              <Calculator className="h-4 w-4" aria-hidden />
+              <div>
+                <strong>{count(pricingCount, "pricing gap")}</strong>
+                <span>Some API-equivalent costs need token splits, model metadata, or pricing coverage.</span>
+              </div>
+              <button className="button compact-button" type="button" onClick={() => onSelectTab("metadata")}>Details</button>
+            </div>
+          ) : null}
+          {dataNoteCount > 0 ? (
+            <div className="repo-attention-row attention-info">
+              <span className="attention-step">{topSession || pricingCount > 0 ? "4" : "2"}</span>
+              <Info className="h-4 w-4" aria-hidden />
+              <div>
+                <strong>{count(dataNoteCount, "data note")}</strong>
+                <span>Local log caveats explain how RepoSpend interpreted this activity.</span>
+              </div>
+              <button className="button compact-button" type="button" onClick={() => onSelectTab("metadata")}>Metadata</button>
+            </div>
+          ) : null}
+        </div>
+      ) : <p className="success-state">No review items detected in this filtered view.</p>}
+    </section>
   );
 }
 
-function RepoWarningsCard({ warnings }: { warnings: string[] }) {
+function RepoFactsCard({ concentration, topModel, warningDetails, onSelectTab }: { concentration: RepoCostConcentration; topModel: RepoModelSpend | undefined; warningDetails: RepoWarningDetail[]; onSelectTab: (tab: RepoDetailTab) => void }) {
+  const dataNoteCount = warningDetails.filter((warning) => warning.category === "data" || warning.category === "normalization").length;
+  const pricingCount = warningDetails.filter((warning) => warning.category === "pricing").length;
   return (
-    <div className="panel overflow-hidden">
-      <div className="panel-heading">
-        <h2>Estimated cost warnings</h2>
+    <section className="repo-basic-panel repo-facts-card">
+      <div className="repo-basic-panel-heading">
+        <h2>At a glance</h2>
+        <p>Useful context without opening another tab.</p>
       </div>
-      <div className="repo-warning-list">
-        {warnings.length ? warnings.map((warning) => (
-          <div className="repo-warning-row" key={warning}>
-            <TriangleAlert className="h-4 w-4 text-amber" aria-hidden />
-            <span>{readableWarning(warning)}</span>
-          </div>
-        )) : <p className="p-4 text-sm text-slate-600">No repo/folder warnings detected.</p>}
-      </div>
-    </div>
+      <dl className="repo-facts-list">
+        <div>
+          <dt>Top model</dt>
+          <dd>{topModel ? `${topModel.label} · ${percent(topModel.costShare)} of known cost` : "Unknown"}</dd>
+        </div>
+        <div>
+          <dt>Top 3 sessions</dt>
+          <dd>{percent(concentration.topThreeShare)} of known cost</dd>
+        </div>
+        <div>
+          <dt>Data notes</dt>
+          <dd>{dataNoteCount || pricingCount ? `${count(dataNoteCount + pricingCount, "note")}` : "None"}</dd>
+        </div>
+      </dl>
+      {dataNoteCount || pricingCount ? (
+        <button className="text-button repo-facts-link" type="button" onClick={() => onSelectTab("metadata")}>
+          View local data details
+        </button>
+      ) : null}
+    </section>
   );
 }
 
-function RepoComparisonCard({ repo, allRepos }: { repo: RepoRow; allRepos: RepoRow[] }) {
-  if (allRepos.length <= 1) return null;
-  const ranked = [...allRepos].sort((a, b) => nullableNumber(b.estimatedCostUsd) - nullableNumber(a.estimatedCostUsd));
-  const rank = ranked.findIndex((item) => item.id === repo.id) + 1;
-  const totalCost = allRepos.reduce((sum, item) => sum + (item.estimatedCostUsd ?? 0), 0);
-  const share = totalCost > 0 && repo.estimatedCostUsd !== undefined ? repo.estimatedCostUsd / totalCost : 0;
-  return (
-    <div className="detail-card">
-      <h3>Compared to other repos / folders</h3>
-      <div className="mt-3 grid gap-2 md:grid-cols-3">
-        <MiniStat label="Cost rank" value={rank ? `#${rank} of ${allRepos.length}` : "Unknown"} />
-        <MiniStat label="Share of filtered cost" value={<PercentValue value={share} />} />
-        <MiniStat label="Most expensive repo / folder" value={ranked[0]?.label ?? "Unknown"} />
-      </div>
-    </div>
-  );
-}
-
-function RepoCostTokensTab({ repo, sessions }: { repo: RepoRow; sessions: Session[] }) {
+function RepoCostTokensOverview({ repo, sessions }: { repo: RepoRow; sessions: Session[] }) {
   const modelRows = repoModelBreakdown(sessions, repo);
   const dayRows = repoDailyBreakdown(sessions);
+  const topModel = modelRows[0];
   return (
-    <div className="repo-tab-body">
-      <div className="grid gap-4 xl:grid-cols-2">
-        <div className="detail-card">
-          <h3>Token breakdown</h3>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <MiniStat label="Total input" value={<TokenValue value={repo.inputTokens} />} />
-            <MiniStat label="Cached input" value={<TokenValue value={repo.cachedInputTokens} />} />
+    <section className="repo-overview-usage-section">
+      <div className="repo-overview-section-heading">
+        <h2>Cost and tokens</h2>
+        <p>{repoCostDriverExplanation(repo, topModel)}</p>
+      </div>
+      <div className="detail-card repo-cost-summary-card">
+        <div className="repo-cost-summary-main">
+          <h3>Cost shape</h3>
+          <p>Cached input is part of total input, so this view shows reuse as a proportion instead of adding cached tokens again.</p>
+          <RepoTokenShareBar inputTokens={repo.inputTokens} cachedInputTokens={repo.cachedInputTokens} />
+        </div>
+        <div className="repo-cost-summary-stats">
+            <MiniStat label="Estimated API-equivalent cost" value={<CostValue value={repo.estimatedCostUsd} breakdown={repo} />} />
+            <MiniStat label="Total tokens" value={<TokenValue value={repo.totalTokens} />} />
+            <MiniStat label="Cache reuse" value={<PercentValue value={repo.inputTokens ? repo.cachedInputTokens / repo.inputTokens : 0} />} />
             <MiniStat label="Output" value={<TokenValue value={repo.outputTokens} />} />
             <MiniStat label="Reasoning" value={<TokenValue value={repo.reasoningTokens} />} />
-          </div>
-        </div>
-        <div className="detail-card">
-          <h3>Cache usage</h3>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <MiniStat label="Cache reuse" value={<PercentValue value={repo.inputTokens ? repo.cachedInputTokens / repo.inputTokens : 0} />} />
-            <MiniStat label="Cached input" value={<TokenValue value={repo.cachedInputTokens} />} />
-            <MiniStat label="Total input" value={<TokenValue value={repo.inputTokens} />} />
-            <MiniStat label="Sessions" value={<CountValue value={repo.sessionCount} noun="session" />} />
-          </div>
         </div>
       </div>
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
@@ -2240,7 +2253,7 @@ function RepoCostTokensTab({ repo, sessions }: { repo: RepoRow; sessions: Sessio
               <XAxis type="number" tickFormatter={(value) => currencyCompact(Number(value))} tick={{ fill: "#94a3b8" }} />
               <YAxis dataKey="label" type="category" width={130} tick={{ fontSize: 12, fill: "#94a3b8" }} />
               <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} formatter={(value) => money(Number(value))} />
-              <Bar dataKey="estimatedCostUsd" name="Estimated cost" fill="#2dd4bf" />
+              <Bar dataKey="estimatedCostUsd" name="Estimated cost" fill="#2dd4bf" minPointSize={positiveBarMinPointSize} />
             </BarChart>
           </ResponsiveContainer>
         </ChartPanel>
@@ -2261,34 +2274,176 @@ function RepoCostTokensTab({ repo, sessions }: { repo: RepoRow; sessions: Sessio
         <div className="detail-card">
           <h3>Cost driver explanation</h3>
           <p className="mt-2 text-sm text-slate-600">{repoCostDriverExplanation(repo, modelRows[0])}</p>
+          <p className="mt-3 text-xs text-slate-500">Estimated API-equivalent cost is not your actual subscription bill.</p>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function RepoTokenShareBar({ inputTokens, cachedInputTokens }: { inputTokens: number; cachedInputTokens: number }) {
+  if (inputTokens <= 0) return <p className="repo-token-share-empty">No input token data is available for this filtered view.</p>;
+  const cached = Math.min(Math.max(cachedInputTokens, 0), inputTokens);
+  const uncached = Math.max(inputTokens - cached, 0);
+  const cachedPct = cached / inputTokens;
+  const uncachedPct = uncached / inputTokens;
+  return (
+    <div className="repo-token-share">
+      <div className="repo-token-share-track" aria-label={`Input token split: ${percent(uncachedPct)} uncached input, ${percent(cachedPct)} cached input`}>
+        <span className="repo-token-share-uncached" style={{ width: `${uncachedPct * 100}%` }} />
+        <span className="repo-token-share-cached" style={{ width: `${cachedPct * 100}%` }} />
+      </div>
+      <div className="repo-token-share-legend">
+        <span><i className="repo-token-share-dot repo-token-share-dot-uncached" />Uncached input <strong><TokenValue value={uncached} /></strong></span>
+        <span><i className="repo-token-share-dot repo-token-share-dot-cached" />Cached input <strong><TokenValue value={cached} /></strong></span>
       </div>
     </div>
   );
 }
 
-function RepoFilesTab({ repo, sessions }: { repo: RepoRow; sessions: Session[] }) {
-  const edited = sessions.reduce((sum, session) => sum + (session.fileEditCount ?? 0), 0);
-  const read = sessions.reduce((sum, session) => sum + (session.fileReadCount ?? 0), 0);
+function TopSessionsToReviewCard({ sessions, compact = false, onOpenSession }: { sessions: RepoReviewSession[]; compact?: boolean; onOpenSession?: (sessionId: string) => void }) {
   return (
-    <div className="repo-tab-body">
-      <div className="detail-card">
-        <h3>Files edited/read</h3>
-        <div className="mt-3 grid gap-2 md:grid-cols-4">
-          <MiniStat label="Files edited" value={<CountValue value={edited} noun="file" />} />
-          <MiniStat label="Files read" value={<CountValue value={read} noun="file" />} />
-          <MiniStat label="Sessions with edits" value={<CountValue value={sessions.filter((session) => (session.fileEditCount ?? 0) > 0).length} noun="session" />} />
-          <MiniStat label="Tokens per edit" value={<TokenIntensityValue label={repo.tokenRoiLabel} title={repo.tokenRoiTitle} />} />
+    <div className="repo-basic-panel overflow-hidden">
+      <div className="panel-heading">
+        <div>
+          <h2>Top sessions to review</h2>
+          <p className="text-sm text-slate-600">{compact ? "The three sessions most worth opening first." : "Picked by cost, duration, outcome, possible failed commands, and unusual token volume."}</p>
         </div>
-        {edited > 0 ? (
-          <div className="compact-warning mt-4">
-            File edit counts were detected, but stable file paths are unavailable for this log format.
-            <details>
-              <summary>Learn more</summary>
-              <p>RepoSpend can count file reads and edits from local session metadata, but some source formats do not persist stable per-file paths. Source limitations and raw paths are listed in Metadata.</p>
-            </details>
+      </div>
+      <div className="repo-review-list">
+        {sessions.map(({ session, reason }) => (
+          <div className="repo-review-row" key={session.id}>
+            <div className="repo-review-main">
+              <strong title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</strong>
+              <span>{reason}</span>
+            </div>
+            <div className="repo-review-metrics">
+              <span><CostValue value={session.estimatedCostUsd} session={session} /></span>
+              {!compact ? <span><TokenValue value={session.totalTokens} /></span> : null}
+              {!compact ? <span>{formatDuration(session.durationMs)}</span> : null}
+              <OutcomeBadge outcome={session.sessionOutcome} />
+              <button className="button" type="button" onClick={() => onOpenSession?.(session.id)}>
+                <ExternalLink className="h-4 w-4" aria-hidden />
+                Open
+              </button>
+            </div>
           </div>
-        ) : <p className="mt-3 text-sm text-slate-600">No file edits were detected for this repo or folder in the current filtered view.</p>}
+        ))}
+        {!sessions.length ? <p className="p-4 text-sm text-slate-600">No sessions need review in this filtered view.</p> : null}
+      </div>
+    </div>
+  );
+}
+
+type RepoWarningCategory = "review" | "pricing" | "data" | "normalization";
+type RepoWarningTone = "critical" | "warning" | "info";
+
+type RepoWarningDetail = {
+  key: string;
+  title: string;
+  detail: string;
+  category: RepoWarningCategory;
+  categoryLabel: string;
+  tone: RepoWarningTone;
+  actionLabel: string;
+};
+
+function primaryRepoIssue(warnings: string[], concentration: RepoCostConcentration): RepoWarningDetail | undefined {
+  const details = prioritizeRepoWarningDetails(warnings.map(repoWarningDetail));
+  const concentrationDetail = concentration.extreme ? repoWarningDetail("expensive_session_concentration") : undefined;
+  const candidates = concentrationDetail ? [concentrationDetail, ...details] : details;
+  return candidates.find((warning) => warning.category !== "normalization" && warning.tone !== "info");
+}
+
+function prioritizeRepoWarningDetails(details: RepoWarningDetail[]): RepoWarningDetail[] {
+  const priority: Record<RepoWarningCategory, number> = { review: 0, pricing: 1, data: 2, normalization: 3 };
+  const tonePriority: Record<RepoWarningTone, number> = { critical: 0, warning: 1, info: 2 };
+  const unique = new Map<string, RepoWarningDetail>();
+  details.forEach((detail) => {
+    if (!unique.has(detail.key)) unique.set(detail.key, detail);
+  });
+  return [...unique.values()].sort((a, b) => priority[a.category] - priority[b.category] || tonePriority[a.tone] - tonePriority[b.tone] || a.title.localeCompare(b.title));
+}
+
+function repoWarningDetail(warning: string): RepoWarningDetail {
+  const normalized = warning.toLowerCase();
+  const normalizedText = normalized.replace(/[:_]+/g, " ");
+  const fallback = {
+    key: warning,
+    title: capitalizeSentence(warning.replaceAll("_", " ")),
+    detail: readableWarning(warning),
+    category: "data" as const,
+    categoryLabel: "Data caveat",
+    tone: "info" as const,
+    actionLabel: "Review context",
+  };
+  if (normalizedText === "expensive session concentration") {
+    return { key: warning, title: "Cost concentrated in one session", detail: "One session accounts for most of this repo or folder's estimated API-equivalent cost.", category: "review", categoryLabel: "Needs review", tone: "warning", actionLabel: "Top sessions" };
+  }
+  if (normalizedText === "failed commands" || normalizedText === "command issues") {
+    return { key: warning, title: "Possible failed commands", detail: "Command or tool failures were detected in sessions for this repo or folder.", category: "review", categoryLabel: "Needs review", tone: "critical", actionLabel: "Commands tab" };
+  }
+  if (normalizedText === "high-token no-edit") {
+    return { key: warning, title: "High-token session without edits", detail: "At least one high-token session has no detected file edits; it may be research, missing path data, or expensive stuck work.", category: "review", categoryLabel: "Needs review", tone: "warning", actionLabel: "Session review" };
+  }
+  if (normalizedText === "low cache rate") {
+    return { key: warning, title: "Low cache reuse", detail: "Input tokens may be driving more estimated cost because cache reuse is low in this filtered view.", category: "review", categoryLabel: "Needs review", tone: "warning", actionLabel: "Token shape" };
+  }
+  if (normalizedText === "output heavy sessions") {
+    return { key: warning, title: "Output-heavy sessions", detail: "Output tokens are unusually high compared with total token volume.", category: "review", categoryLabel: "Needs review", tone: "info", actionLabel: "Token shape" };
+  }
+  if (normalizedText === "unknown pricing" || normalizedText === "unknown cost") {
+    return { key: warning, title: "Some sessions cannot be priced", detail: "Token splits, model metadata, or pricing coverage are missing, so some API-equivalent costs are unavailable.", category: "pricing", categoryLabel: "Pricing incomplete", tone: "warning", actionLabel: "Pricing review" };
+  }
+  if (normalizedText === "missing token breakdown") {
+    return { key: warning, title: "Missing token breakdowns", detail: "Some local session records do not include enough detail to split tokens by input, cache, output, or reasoning.", category: "data", categoryLabel: "Data caveat", tone: "warning", actionLabel: "Session review" };
+  }
+  if (normalizedText === "claude synthetic zero usage") {
+    return { key: warning, title: "Claude synthetic usage marker", detail: "Claude only persisted a local zero-usage placeholder, so RepoSpend cannot recover real model or token counts for those sessions.", category: "data", categoryLabel: "Data caveat", tone: "warning", actionLabel: "No local fix" };
+  }
+  if (normalizedText === "repo unverified no git root") {
+    return { key: warning, title: "Repo grouping unverified", detail: "RepoSpend could not verify the Git root from local metadata, so grouping may be based on an inferred folder.", category: "data", categoryLabel: "Data caveat", tone: "info", actionLabel: "Path check" };
+  }
+  if (normalizedText === "copilot missing cwd") {
+    return { key: warning, title: "Copilot missing workspace", detail: "GitHub Copilot did not include a local workspace path, so the session is grouped under Unknown repo/folder.", category: "data", categoryLabel: "Data caveat", tone: "info", actionLabel: "No local fix" };
+  }
+  if (normalizedText === "copilot partial token breakdown") {
+    return { key: warning, title: "Partial Copilot token split", detail: "GitHub Copilot exposed only partial token breakdowns for some local records.", category: "data", categoryLabel: "Data caveat", tone: "warning", actionLabel: "Session review" };
+  }
+  if (normalizedText === "claude session split by activity day") {
+    return { key: warning, title: "Claude session split by activity day", detail: "Claude activity crossed day or model boundaries, so RepoSpend split it to keep daily totals accurate.", category: "normalization", categoryLabel: "Normalization note", tone: "info", actionLabel: "No action needed" };
+  }
+  if (normalizedText === "duplicate or stale token snapshots skipped") {
+    return { key: warning, title: "Duplicate token snapshots skipped", detail: "RepoSpend skipped repeated or stale token records to avoid double-counting usage.", category: "normalization", categoryLabel: "Normalization note", tone: "info", actionLabel: "No action needed" };
+  }
+  if (normalizedText === "token direct usage ignored after cumulative snapshot") {
+    return { key: warning, title: "Token snapshots de-duplicated", detail: "Direct token usage was ignored after a cumulative snapshot to avoid double-counting.", category: "normalization", categoryLabel: "Normalization note", tone: "info", actionLabel: "No action needed" };
+  }
+  if (normalizedText.startsWith("invalid token snapshots")) {
+    return { key: warning, title: "Invalid token snapshots skipped", detail: "Malformed token snapshots were skipped while counting tokens.", category: "normalization", categoryLabel: "Normalization note", tone: "warning", actionLabel: "Source data" };
+  }
+  if (normalizedText === "copilot duplicate session merged") {
+    return { key: warning, title: "Duplicate Copilot fragments merged", detail: "RepoSpend merged duplicate GitHub Copilot session fragments before aggregating usage.", category: "normalization", categoryLabel: "Normalization note", tone: "info", actionLabel: "No action needed" };
+  }
+  if (normalizedText === "model inferred from import source") {
+    return { key: warning, title: "Model inferred from metadata", detail: "Model name was inferred from local import metadata because the primary session record did not include it.", category: "normalization", categoryLabel: "Normalization note", tone: "info", actionLabel: "No action needed" };
+  }
+  return fallback;
+}
+
+function RepoComparisonCard({ repo, allRepos }: { repo: RepoRow; allRepos: RepoRow[] }) {
+  if (allRepos.length <= 1) return null;
+  const ranked = [...allRepos].sort((a, b) => nullableNumber(b.estimatedCostUsd) - nullableNumber(a.estimatedCostUsd));
+  const rank = ranked.findIndex((item) => item.id === repo.id) + 1;
+  const totalCost = allRepos.reduce((sum, item) => sum + (item.estimatedCostUsd ?? 0), 0);
+  const share = totalCost > 0 && repo.estimatedCostUsd !== undefined ? repo.estimatedCostUsd / totalCost : 0;
+  return (
+    <div className="detail-card">
+      <h3>Compared to other repos / folders</h3>
+      <div className="mt-3 grid gap-2 md:grid-cols-3">
+        <MiniStat label="Cost rank" value={rank ? `#${rank} of ${allRepos.length}` : "Unknown"} />
+        <MiniStat label="Share of filtered cost" value={<PercentValue value={share} />} />
+        <MiniStat label="Most expensive repo / folder" value={ranked[0]?.label ?? "Unknown"} />
       </div>
     </div>
   );
@@ -2297,6 +2452,7 @@ function RepoFilesTab({ repo, sessions }: { repo: RepoRow; sessions: Session[] }
 function RepoCommandsTab({ sessions, commandTotals, onOpenSession }: { sessions: Session[]; commandTotals: RepoCommandTotals; onOpenSession?: (sessionId: string) => void }) {
   const reviewSessions = sessions.filter(sessionNeedsCommandReview).slice(0, 8);
   const issueSamples = sessions.flatMap((session) => (session.commandIssueSamples ?? []).map((issue) => ({ session, issue })));
+  const issueClusters = repoCommandIssueClusters(issueSamples).slice(0, 8);
   return (
     <div className="repo-tab-body">
       <div className="detail-card">
@@ -2311,21 +2467,23 @@ function RepoCommandsTab({ sessions, commandTotals, onOpenSession }: { sessions:
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="detail-card">
-          <h3>Possible failed command evidence</h3>
+          <h3>Possible failed command clusters</h3>
           <div className="mt-3 space-y-2">
-            {issueSamples.filter(({ issue }) => issue.severity === "critical" || issue.severity === "warning").slice(0, 8).map(({ session, issue }, index) => (
-              <div className="issue-row" key={`${session.id}-${issue.command}-${index}`}>
+            {issueClusters.map((cluster) => (
+              <div className="issue-row command-cluster-row" key={cluster.command}>
                 <div>
-                  <div className="font-mono text-xs text-slate-100" title={issue.command}>{shortCommand(issue.command)}</div>
-                  <p className="mt-1 text-xs text-slate-500">{issue.reason}</p>
+                  <div className="font-mono text-xs text-slate-100" title={cluster.command}>{shortCommand(cluster.command)}</div>
+                  <p className="mt-1 text-xs text-slate-500">{cluster.reason}</p>
                 </div>
                 <div className="issue-row-badges">
-                  <Badge label={readableIssueLabel(issue.category)} />
-                  <Badge label={`${issue.impact} impact`} />
+                  <Badge label={count(cluster.count, "event")} />
+                  <Badge label={count(cluster.sessionIds.size, "session")} />
+                  <Badge label={readableIssueLabel(cluster.category)} />
+                  <Badge label={`${cluster.impact} impact`} />
                 </div>
               </div>
             ))}
-            {!issueSamples.some(({ issue }) => issue.severity === "critical" || issue.severity === "warning") ? <p className="text-sm text-slate-600">No possible failed command samples were available.</p> : null}
+            {!issueClusters.length ? <p className="text-sm text-slate-600">No possible failed command samples were available.</p> : null}
           </div>
         </div>
         <div className="detail-card">
@@ -2345,9 +2503,55 @@ function RepoCommandsTab({ sessions, commandTotals, onOpenSession }: { sessions:
   );
 }
 
+type RepoCommandIssueSample = { session: Session; issue: NonNullable<Session["commandIssueSamples"]>[number] };
+type RepoCommandIssueCluster = {
+  command: string;
+  reason: string;
+  category: NonNullable<Session["commandIssueSamples"]>[number]["category"];
+  impact: NonNullable<Session["commandIssueSamples"]>[number]["impact"];
+  severity: NonNullable<Session["commandIssueSamples"]>[number]["severity"];
+  count: number;
+  sessionIds: Set<string>;
+};
+
+function repoCommandIssueClusters(samples: RepoCommandIssueSample[]): RepoCommandIssueCluster[] {
+  const priority = { critical: 0, warning: 1, info: 2, ignored: 3, none: 4 } satisfies Record<RepoCommandIssueCluster["severity"], number>;
+  const clusters = new Map<string, RepoCommandIssueCluster>();
+  samples
+    .filter(({ issue }) => issue.severity === "critical" || issue.severity === "warning")
+    .forEach(({ session, issue }) => {
+      const key = issue.command;
+      const existing = clusters.get(key);
+      if (!existing) {
+        clusters.set(key, {
+          command: issue.command,
+          reason: issue.reason,
+          category: issue.category,
+          impact: issue.impact,
+          severity: issue.severity,
+          count: 1,
+          sessionIds: new Set([session.id]),
+        });
+        return;
+      }
+      existing.count += 1;
+      existing.sessionIds.add(session.id);
+      if (priority[issue.severity] < priority[existing.severity]) {
+        existing.reason = issue.reason;
+        existing.category = issue.category;
+        existing.impact = issue.impact;
+        existing.severity = issue.severity;
+      }
+    });
+  return [...clusters.values()].sort((a, b) => priority[a.severity] - priority[b.severity] || b.count - a.count || b.sessionIds.size - a.sessionIds.size || a.command.localeCompare(b.command));
+}
+
 function RepoMetadataTab({ repo, sessions, data }: { repo: RepoRow; sessions: Session[]; data: ApiData }) {
   const sourcePaths = [...new Set(sessions.map((session) => session.sourcePath).filter(Boolean))];
   const rawPaths = [...new Set(sessions.map((session) => session.repoRoot).filter(Boolean))];
+  const edited = sessions.reduce((sum, session) => sum + (session.fileEditCount ?? 0), 0);
+  const read = sessions.reduce((sum, session) => sum + (session.fileReadCount ?? 0), 0);
+  const sessionsWithEdits = sessions.filter((session) => (session.fileEditCount ?? 0) > 0).length;
   return (
     <div className="repo-tab-body">
       <div className="grid gap-4 xl:grid-cols-2">
@@ -2373,20 +2577,44 @@ function RepoMetadataTab({ repo, sessions, data }: { repo: RepoRow; sessions: Se
           <h3>Source format limitations</h3>
           <p className="mt-2 text-sm text-slate-600">Estimated API-equivalent cost depends on local token splits and pricing coverage. Some log formats expose file edit counts without stable file paths, so file-level analysis may be limited even when edit counts are present.</p>
         </div>
-        <div className="detail-card">
-          <h3>Raw paths</h3>
+        <div className="detail-card xl:col-span-2">
+          <h3>File activity</h3>
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
+            <MiniStat label="Files edited" value={<CountValue value={edited} noun="file" />} />
+            <MiniStat label="Files read" value={<CountValue value={read} noun="file" />} />
+            <MiniStat label="Sessions with edits" value={<CountValue value={sessionsWithEdits} noun="session" />} />
+            <MiniStat label="Tokens per edit" value={<TokenIntensityValue label={repo.tokenRoiLabel} title={repo.tokenRoiTitle} />} />
+          </div>
+          {edited > 0 ? (
+            <div className="compact-warning mt-4">
+              File edit counts were detected, but stable file paths are unavailable for this log format.
+              <details>
+                <summary>Learn more</summary>
+                <p>RepoSpend can count file reads and edits from local session metadata, but some source formats do not persist stable per-file paths.</p>
+              </details>
+            </div>
+          ) : <p className="mt-3 text-sm text-slate-600">No file edits were detected for this repo or folder in the current filtered view.</p>}
+        </div>
+        <details className="detail-card metadata-disclosure">
+          <summary>
+            <span>Raw paths</span>
+            <small>{count(rawPaths.length, "path")}</small>
+          </summary>
           <div className="metadata-list mt-3">
             {rawPaths.slice(0, 8).map((path) => <MetadataRow key={path} label="Repo/folder path" value={shortPath(path)} title={path} />)}
             {!rawPaths.length ? <MetadataRow label="Repo/folder path" value="Unavailable" /> : null}
           </div>
-        </div>
-        <div className="detail-card">
-          <h3>Data source files</h3>
+        </details>
+        <details className="detail-card metadata-disclosure">
+          <summary>
+            <span>Data source files</span>
+            <small>{count(sourcePaths.length, "file")}</small>
+          </summary>
           <div className="metadata-list mt-3">
             {sourcePaths.slice(0, 8).map((path) => <MetadataRow key={path} label="Source file" value={shortPath(path)} title={path} />)}
             {!sourcePaths.length ? <MetadataRow label="Source file" value="Unavailable" /> : null}
           </div>
-        </div>
+        </details>
       </div>
     </div>
   );
@@ -2416,7 +2644,7 @@ function SessionsTable({
   const costOutlierThreshold = React.useMemo(() => sessionCostOutlierThreshold(sessions), [sessions]);
   return (
     <div className="table-wrap">
-      <table className="sessions-table">
+      <table className={`sessions-table ${compact ? "compact-table" : ""}`}>
         <thead>
           <tr>
             {!compact ? <SortableTh label="Repo / folder" column="repo" sort={sort} setSort={setSort} /> : null}
@@ -2923,7 +3151,6 @@ function LoadingState({ compact = false, data }: { compact?: boolean; data?: Api
     { label: "Grouping by repo or inferred folder", detail: "Resolving cwd paths, models, warnings, and surfaces" },
     { label: "Estimating API-equivalent cost", detail: "Applying local pricing and dashboard filters" },
   ];
-  const activeStage = Math.min(stages.length - 1, Math.floor(elapsedSeconds / 5));
   const sourceRows = [
     { id: "codex", label: "Codex", detail: "CLI sessions and token checkpoints", count: data ? sourceImportedSessions(data, "codex") : 0 },
     { id: "claude", label: "Claude Code", detail: "Project JSONL transcripts and history", count: data ? sourceImportedSessions(data, "claude") : 0 },
@@ -2954,10 +3181,10 @@ function LoadingState({ compact = false, data }: { compact?: boolean; data?: Api
               </div>
             ))}
           </div>
-          <div className="loading-stage-list" aria-label="Current scan stages">
-            {stages.map((stage, index) => (
-              <div className={`loading-stage-row ${index === activeStage ? "active" : ""}`} key={stage.label}>
-                <span>{index + 1}</span>
+          <div className="loading-stage-list" aria-label="Scan work checklist">
+            {stages.map((stage) => (
+              <div className="loading-stage-row" key={stage.label}>
+                <span aria-hidden />
                 <div>
                   <strong>{stage.label}</strong>
                   <small>{stage.detail}</small>
@@ -3152,6 +3379,8 @@ function SettingsPricingTab({
       ...draft,
       [model]: draft[model] ?? {
         inputPerMillion: 0,
+        cacheCreationInput5mPerMillion: 0,
+        cacheCreationInput1hPerMillion: 0,
         cacheCreationInputPerMillion: 0,
         cachedInputPerMillion: 0,
         outputPerMillion: 0,
@@ -3242,7 +3471,8 @@ function SettingsPricingTab({
             <tr>
               <th>Model</th>
               <th>Input</th>
-              <th>Cache write</th>
+              <th>Cache write 5m</th>
+              <th>Cache write 1h</th>
               <th>Cached input</th>
               <th>Output</th>
               <th>Reasoning</th>
@@ -3262,7 +3492,8 @@ function SettingsPricingTab({
                   </div>
                 </td>
                 <PriceInput value={row.pricing.inputPerMillion} onChange={(value) => updatePrice(row.model, "inputPerMillion", value)} />
-                <PriceInput value={row.pricing.cacheCreationInputPerMillion} onChange={(value) => updatePrice(row.model, "cacheCreationInputPerMillion", value)} />
+                <PriceInput value={row.pricing.cacheCreationInput5mPerMillion ?? row.pricing.cacheCreationInputPerMillion} onChange={(value) => updatePrice(row.model, "cacheCreationInput5mPerMillion", value)} />
+                <PriceInput value={row.pricing.cacheCreationInput1hPerMillion ?? row.pricing.cacheCreationInputPerMillion} onChange={(value) => updatePrice(row.model, "cacheCreationInput1hPerMillion", value)} />
                 <PriceInput value={row.pricing.cachedInputPerMillion} onChange={(value) => updatePrice(row.model, "cachedInputPerMillion", value)} />
                 <PriceInput value={row.pricing.outputPerMillion} onChange={(value) => updatePrice(row.model, "outputPerMillion", value)} />
                 <PriceInput value={row.pricing.reasoningOutputPerMillion} onChange={(value) => updatePrice(row.model, "reasoningOutputPerMillion", value)} />
@@ -3279,7 +3510,7 @@ function SettingsPricingTab({
         </p>
       ) : null}
       <div className="settings-supporting-copy">
-        <p>Rates are USD per 1M tokens. Saving writes local RepoSpend settings under <code>~/.repospend/</code> unless <code>repospend.config.json</code> sets <code>pricingPath</code>.</p>
+        <p>Rates are USD per 1M tokens. Claude cache writes are priced by the TTL recorded in local usage: 5-minute writes use the 5m rate, 1-hour writes use the 1h rate, and unsplit cache writes fall back to the legacy cache-write rate when present. Saving writes local RepoSpend settings under <code>~/.repospend/</code> unless <code>repospend.config.json</code> sets <code>pricingPath</code>.</p>
         {(data.pricing.info.sourceUrls ?? [{ label: data.pricing.info.sourceName, url: data.pricing.info.sourceUrl }]).map((source) => (
           <a className="text-button" href={source.url} key={source.url}>{source.label}</a>
         ))}
@@ -3368,13 +3599,17 @@ function SettingsTokenCountingTab({ data }: { data: ApiData }) {
           <p>Token counts come from local Codex and Claude Code logs. Those logs may be incomplete, so RepoSpend shows the best available count rather than inventing missing billing details.</p>
         </div>
       </div>
-      <div className="token-accuracy-grid settings-token-grid">
-        <MiniStat label="Aggregation method" value={stats.methodLabel} />
-        <MiniStat label="Confidence" value={stats.confidenceLabel} />
-        <MiniStat label="Token checkpoints" value={<CountValue value={stats.tokenSnapshots} noun="checkpoint" />} />
-        <MiniStat label="Sessions with token data" value={<CountValue value={stats.sessionsWithTokenData} noun="session" />} />
-        <MiniStat label="Missing token data" value={<CountValue value={stats.sessionsMissingTokenData} noun="session" />} />
-      </div>
+      <TokenAccuracyCard data={data} />
+      <section className="settings-info-panel">
+        <h2>Comparison notes</h2>
+        <p>RepoSpend may differ from ccusage, Tokscale, and similar tools for a few expected reasons:</p>
+        <ul className="settings-note-list">
+          <li>Claude Desktop/local-agent sessions are included when local files exist; many CLI tools focus on <code>~/.claude/projects</code>.</li>
+          <li>Cache reads and cache writes stay under input in RepoSpend totals instead of being added again as separate headline tokens.</li>
+          <li>Claude cache writes use the recorded 5-minute or 1-hour TTL rate when that split is present.</li>
+          <li>Codex reasoning output is separated from visible output so reasoning is priced once.</li>
+        </ul>
+      </section>
       <details className="settings-details">
         <summary>Show method breakdown</summary>
         <div className="settings-detail-grid">
@@ -3881,6 +4116,15 @@ function ModelsPage({
   const topCachedModel = [...rows].sort((a, b) => b.cachedInputTokens - a.cachedInputTokens)[0];
   const topOutputModel = [...rows].sort((a, b) => b.outputTokens - a.outputTokens)[0];
   const topReasoningModel = [...rows].sort((a, b) => b.reasoningTokens - a.reasoningTokens)[0];
+  const modelShareRows = React.useMemo(
+    () => [...rows]
+      .map((row) => ({ id: row.id, label: row.label, value: timelineMetricValue(row, modelMetric) }))
+      .filter((row) => row.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, displaySettings.chartGroupLimit),
+    [displaySettings.chartGroupLimit, modelMetric, rows],
+  );
+  const modelShareTotal = React.useMemo(() => rows.reduce((sum, row) => sum + Math.max(timelineMetricValue(row, modelMetric), 0), 0), [modelMetric, rows]);
   return (
     <section className="mt-4 space-y-4">
       <div className="page-summary-panel">
@@ -3911,17 +4155,18 @@ function ModelsPage({
               <XAxis type="number" tickFormatter={(value) => metricTick(modelMetric, Number(value))} tick={{ fill: "#94a3b8" }} />
               <YAxis dataKey="label" type="category" width={170} tickFormatter={(value) => compactModelLabel(String(value))} tick={{ fontSize: 12, fill: "#94a3b8" }} />
               <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} formatter={(value) => tooltipMetric(modelMetric, Number(value))} />
-              <Bar dataKey={modelMetric} name={metricLabel(modelMetric)} fill={modelMetric === "estimatedCostUsd" ? "#f59e0b" : "#2dd4bf"} />
+              <Bar dataKey={modelMetric} name={metricLabel(modelMetric)} fill={modelMetric === "estimatedCostUsd" ? "#f59e0b" : "#2dd4bf"} minPointSize={positiveBarMinPointSize} />
             </BarChart>
           </ResponsiveContainer>
         </ChartPanel>
         <div className="panel model-shape-panel">
           <div className="panel-heading">
             <div>
-              <h2>Token shape by model</h2>
-              <p className="text-sm text-slate-600">Largest token buckets in this filtered view.</p>
+              <h2>Model distribution</h2>
+              <p className="text-sm text-slate-600">Share of {metricLabel(modelMetric).toLowerCase()} in this filtered view.</p>
             </div>
           </div>
+          <ModelShareList rows={modelShareRows} total={modelShareTotal} metric={modelMetric} />
           <div className="model-shape-list">
             <MiniStat label="Highest input" value={topInputModel ? <span>{topInputModel.label} · <TokenValue value={topInputModel.inputTokens} /></span> : "None"} />
             <MiniStat label="Largest cached input" value={topCachedModel && topCachedModel.cachedInputTokens > 0 ? <span>{topCachedModel.label} · <TokenValue value={topCachedModel.cachedInputTokens} /></span> : "None"} />
@@ -3945,6 +4190,32 @@ function ModelsPage({
         <ModelTable rows={rows} pageSize={displaySettings.tablePageSize} onOpenRepo={onOpenRepo} onOpenSession={onOpenSession} onFilterModel={onFilterModel} />
       </div>
     </section>
+  );
+}
+
+function ModelShareList({ rows, total, metric }: { rows: Array<{ id: string; label: string; value: number }>; total: number; metric: MetricKey }) {
+  if (!rows.length || total <= 0) {
+    return <p className="model-share-empty">No positive values for this metric.</p>;
+  }
+  return (
+    <div className="model-share-list">
+      {rows.map((row) => {
+        const share = row.value / total;
+        const [valueLabel] = tooltipMetric(metric, row.value);
+        return (
+          <div className="model-share-row" key={row.id}>
+            <div className="model-share-copy">
+              <ModelLabel model={row.label} />
+              <strong>{valueLabel}</strong>
+            </div>
+            <div className="model-share-track" aria-hidden>
+              <div style={{ width: `${Math.max(1, Math.min(share * 100, 100))}%` }} />
+            </div>
+            <span>{percent(share)}</span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -4482,27 +4753,23 @@ function EmptyPanel({ title, text }: { title: string; text: string }) {
   );
 }
 
-function hasActiveFilters(filters: Filters, rangePreset: RangePreset): boolean {
-  return filters.source.length > 0 || filters.sourceApp.length > 0 || filters.repo.length > 0 || filters.model.length > 0 || rangePreset !== "last7";
-}
-
 function hasNonDateFilters(filters: Filters): boolean {
   return filters.source.length > 0 || filters.sourceApp.length > 0 || filters.repo.length > 0 || filters.model.length > 0;
 }
 
-function activeFilterSummary(filters: Filters, rangePreset: RangePreset, options: { sources: PickerOption[]; sourceApps: PickerOption[]; repos: PickerOption[]; models: PickerOption[] }): { date: string; countLabel: string; preview: string[] } {
-  const labels: string[] = [];
-  filters.source.forEach((value) => labels.push(options.sources.find((option) => option.value === value)?.label ?? value));
-  filters.sourceApp.forEach((value) => labels.push(options.sourceApps.find((option) => option.value === value)?.label ?? value));
-  filters.repo.forEach((value) => labels.push(options.repos.find((option) => option.value === value)?.label ?? value));
-  filters.model.forEach((value) => labels.push(options.models.find((option) => option.value === value)?.label ?? value));
-  const presetLabel = rangeOptions.find((option) => option.value === rangePreset)?.label ?? "Custom dates";
-  const date = rangePreset === "custom" ? `${dateInputValue(filters.from) || "Any start"} to ${dateInputValue(filters.to) || "now"}` : presetLabel;
-  return {
-    date,
-    countLabel: labels.length ? `${labels.length} filter${labels.length === 1 ? "" : "s"} active` : "No extra filters",
-    preview: labels.slice(0, 3),
-  };
+function viewShowsFiltersBar(view: ViewKey): boolean {
+  return view === "dashboard" || view === "sessions" || view === "repos" || view === "models" || view === "commands" || view === "insights";
+}
+
+function compactHiddenFilterNotice(filters: Filters, rangePreset: RangePreset): string | null {
+  const nonDateCount = filters.source.length + filters.sourceApp.length + filters.repo.length + filters.model.length;
+  const hasCustomDate = rangePreset !== "last7" && rangePreset !== "all";
+  if (!nonDateCount && !hasCustomDate) return null;
+  const dateLabel = rangePreset === "custom"
+    ? `${dateInputValue(filters.from) || "Any start"} to ${dateInputValue(filters.to) || "now"}`
+    : rangeOptions.find((option) => option.value === rangePreset)?.label ?? "Custom dates";
+  const filterLabel = nonDateCount ? `${nonDateCount} filter${nonDateCount === 1 ? "" : "s"}` : "No extra filters";
+  return `Filtered view · ${dateLabel} · ${filterLabel}`;
 }
 
 function ChartPanel({ title, children, className = "", actions }: { title: string; children: React.ReactNode; className?: string; actions?: React.ReactNode }) {
@@ -4515,6 +4782,98 @@ function ChartPanel({ title, children, className = "", actions }: { title: strin
       <div className="chart-panel-body p-3">{children}</div>
     </div>
   );
+}
+
+function stableEntityColor(value: string): string {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return colors[hash % colors.length] ?? "#2dd4bf";
+}
+
+function FilterDropdown({
+  icon,
+  iconKind,
+  label,
+  values,
+  onChange,
+  options,
+  collapsedLimit = 5,
+  align = "start",
+}: {
+  icon: React.ReactElement;
+  iconKind: PickerIcon;
+  label: string;
+  values: string[];
+  onChange: (value: string) => void;
+  options: PickerOption[];
+  collapsedLimit?: number;
+  align?: "start" | "end";
+}) {
+  const id = React.useId();
+  const ref = React.useRef<HTMLDetailsElement | null>(null);
+  const [open, setOpen] = React.useState(false);
+  const summary = filterDropdownSummary(values, options);
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    const closeForPeer = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== id) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("repospend:filter-dropdown-open", closeForPeer);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("repospend:filter-dropdown-open", closeForPeer);
+    };
+  }, [id, open]);
+
+  return (
+    <details
+      className={`filter-dropdown filter-dropdown-align-${align}`}
+      onToggle={(event) => {
+        const nextOpen = event.currentTarget.open;
+        setOpen(nextOpen);
+        if (nextOpen) window.dispatchEvent(new CustomEvent("repospend:filter-dropdown-open", { detail: id }));
+      }}
+      open={open}
+      ref={ref}
+    >
+      <summary onClick={(event) => {
+        event.preventDefault();
+        setOpen((current) => {
+          const nextOpen = !current;
+          if (nextOpen) window.dispatchEvent(new CustomEvent("repospend:filter-dropdown-open", { detail: id }));
+          return nextOpen;
+        });
+      }}>
+        <span className="filter-dropdown-label">
+          {React.cloneElement(icon, { className: "h-4 w-4", "aria-hidden": true })}
+          {label}
+        </span>
+        <span className={`filter-dropdown-value ${values.length ? "active" : ""}`}>{summary}</span>
+      </summary>
+      <div className="filter-dropdown-body">
+        <FilterPillPicker icon={icon} iconKind={iconKind} label={label} values={values} onChange={onChange} options={options} collapsedLimit={collapsedLimit} />
+      </div>
+    </details>
+  );
+}
+
+function filterDropdownSummary(values: string[], options: PickerOption[]): string {
+  if (!values.length) return "All";
+  const labels = values.map((value) => options.find((option) => option.value === value)?.label ?? value);
+  if (labels.length === 1) return labels[0]!;
+  return `${labels[0]} +${labels.length - 1}`;
 }
 
 function FilterPillPicker({
@@ -4643,7 +5002,7 @@ function ActiveFiltersSummary({
           <span aria-hidden>×</span>
         </button>
       ))}
-      {chips.length === 0 && !hasCustomDate ? <span className="active-filter-empty">No AI provider, app/surface, repo/folder, or model filters applied.</span> : null}
+      {chips.length === 0 && !hasCustomDate ? <span className="active-filter-empty">All providers, apps, repos, and models</span> : null}
       {hasAnyFilter ? <button className="text-button active-filter-reset" type="button" onClick={onResetAll}>Reset filters</button> : null}
     </div>
   );
@@ -4765,7 +5124,7 @@ function AppLabel({ app, surface }: { app?: string; surface?: Session["detectedS
 function SourceBadge({ source, label }: { source: Session["sourceClient"]; label?: string }) {
   const display = label ?? sourceLabel(source);
   return (
-    <span className={`source-badge source-badge-${source}`} title={`AI provider: ${display}`}>
+    <span className="source-badge" title={`AI provider: ${display}`}>
       <ProviderIcon provider={source} label={display} />
       <span>{display}</span>
     </span>
@@ -4919,6 +5278,15 @@ function ClaudeIcon() {
   );
 }
 
+function NpmIcon() {
+  return (
+    <svg className="brand-icon npm-icon" viewBox="0 0 24 24" aria-hidden>
+      <rect x="2.5" y="6" width="19" height="12" rx="2" fill="currentColor" />
+      <path d="M5.6 15.2V8.8h12.8v6.4h-3.2v-4h-1.6v4H5.6Z" fill="#fff" />
+    </svg>
+  );
+}
+
 function DateInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="field">
@@ -4928,7 +5296,7 @@ function DateInput({ label, value, onChange }: { label: string; value: string; o
   );
 }
 
-function QuickLink({ href, label, icon, tone }: { href: string; label: string; icon: React.ReactNode; tone: "codex" | "claude" | "cursor" | "github" }) {
+function QuickLink({ href, label, icon, tone }: { href: string; label: string; icon: React.ReactNode; tone: "codex" | "claude" | "cursor" | "github" | "npm" }) {
   return (
     <a className={`quick-link quick-link-${tone}`} href={href} target="_blank" rel="noreferrer" title={label}>
       <span className="quick-link-icon" aria-hidden>{icon}</span>
@@ -5198,7 +5566,8 @@ function Badge({ label, title, tone }: { label: string; title?: string | undefin
 }
 
 function OutcomeBadge({ outcome }: { outcome: Session["sessionOutcome"] }) {
-  return <Badge label={outcomeLabel(outcome)} title={outcomeTitle(outcome)} />;
+  const tone: BadgeTone = outcome === "completed" ? "good" : outcome === "failed" || outcome === "partial" ? "warning" : "neutral";
+  return <Badge label={outcomeLabel(outcome)} title={outcomeTitle(outcome)} tone={tone} />;
 }
 
 function BadgeRow({ labels }: { labels: string[] }) {
@@ -5274,6 +5643,7 @@ function repoWarningBadgeItem(warning: string): WarningBadgeItem {
   if (normalized === "low cache rate") return { label: "Low cache", title, tone: "warning" };
   if (normalized === "output heavy sessions") return { label: "Output heavy", title, tone: "info" };
   if (normalized === "high-token no-edit") return { label: "High-token no-edit", title, tone: "warning" };
+  if (normalized === "claude session split by activity day") return { label: "Day split", title, tone: "info" };
   if (normalized === "duplicate or stale token snapshots skipped") return { label: "Stale snapshots", title, tone: "info" };
   if (normalized === "token direct usage ignored after cumulative snapshot") return { label: "Token snapshots", title, tone: "info" };
   if (normalized.startsWith("invalid token snapshots")) return { label: "Invalid snapshots", title, tone: "warning" };

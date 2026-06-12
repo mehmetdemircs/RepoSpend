@@ -2,6 +2,17 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.1.1
+
+- Add bundled Claude Fable 5 and Claude Mythos 5 API-equivalent pricing, including dated model ID family pricing and future Fable/Mythos version fallback.
+- Price Claude cache writes from the local 5-minute vs 1-hour TTL split when transcripts expose it, with the 1-hour rate kept as the fallback for unsplit cache creation.
+- Improve the dashboard filter bar by replacing always-expanded filter groups with compact dropdowns that close when another filter opens, Escape is pressed, or the user clicks outside.
+- Move the Overview timeline and chart controls directly under the KPI row, keeping diagnostics such as Token Counting in Settings instead of the daily-glance flow.
+- Replace Settings save and local-cache actions that forced full page reloads with React refetches that preserve page context.
+- Improve chart readability with stable repo colors, positive-only minimum bar size, and a model distribution share panel for skewed model usage.
+- Reduce badge and copy noise by quieting provider badges, preserving outcome color, simplifying empty filter copy, and showing a compact filtered-view notice on pages without the filter bar.
+- Improve responsive and accessibility polish with a horizontal narrow-width nav, safer filter popover alignment, system font fallback, tabular numeric values, and reduced-motion CSS.
+
 ## 0.1.0
 
 - Add GitHub Copilot support for local OTEL exports, Copilot session-state files, and VS Code Copilot Chat transcript/debug files, leaving cost unknown when local data lacks full token splits.

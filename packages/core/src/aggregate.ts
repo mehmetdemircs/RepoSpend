@@ -7,11 +7,17 @@ export function summarize(sessions: NormalizedUsage[]): Summary {
   const cost = sumKnownCost(sessions);
   const inputTokens = sum(sessions, "inputTokens");
   const cachedInputTokens = sum(sessions, "cachedInputTokens");
+  const cacheCreationInputTokens = optionalSum(sessions, "cacheCreationInputTokens");
+  const cacheCreationInputTokens5m = optionalSum(sessions, "cacheCreationInputTokens5m");
+  const cacheCreationInputTokens1h = optionalSum(sessions, "cacheCreationInputTokens1h");
   return {
     estimatedCostUsd: cost.knownCount > 0 ? cost.value : undefined,
     knownCostSessions: cost.knownCount,
     totalTokens: sum(sessions, "totalTokens"),
     cachedInputTokens,
+    cacheCreationInputTokens,
+    cacheCreationInputTokens5m,
+    cacheCreationInputTokens1h,
     inputTokens,
     outputTokens: sum(sessions, "outputTokens"),
     reasoningTokens: sum(sessions, "reasoningTokens"),
@@ -85,6 +91,9 @@ function groupBy(sessions: NormalizedUsage[], keyFn: (session: NormalizedUsage) 
       unknownCostSessions: 0,
       inputTokens: 0,
       cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheCreationInputTokens5m: 0,
+      cacheCreationInputTokens1h: 0,
       outputTokens: 0,
       reasoningTokens: 0,
       totalTokens: 0,
@@ -95,6 +104,9 @@ function groupBy(sessions: NormalizedUsage[], keyFn: (session: NormalizedUsage) 
 
     group.inputTokens += session.inputTokens;
     group.cachedInputTokens += session.cachedInputTokens;
+    group.cacheCreationInputTokens = (group.cacheCreationInputTokens ?? 0) + (session.cacheCreationInputTokens ?? 0);
+    group.cacheCreationInputTokens5m = (group.cacheCreationInputTokens5m ?? 0) + (session.cacheCreationInputTokens5m ?? 0);
+    group.cacheCreationInputTokens1h = (group.cacheCreationInputTokens1h ?? 0) + (session.cacheCreationInputTokens1h ?? 0);
     group.outputTokens += session.outputTokens;
     group.reasoningTokens += session.reasoningTokens;
     group.totalTokens += session.totalTokens;
@@ -136,6 +148,8 @@ export function toCsv(sessions: NormalizedUsage[]): string {
     "inputTokens",
     "cachedInputTokens",
     "cacheCreationInputTokens",
+    "cacheCreationInputTokens5m",
+    "cacheCreationInputTokens1h",
     "outputTokens",
     "reasoningTokens",
     "reasoningOutputTokens",
@@ -199,6 +213,9 @@ function optionalSum(
     | "harmlessNonZeroEvents"
     | "exploratoryMisses"
     | "repeatedFailureClusters"
+    | "cacheCreationInputTokens"
+    | "cacheCreationInputTokens5m"
+    | "cacheCreationInputTokens1h"
     | "fileReadCount"
     | "fileEditCount"
     | "rawEventCount",

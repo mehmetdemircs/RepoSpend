@@ -187,10 +187,104 @@ describe("pricing and grouping", () => {
     expect(cost).toBe(7.935);
   });
 
+  it("prices Claude cache writes by the logged cache TTL split", () => {
+    const cost = calculateCostUsd(
+      {
+        model: "claude-sonnet-4-5",
+        inputTokens: 1_300_000,
+        cachedInputTokens: 200_000,
+        cacheCreationInputTokens: 100_000,
+        cacheCreationInputTokens5m: 40_000,
+        cacheCreationInputTokens1h: 60_000,
+        outputTokens: 300_000,
+        reasoningTokens: 0,
+      },
+      {
+        "claude-sonnet-4-5": {
+          inputPerMillion: 3,
+          cacheCreationInput5mPerMillion: 3.75,
+          cacheCreationInput1hPerMillion: 6,
+          cacheCreationInputPerMillion: 6,
+          cachedInputPerMillion: 0.3,
+          outputPerMillion: 15,
+        },
+      },
+    );
+
+    expect(cost).toBe(8.07);
+  });
+
+  it("uses split cache write tokens even when the aggregate cache write total is absent", () => {
+    const cost = calculateCostUsd(
+      {
+        model: "claude-sonnet-4-5",
+        inputTokens: 1_300_000,
+        cachedInputTokens: 200_000,
+        cacheCreationInputTokens5m: 40_000,
+        cacheCreationInputTokens1h: 60_000,
+        outputTokens: 300_000,
+        reasoningTokens: 0,
+      },
+      defaultPricing,
+    );
+
+    expect(cost).toBe(8.07);
+  });
+
+  it("ignores zero generic Claude cache write rates when TTL rates are configured", () => {
+    const cost = calculateCostUsd(
+      {
+        model: "claude-custom",
+        inputTokens: 1_300_000,
+        cachedInputTokens: 200_000,
+        cacheCreationInputTokens: 100_000,
+        outputTokens: 300_000,
+        reasoningTokens: 0,
+      },
+      {
+        "claude-custom": {
+          inputPerMillion: 3,
+          cacheCreationInput5mPerMillion: 3.75,
+          cacheCreationInput1hPerMillion: 6,
+          cacheCreationInputPerMillion: 0,
+          cachedInputPerMillion: 0.3,
+          outputPerMillion: 15,
+        },
+      },
+    );
+
+    expect(cost).toBe(8.16);
+  });
+
   it("prices Claude Opus 4.8 from its own bundled rate card", () => {
     const opusUsage = { model: "claude-opus-4-8", inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 };
     // $5/M input + $25/M output: 1 * 5 + 0.1 * 25 = 7.5 (not the old $15/$75 Opus 4 fallback).
     expect(calculateCostUsd(opusUsage, defaultPricing)).toBe(7.5);
+  });
+
+  it("prices Claude Fable 5 and Claude Mythos 5 from their bundled rate cards", () => {
+    const usageFor = (model: string) => ({
+      model,
+      inputTokens: 1_300_000,
+      cachedInputTokens: 200_000,
+      cacheCreationInputTokens: 100_000,
+      outputTokens: 300_000,
+      reasoningTokens: 0,
+    });
+    // Standard input: 1M * $10, 1h cache write: 0.1M * $20, cache read: 0.2M * $1, output: 0.3M * $50.
+    expect(calculateCostUsd(usageFor("claude-fable-5"), defaultPricing)).toBe(27.2);
+    expect(calculateCostUsd(usageFor("claude-mythos-5"), defaultPricing)).toBe(27.2);
+  });
+
+  it("uses Claude Fable and Mythos family pricing for dated model ids", () => {
+    const usageFor = (model: string) => ({ model, inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 });
+    expect(calculateCostUsd(usageFor("claude-fable-5-20260609"), defaultPricing)).toBe(15);
+    expect(calculateCostUsd(usageFor("claude-mythos-5-20260609"), defaultPricing)).toBe(15);
+  });
+
+  it("inherits the nearest older known Fable and Mythos versions", () => {
+    expect(versionedFallbackModel("claude-fable-6", Object.keys(defaultPricing))).toBe("claude-fable-5");
+    expect(versionedFallbackModel("claude-mythos-6", Object.keys(defaultPricing))).toBe("claude-mythos-5");
   });
 
   it("inherits the nearest older known version for unknown newer models", () => {

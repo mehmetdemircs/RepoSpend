@@ -61,6 +61,10 @@ export interface TokenAggregation {
   cachedInputTokens: number;
   /** Input tokens written to cache. This is a subset of inputTokens when known. */
   cacheCreationInputTokens?: number | undefined;
+  /** Input tokens written to Anthropic's 5-minute cache, when the source exposes the TTL split. */
+  cacheCreationInputTokens5m?: number | undefined;
+  /** Input tokens written to Anthropic's 1-hour cache, when the source exposes the TTL split. */
+  cacheCreationInputTokens1h?: number | undefined;
   outputTokens: number;
   reasoningTokens: number;
   reasoningOutputTokens: number;
@@ -161,6 +165,9 @@ export interface UsageGroup {
   unknownCostSessions: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheCreationInputTokens?: number | undefined;
+  cacheCreationInputTokens5m?: number | undefined;
+  cacheCreationInputTokens1h?: number | undefined;
   outputTokens: number;
   reasoningTokens: number;
   totalTokens: number;
@@ -175,6 +182,9 @@ export interface Summary {
   knownCostSessions: number;
   totalTokens: number;
   cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheCreationInputTokens5m: number;
+  cacheCreationInputTokens1h: number;
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
@@ -359,6 +369,8 @@ export interface DashboardSnapshot {
 export interface ModelPricing {
   inputPerMillion: number;
   cachedInputPerMillion?: number;
+  cacheCreationInput5mPerMillion?: number;
+  cacheCreationInput1hPerMillion?: number;
   cacheCreationInputPerMillion?: number;
   outputPerMillion: number;
   reasoningOutputPerMillion?: number;
@@ -376,6 +388,8 @@ export function normalizePricingModelId(model: string): string {
 
 export function claudePricingFamilyModel(model: string, isUsable: (model: string) => boolean = () => true): string | undefined {
   const families = [
+    "claude-fable-5",
+    "claude-mythos-5",
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-opus-4-5",
@@ -419,7 +433,7 @@ interface ParsedVersionedModel {
 function parseVersionedModel(normalized: string): ParsedVersionedModel | undefined {
   // Fast mode and other special rate cards are intentionally not version-inherited.
   if (normalized.includes("fast-mode")) return undefined;
-  const claude = normalized.match(/^(claude-(?:opus|sonnet|haiku))-(\d+)(?:-(\d+))?/);
+  const claude = normalized.match(/^(claude-(?:fable|mythos|opus|sonnet|haiku))-(\d+)(?:-(\d+))?/);
   if (claude) {
     const minor = claude[3] ? Number(claude[3]) : 0;
     return { tier: claude[1]!, version: Number(claude[2]) + minor / 100 };

@@ -4,7 +4,7 @@ RepoSpend is a local-first AI coding usage dashboard. The product promise is rep
 
 ## Current Release
 
-- Version: `0.1.0`
+- Version: `0.1.1`
 - Scope: early debug release
 - Source clients: Codex, Claude Code, GitHub Copilot, and opt-in experimental Cursor support
 - Server: localhost-only local Fastify API
@@ -34,6 +34,7 @@ RepoSpend is a local-first AI coding usage dashboard. The product promise is rep
 - **API-equivalent Cost**: A local estimate based on token counts and public API-style pricing assumptions. It is not the user's actual ChatGPT, Codex, Claude, Claude Code, or GitHub Copilot bill.
 - **RTK Savings**: Estimated tokens avoided by the local `rtk` command proxy, when local RTK reports are available.
 - **Data Health**: Local scan status: files scanned, sessions imported, parser issues, token checkpoints, and last scan time.
+- **Comparison Tool Differences**: Expected differences from `ccusage`, Tokscale, and similar tools can come from source scope and accounting semantics. RepoSpend includes Claude Desktop/local-agent sessions when present, keeps cache reads/writes under input instead of adding them again to headline totals, prices Claude cache writes by the recorded 5-minute vs 1-hour TTL split, and separates Codex visible output from reasoning output so reasoning is priced once.
 
 ## UX Principles
 
