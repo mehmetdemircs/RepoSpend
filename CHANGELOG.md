@@ -2,6 +2,15 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.1.2
+
+- Add bundled GPT-5.6 API-equivalent pricing for the Sol, Terra, and Luna tiers, including cache-write and cached-input rates.
+- Add bundled Claude Sonnet 5 introductory pricing through August 31, 2026, with dated model ID family pricing and a note for the standard September 1, 2026 rate.
+- Add Claude Opus 4.8 fast mode pricing and keep special fast-mode rate cards separate from regular Opus family fallback.
+- Add GitHub Copilot pricing coverage for MAI-Code-1-Flash and Kimi K2.7 Code, including suffix variant matching for local Copilot model IDs.
+- Add the OpenAI GPT-5.6 preview pricing source to the bundled pricing metadata shown in Settings.
+- Ignore local generated `marketing/` assets so release diffs stay focused on source, docs, and packaged files.
+
 ## 0.1.1
 
 - Add bundled Claude Fable 5 and Claude Mythos 5 API-equivalent pricing, including dated model ID family pricing and future Fable/Mythos version fallback.

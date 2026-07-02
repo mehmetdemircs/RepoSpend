@@ -4,6 +4,10 @@ RepoSpend estimates API-equivalent cost from a local pricing table. The bundled 
 
 The bundled table is seeded from public OpenAI, Anthropic, Google, and GitHub Copilot model references and is expressed as USD per 1M tokens. Pricing changes over time, so treat RepoSpend costs as API-equivalent estimates rather than invoice-grade accounting.
 
+The bundled defaults use currently published standard API prices unless a provider has an active introductory API rate. For example, Claude Sonnet 5 uses Anthropic's $2 input and $10 output introductory rate through August 31, 2026, with a pricing-table note for the $3 input and $15 output standard rate that starts September 1, 2026.
+
+Some GitHub Copilot model rows are hosted or fine-tuned vendor models such as Raptor mini, MAI-Code-1-Flash, and Kimi K2.7 Code. RepoSpend prices those rows from GitHub's public per-token table as API-equivalent estimates, not as a Copilot invoice.
+
 For Claude models, RepoSpend uses Anthropic's cache-write TTL split when local
 Claude Code usage reports expose it. Tokens recorded under
 `cache_creation.ephemeral_5m_input_tokens` use the 5-minute cache-write rate, and

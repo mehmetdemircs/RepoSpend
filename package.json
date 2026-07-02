@@ -1,6 +1,6 @@
 {
   "name": "repospend",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local-first dashboard for tracking AI coding token usage and API-equivalent spend by repository, session, model, and tool.",
   "license": "Apache-2.0",
   "author": "Mehmet Mustafa Demir",
@@ -46,7 +46,8 @@
     "clean": "pnpm -r clean && rm -rf dist web-dist",
     "rebuild:native": "pnpm rebuild better-sqlite3",
     "doctor:native": "node scripts/check-native.mjs",
-    "media:capture": "node scripts/capture-release-media.mjs"
+    "media:capture": "node scripts/capture-release-media.mjs",
+    "media:producthunt": "node scripts/generate-producthunt-media.mjs"
   },
   "keywords": [
     "codex",

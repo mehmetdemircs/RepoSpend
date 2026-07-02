@@ -4,7 +4,7 @@ RepoSpend is a local-first AI coding usage dashboard. The product promise is rep
 
 ## Current Release
 
-- Version: `0.1.1`
+- Version: `0.1.2`
 - Scope: early debug release
 - Source clients: Codex, Claude Code, GitHub Copilot, and opt-in experimental Cursor support
 - Server: localhost-only local Fastify API

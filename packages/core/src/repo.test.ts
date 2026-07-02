@@ -164,6 +164,13 @@ describe("pricing and grouping", () => {
     ).toBe(2.8);
   });
 
+  it("classifies GitHub Copilot hosted vendor models as Copilot aliases", () => {
+    expect(isCopilotAliasModel("mai-code-1-flash")).toBe(true);
+    expect(isCopilotAliasModel("mai-code-1-flash-vscode")).toBe(true);
+    expect(isCopilotAliasModel("kimi-k2.7-code")).toBe(true);
+    expect(isCopilotAliasModel("kimi-k2.7-code-preview")).toBe(true);
+  });
+
   it("treats input tokens as total input when cache write and cache read tokens are split out", () => {
     const cost = calculateCostUsd(
       {
@@ -262,6 +269,27 @@ describe("pricing and grouping", () => {
     expect(calculateCostUsd(opusUsage, defaultPricing)).toBe(7.5);
   });
 
+  it("prices Claude Opus 4.8 fast mode from its own bundled rate card", () => {
+    const opusUsage = {
+      model: "claude-opus-4.8-fast-mode",
+      inputTokens: 1_300_000,
+      cachedInputTokens: 200_000,
+      cacheCreationInputTokens: 100_000,
+      outputTokens: 300_000,
+      reasoningTokens: 0,
+    };
+    // Fast mode standard input: 1M * $10, generic cache write: 0.1M * $12.50, cache read: 0.2M * $1, output: 0.3M * $50.
+    expect(calculateCostUsd(opusUsage, defaultPricing)).toBe(26.45);
+  });
+
+  it("prices new Copilot hosted vendor models from their bundled rate cards", () => {
+    const usageFor = (model: string) => ({ model, inputTokens: 1_000_000, cachedInputTokens: 100_000, outputTokens: 100_000, reasoningTokens: 0 });
+    expect(calculateCostUsd(usageFor("mai-code-1-flash"), defaultPricing)).toBe(1.1325);
+    expect(calculateCostUsd(usageFor("mai-code-1-flash-vscode"), defaultPricing)).toBe(1.1325);
+    expect(calculateCostUsd(usageFor("kimi-k2.7-code"), defaultPricing)).toBe(1.274);
+    expect(calculateCostUsd(usageFor("kimi-k2.7-code-preview"), defaultPricing)).toBe(1.274);
+  });
+
   it("prices Claude Fable 5 and Claude Mythos 5 from their bundled rate cards", () => {
     const usageFor = (model: string) => ({
       model,
@@ -276,10 +304,28 @@ describe("pricing and grouping", () => {
     expect(calculateCostUsd(usageFor("claude-mythos-5"), defaultPricing)).toBe(27.2);
   });
 
+  it("prices Claude Sonnet 5 from its current bundled introductory rate card", () => {
+    const usage = {
+      model: "claude-sonnet-5",
+      inputTokens: 1_300_000,
+      cachedInputTokens: 200_000,
+      cacheCreationInputTokens: 100_000,
+      outputTokens: 300_000,
+      reasoningTokens: 0,
+    };
+    // Current introductory pricing: standard input 1M * $2, 1h cache write 0.1M * $4, cache read 0.2M * $0.20, output 0.3M * $10.
+    expect(calculateCostUsd(usage, defaultPricing)).toBe(5.44);
+  });
+
   it("uses Claude Fable and Mythos family pricing for dated model ids", () => {
     const usageFor = (model: string) => ({ model, inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 });
     expect(calculateCostUsd(usageFor("claude-fable-5-20260609"), defaultPricing)).toBe(15);
     expect(calculateCostUsd(usageFor("claude-mythos-5-20260609"), defaultPricing)).toBe(15);
+  });
+
+  it("uses Claude Sonnet 5 family pricing for dated model ids", () => {
+    const usage = { model: "claude-sonnet-5-20260630", inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 };
+    expect(calculateCostUsd(usage, defaultPricing)).toBe(3);
   });
 
   it("inherits the nearest older known Fable and Mythos versions", () => {
@@ -287,18 +333,33 @@ describe("pricing and grouping", () => {
     expect(versionedFallbackModel("claude-mythos-6", Object.keys(defaultPricing))).toBe("claude-mythos-5");
   });
 
+  it("prices GPT-5.6 tiers from their own bundled rate cards", () => {
+    const usageFor = (model: string) => ({
+      model,
+      inputTokens: 1_300_000,
+      cachedInputTokens: 200_000,
+      cacheCreationInputTokens: 100_000,
+      outputTokens: 300_000,
+      reasoningTokens: 100_000,
+    });
+    expect(calculateCostUsd(usageFor("gpt-5.6"), defaultPricing)).toBe(17.725);
+    expect(calculateCostUsd(usageFor("gpt-5.6-sol"), defaultPricing)).toBe(17.725);
+    expect(calculateCostUsd(usageFor("gpt-5.6-terra"), defaultPricing)).toBe(8.8625);
+    expect(calculateCostUsd(usageFor("gpt-5.6-luna"), defaultPricing)).toBe(3.545);
+  });
+
   it("inherits the nearest older known version for unknown newer models", () => {
     const usageFor = (model: string) => ({ model, inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 });
     // Unknown Opus 4.9 / Opus 5 fall back to Opus 4.8 ($5/$25 => 7.5), not the pricier Opus 4 base.
     expect(calculateCostUsd(usageFor("claude-opus-4-9"), defaultPricing)).toBe(7.5);
     expect(calculateCostUsd(usageFor("claude-opus-5"), defaultPricing)).toBe(7.5);
-    // Unknown GPT 5.6 falls back to GPT 5.5 ($5 input / $30 output => 8).
-    expect(calculateCostUsd(usageFor("gpt-5.6"), defaultPricing)).toBe(8);
+    // Unknown future GPT 5.7 falls back to the newest same-tier GPT 5.6 rate card.
+    expect(calculateCostUsd(usageFor("gpt-5.7"), defaultPricing)).toBe(8);
   });
 
   it("reports the inherited source model so the UI can label it", () => {
     expect(resolvePricingForModel("claude-opus-4-9", defaultPricing)).toMatchObject({ sourceModel: "claude-opus-4-8", inherited: true });
-    expect(resolvePricingForModel("gpt-5.6", defaultPricing)).toMatchObject({ sourceModel: "gpt-5.5", inherited: true });
+    expect(resolvePricingForModel("gpt-5.7", defaultPricing)).toMatchObject({ sourceModel: "gpt-5.6", inherited: true });
   });
 
   it("only inherits within the same tier and never from a newer version", () => {

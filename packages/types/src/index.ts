@@ -390,11 +390,13 @@ export function claudePricingFamilyModel(model: string, isUsable: (model: string
   const families = [
     "claude-fable-5",
     "claude-mythos-5",
+    "claude-opus-4-8-fast-mode",
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-opus-4-5",
     "claude-opus-4-1",
     "claude-opus-4",
+    "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
     "claude-sonnet-4",
@@ -418,6 +420,8 @@ export function copilotPricingFamilyModel(model: string, isUsable: (model: strin
   if ((normalized === "raptor-mini" || normalized.startsWith("raptor-mini-") || normalized.startsWith("oswe-vscode")) && isUsable("raptor-mini")) return "raptor-mini";
   if ((normalized === "lark" || normalized.startsWith("lark-")) && isUsable("lark")) return "lark";
   if ((normalized === "goldeneye" || normalized.startsWith("goldeneye-")) && isUsable("goldeneye")) return "goldeneye";
+  if ((normalized === "mai-code-1-flash" || normalized.startsWith("mai-code-1-flash-")) && isUsable("mai-code-1-flash")) return "mai-code-1-flash";
+  if ((normalized === "kimi-k2.7-code" || normalized.startsWith("kimi-k2.7-code-")) && isUsable("kimi-k2.7-code")) return "kimi-k2.7-code";
   return undefined;
 }
 
@@ -466,7 +470,7 @@ export function versionedFallbackModel(model: string, knownModels: string[], isU
 
 export function isCopilotAliasModel(model: string): boolean {
   const normalized = normalizePricingModelId(model);
-  return normalized.startsWith("raptor-mini") || normalized.startsWith("oswe-vscode") || normalized === "lark" || normalized.startsWith("lark-") || normalized.startsWith("goldeneye");
+  return normalized.startsWith("raptor-mini") || normalized.startsWith("oswe-vscode") || normalized === "lark" || normalized.startsWith("lark-") || normalized.startsWith("goldeneye") || normalized.startsWith("mai-code-1-flash") || normalized.startsWith("kimi-k2.7-code");
 }
 
 export function positiveRate(value: number | undefined): boolean {
