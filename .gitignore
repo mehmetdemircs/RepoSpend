@@ -1,5 +1,6 @@
 .claude/
 .codex/
+.logs/
 node_modules
 dist
 web-dist

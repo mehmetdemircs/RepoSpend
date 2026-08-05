@@ -13,19 +13,20 @@ export const pricingInfo = {
   sourceUrls: [
     { label: "OpenAI pricing reference", url: "https://developers.openai.com/api/docs/pricing" },
     { label: "OpenAI GPT-5.6 preview pricing", url: "https://openai.com/index/previewing-gpt-5-6-sol/" },
+    { label: "OpenAI GPT-5.6 price update", url: "https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/" },
     { label: "Claude pricing reference", url: "https://platform.claude.com/docs/en/about-claude/pricing" },
     { label: "GitHub Copilot model pricing reference", url: "https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" },
   ],
   unit: "USD per 1M tokens",
-  updatedAt: "2026-07-02",
-  note: "RepoSpend estimates API-equivalent cost from local token counts and public API-style Standard pricing. This is not your actual bill; subscriptions, credits, provider terms, cache behavior, regional processing, or other billing factors can make your real cost different.",
+  updatedAt: "2026-07-30",
+  note: "RepoSpend estimates API-equivalent cost from local token counts and public API-style Standard pricing. GPT-5.6 Terra and Luna use the reduced OpenAI API rates effective July 30, 2026. This is not your actual bill; subscriptions, credits, provider terms, cache behavior, regional processing, or other billing factors can make your real cost different.",
 };
 
 export const defaultPricing: PricingTable = {
   "gpt-5.6": { inputPerMillion: 5, cachedInputPerMillion: 0.5, cacheCreationInputPerMillion: 6.25, outputPerMillion: 30, reasoningOutputPerMillion: 30, note: "GPT-5.6 Sol flagship tier. OpenAI preview pricing lists Sol at $5 input / $30 output per 1M tokens, cache writes at 1.25x input, and cache reads at a 90% discount." },
   "gpt-5.6-sol": { inputPerMillion: 5, cachedInputPerMillion: 0.5, cacheCreationInputPerMillion: 6.25, outputPerMillion: 30, reasoningOutputPerMillion: 30 },
-  "gpt-5.6-terra": { inputPerMillion: 2.5, cachedInputPerMillion: 0.25, cacheCreationInputPerMillion: 3.125, outputPerMillion: 15, reasoningOutputPerMillion: 15 },
-  "gpt-5.6-luna": { inputPerMillion: 1, cachedInputPerMillion: 0.1, cacheCreationInputPerMillion: 1.25, outputPerMillion: 6, reasoningOutputPerMillion: 6 },
+  "gpt-5.6-terra": { inputPerMillion: 2, cachedInputPerMillion: 0.2, cacheCreationInputPerMillion: 2.5, outputPerMillion: 12, reasoningOutputPerMillion: 12, note: "GPT-5.6 Terra reduced API pricing effective July 30, 2026. Cache reads are 90% below input and cache writes are 1.25x input." },
+  "gpt-5.6-luna": { inputPerMillion: 0.2, cachedInputPerMillion: 0.02, cacheCreationInputPerMillion: 0.25, outputPerMillion: 1.2, reasoningOutputPerMillion: 1.2, note: "GPT-5.6 Luna reduced API pricing effective July 30, 2026. Cache reads are 90% below input and cache writes are 1.25x input." },
   "gpt-5.5": { inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30, reasoningOutputPerMillion: 30 },
   "gpt-5.5-pro": { inputPerMillion: 30, outputPerMillion: 180, reasoningOutputPerMillion: 180 },
   "gpt-5.4": { inputPerMillion: 2.5, cachedInputPerMillion: 0.25, outputPerMillion: 15, reasoningOutputPerMillion: 15 },
@@ -77,6 +78,11 @@ export const defaultPricing: PricingTable = {
   "claude-3-5-haiku": { inputPerMillion: 0.8, cacheCreationInput5mPerMillion: 1, cacheCreationInput1hPerMillion: 1.6, cacheCreationInputPerMillion: 1.6, cachedInputPerMillion: 0.08, outputPerMillion: 4 },
 };
 
+const legacyBundledPricing: PricingTable = {
+  "gpt-5.6-terra": { inputPerMillion: 2.5, cachedInputPerMillion: 0.25, cacheCreationInputPerMillion: 3.125, outputPerMillion: 15, reasoningOutputPerMillion: 15 },
+  "gpt-5.6-luna": { inputPerMillion: 1, cachedInputPerMillion: 0.1, cacheCreationInputPerMillion: 1.25, outputPerMillion: 6, reasoningOutputPerMillion: 6 },
+};
+
 export function loadPricingTable(pricingPath?: string): PricingTable {
   if (!pricingPath) {
     return defaultPricing;
@@ -84,10 +90,37 @@ export function loadPricingTable(pricingPath?: string): PricingTable {
 
   try {
     const resolved = path.resolve(pricingPath);
-    return { ...defaultPricing, ...(JSON.parse(fs.readFileSync(resolved, "utf8")) as PricingTable) };
+    const stored = JSON.parse(fs.readFileSync(resolved, "utf8")) as PricingTable;
+    return { ...defaultPricing, ...migrateLegacyBundledPricing(stored) };
   } catch {
     return defaultPricing;
   }
+}
+
+export function pricingOverrides(pricing: PricingTable): PricingTable {
+  return Object.fromEntries(
+    Object.entries(pricing).filter(([model, modelPricing]) => {
+      const bundled = defaultPricing[model];
+      return !bundled || !pricingEntriesEqual(modelPricing, bundled);
+    }),
+  );
+}
+
+function migrateLegacyBundledPricing(stored: PricingTable): PricingTable {
+  const isLegacyFullTable = Object.keys(defaultPricing).every((model) => Object.hasOwn(stored, model));
+  if (!isLegacyFullTable) return stored;
+
+  const migrated = { ...stored };
+  for (const [model, legacyPricing] of Object.entries(legacyBundledPricing)) {
+    if (pricingEntriesEqual(migrated[model], legacyPricing)) delete migrated[model];
+  }
+  return pricingOverrides(migrated);
+}
+
+function pricingEntriesEqual(left: ModelPricing | undefined, right: ModelPricing | undefined): boolean {
+  if (!left || !right) return left === right;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => left[key as keyof ModelPricing] === right[key as keyof ModelPricing]);
 }
 
 export function resolvePricingPath(config: RepoSpendConfig = {}): string {

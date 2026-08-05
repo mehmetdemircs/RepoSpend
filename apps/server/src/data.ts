@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { buildDashboardSnapshot, clearRepoSpendCache, configPath, loadConfig, loadConfigWithWarnings, loadPricingTable, lowerBound, repospendHome, resolvePricingPath, saveConfig, savePricingTable, scanUsageSources, toCsv, upperBound, type PricingTable } from "@repospend/core";
+import { buildDashboardSnapshot, clearRepoSpendCache, configPath, loadConfig, loadConfigWithWarnings, loadPricingTable, lowerBound, pricingOverrides, repospendHome, resolvePricingPath, saveConfig, savePricingTable, scanUsageSources, toCsv, upperBound, type PricingTable } from "@repospend/core";
 import type { DashboardSnapshot, NormalizedUsage, UsageFilters } from "@repospend/types";
 
 export type DashboardData = DashboardSnapshot;
@@ -145,7 +145,7 @@ export function writeConfigData(nextConfig: ReturnType<typeof loadConfig>): { pa
 export function writePricingData(models: PricingTable): { path: string; models: PricingTable } {
   const config = loadConfig();
   const pricingPath = resolvePricingPath(config);
-  savePricingTable(pricingPath, models);
+  savePricingTable(pricingPath, pricingOverrides(models));
   clearScanCache();
   return {
     path: pricingPath,

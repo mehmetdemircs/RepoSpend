@@ -2,6 +2,13 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.1.3
+
+- Correct GPT-5.6 Terra and Luna API-equivalent pricing to the reduced July 30, 2026 OpenAI rates, including cached-input and cache-write rates.
+- Migrate legacy full pricing files so the new Terra and Luna defaults take effect while preserving sparse user overrides and custom model rows.
+- Improve unverified repo and folder grouping by using the outermost project marker below a safe shared-folder boundary, keeping nested non-Git workspace paths together without collapsing them into broad folders such as `Desktop`.
+- Show paths relative to the home directory for unverified workspace labels so similarly named folders such as `src` remain distinguishable.
+
 ## 0.1.2
 
 - Add bundled GPT-5.6 API-equivalent pricing for the Sol, Terra, and Luna tiers, including cache-write and cached-input rates.

@@ -125,7 +125,7 @@ RepoSpend helps you break down local AI coding usage by:
 - input, cached input, output, and reasoning token shape
 - estimated API-equivalent cost
 
-Nested paths are grouped by Git root so usage rolls up to the repository.
+Nested paths are grouped by Git root so usage rolls up to the repository. When no Git root is available, RepoSpend uses the outermost project marker below a safe shared-folder boundary, such as `package.json`, and keeps the grouping visibly unverified.
 
 ## Screenshots
 

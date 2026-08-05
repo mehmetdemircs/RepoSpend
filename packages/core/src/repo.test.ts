@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { groupByDay, groupByHour, groupByModel, groupByRepo, groupBySourceApp } from "./aggregate.js";
 import { calculateCostUsd, defaultPricing } from "./pricing.js";
-import { findGitRoot, resolveRepoInfo } from "./repo.js";
+import { fallbackWorkspaceRoot, findGitRoot, resolveRepoInfo } from "./repo.js";
 import { isCopilotAliasModel, resolvePricingForModel, versionedFallbackModel, type NormalizedUsage } from "@repospend/types";
 
 const tempDirs: string[] = [];
@@ -45,6 +45,34 @@ describe("repo normalization", () => {
     const info = resolveRepoInfo(root, { repos: [{ name: "RivendellRecords", paths: [root] }] });
 
     expect(info.repoName).toBe("RivendellRecords");
+  });
+
+  it("keeps unverified workspace paths distinct", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "repospend-unverified-"));
+    tempDirs.push(root);
+    const cwd = path.join(root, "nested-workspace");
+    fs.mkdirSync(cwd);
+
+    const fileSystem = noGitFileSystem();
+    const info = resolveRepoInfo(cwd, {}, fileSystem);
+
+    expect(fallbackWorkspaceRoot(cwd, fileSystem)).toBe(cwd);
+    expect(info.repoRoot).toBe(cwd);
+    expect(info.repoName).toBe("nested-workspace");
+    expect(info.verified).toBe(false);
+    expect(info.warnings).toContain("repo_unverified_no_git_root");
+  });
+
+  it("uses the outermost project marker for an unverified workspace", () => {
+    const workspace = path.join(os.homedir(), "Desktop", "Repo", "client");
+    const nested = path.join(workspace, "src");
+    const fileSystem = noGitFileSystem([
+      path.join(workspace, "package.json"),
+      path.join(os.homedir(), "Desktop", "Repo", "package.json"),
+    ]);
+
+    expect(fallbackWorkspaceRoot(nested, fileSystem)).toBe(path.join(os.homedir(), "Desktop", "Repo"));
+    expect(resolveRepoInfo(nested, {}, fileSystem).repoName).toBe("Desktop/Repo");
   });
 });
 
@@ -344,8 +372,8 @@ describe("pricing and grouping", () => {
     });
     expect(calculateCostUsd(usageFor("gpt-5.6"), defaultPricing)).toBe(17.725);
     expect(calculateCostUsd(usageFor("gpt-5.6-sol"), defaultPricing)).toBe(17.725);
-    expect(calculateCostUsd(usageFor("gpt-5.6-terra"), defaultPricing)).toBe(8.8625);
-    expect(calculateCostUsd(usageFor("gpt-5.6-luna"), defaultPricing)).toBe(3.545);
+    expect(calculateCostUsd(usageFor("gpt-5.6-terra"), defaultPricing)).toBe(7.09);
+    expect(calculateCostUsd(usageFor("gpt-5.6-luna"), defaultPricing)).toBe(0.709);
   });
 
   it("inherits the nearest older known version for unknown newer models", () => {
@@ -424,6 +452,15 @@ function makeRepo(name = "repo"): string {
   fs.writeFileSync(path.join(root, ".git", "config"), '[remote "origin"]\n\turl = git@example.com:org/repo.git\n');
   tempDirs.push(root);
   return root;
+}
+
+function noGitFileSystem(markedPaths: string[] = []) {
+  const marked = new Set(markedPaths);
+  return {
+    existsSync: (candidate: string) => marked.has(candidate),
+    statSync: () => ({ isDirectory: () => false, isFile: () => false }),
+    readFileSync: () => "",
+  };
 }
 
 function usage(overrides: Partial<NormalizedUsage> = {}): NormalizedUsage {

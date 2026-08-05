@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { RepoSpendConfig } from "@repospend/types";
 import { aliasForPath } from "./config.js";
@@ -46,9 +47,9 @@ export function findGitRoot(cwd: string, fileSystem: Pick<FileSystemLike, "exist
 export function resolveRepoInfo(cwd: string, config: RepoSpendConfig = {}, fileSystem: FileSystemLike = fs): RepoInfo {
   const warnings: string[] = [];
   const gitRoot = safeFindGitRoot(cwd, fileSystem);
-  const repoRoot = gitRoot ?? fallbackWorkspaceRoot(cwd);
+  const repoRoot = gitRoot ?? fallbackWorkspaceRoot(cwd, fileSystem);
   const alias = aliasForPath(repoRoot, config);
-  const repoName = alias ?? (path.basename(repoRoot) || "unknown-workspace");
+  const repoName = alias ?? (gitRoot ? path.basename(repoRoot) : fallbackWorkspaceLabel(repoRoot));
   const gitMeta = gitRoot ? readGitMetadata(gitRoot, fileSystem) : { remote: undefined, branch: undefined };
 
   if (!gitRoot) {
@@ -73,16 +74,64 @@ function safeFindGitRoot(cwd: string, fileSystem: Pick<FileSystemLike, "existsSy
   }
 }
 
-export function fallbackWorkspaceRoot(cwd: string): string {
+const workspaceMarkers = [
+  "package.json",
+  "pyproject.toml",
+  "Cargo.toml",
+  "go.mod",
+  "mix.exs",
+  "composer.json",
+  "Gemfile",
+  "pom.xml",
+  "build.gradle",
+  "Package.swift",
+  "CMakeLists.txt",
+];
+const fallbackWorkspaceCache = new Map<string, string>();
+
+export function fallbackWorkspaceRoot(cwd: string, fileSystem: Pick<FileSystemLike, "existsSync"> = fs): string {
   const resolved = normalizeRoot(path.resolve(cwd || process.cwd()));
-  const home = process.env.HOME ? normalizeRoot(path.resolve(process.env.HOME)) : undefined;
-  if (home && (resolved === home || resolved.startsWith(`${home}${path.sep}`))) {
-    const relative = path.relative(home, resolved).split(path.sep).filter(Boolean);
-    const first = relative[0];
-    return first ? path.join(home, first) : home;
+  if (fileSystem === fs) {
+    const cached = fallbackWorkspaceCache.get(resolved);
+    if (cached) return cached;
   }
-  const parts = resolved.split(path.sep).filter(Boolean);
-  return `${path.sep}${parts.slice(0, Math.min(parts.length, 3)).join(path.sep)}`;
+  const root = findWorkspaceMarkerRoot(resolved, fileSystem) ?? resolved;
+  if (fileSystem === fs) fallbackWorkspaceCache.set(resolved, root);
+  return root;
+}
+
+function findWorkspaceMarkerRoot(start: string, fileSystem: Pick<FileSystemLike, "existsSync">): string | undefined {
+  const home = normalizeRoot(path.resolve(os.homedir()));
+  const boundary = isWithin(start, home) ? home : path.parse(start).root;
+  let candidate: string | undefined;
+  let current = start;
+  while (true) {
+    if (current !== boundary && isAllowedMarkerRoot(current, boundary) && workspaceMarkers.some((marker) => fileSystem.existsSync(path.join(current, marker)))) {
+      candidate = current;
+    }
+    if (current === boundary) return candidate;
+    const parent = path.dirname(current);
+    if (parent === current) return candidate;
+    current = parent;
+  }
+}
+
+function isAllowedMarkerRoot(candidate: string, boundary: string): boolean {
+  const relative = path.relative(boundary, candidate).split(path.sep).filter(Boolean);
+  return relative.length > 1;
+}
+
+function isWithin(candidate: string, parent: string): boolean {
+  return candidate === parent || candidate.startsWith(`${parent}${path.sep}`);
+}
+
+function fallbackWorkspaceLabel(repoRoot: string): string {
+  const home = normalizeRoot(path.resolve(os.homedir()));
+  const relativeToHome = path.relative(home, repoRoot);
+  if (relativeToHome && !relativeToHome.startsWith("..") && !path.isAbsolute(relativeToHome)) {
+    return relativeToHome.split(path.sep).filter(Boolean).join("/");
+  }
+  return path.basename(repoRoot) || "unknown-workspace";
 }
 
 function readGitMetadata(repoRoot: string, fileSystem: FileSystemLike): { remote: string | undefined; branch: string | undefined } {

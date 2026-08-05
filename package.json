@@ -1,6 +1,6 @@
 {
   "name": "repospend",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Local-first dashboard for tracking AI coding token usage and API-equivalent spend by repository, session, model, and tool.",
   "license": "Apache-2.0",
   "author": "Mehmet Mustafa Demir",

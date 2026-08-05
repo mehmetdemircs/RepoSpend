@@ -6,6 +6,10 @@ The bundled table is seeded from public OpenAI, Anthropic, Google, and GitHub Co
 
 The bundled defaults use currently published standard API prices unless a provider has an active introductory API rate. For example, Claude Sonnet 5 uses Anthropic's $2 input and $10 output introductory rate through August 31, 2026, with a pricing-table note for the $3 input and $15 output standard rate that starts September 1, 2026.
 
+OpenAI reduced GPT-5.6 pricing effective July 30, 2026. RepoSpend uses $2 input and $12 output per 1M tokens for Terra, and $0.20 input and $1.20 output for Luna. Cached input remains 90% below the uncached input rate, and cache writes are billed at 1.25x the uncached input rate, so Luna's bundled cache-write rate is $0.25 per 1M tokens.
+
+The Settings page persists only custom or intentionally edited model rows. This lets future bundled rate updates flow through automatically. Older full pricing files are migrated for the GPT-5.6 Terra and Luna reductions when they still contain the previous bundled rates.
+
 Some GitHub Copilot model rows are hosted or fine-tuned vendor models such as Raptor mini, MAI-Code-1-Flash, and Kimi K2.7 Code. RepoSpend prices those rows from GitHub's public per-token table as API-equivalent estimates, not as a Copilot invoice.
 
 For Claude models, RepoSpend uses Anthropic's cache-write TTL split when local
