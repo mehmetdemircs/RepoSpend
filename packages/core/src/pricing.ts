@@ -12,17 +12,21 @@ export const pricingInfo = {
   sourceUrl: "https://developers.openai.com/api/docs/pricing",
   sourceUrls: [
     { label: "OpenAI pricing reference", url: "https://developers.openai.com/api/docs/pricing" },
+    { label: "OpenAI GPT-6 model reference", url: "https://developers.openai.com/api/docs/models" },
     { label: "OpenAI GPT-5.6 preview pricing", url: "https://openai.com/index/previewing-gpt-5-6-sol/" },
     { label: "OpenAI GPT-5.6 price update", url: "https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/" },
     { label: "Claude pricing reference", url: "https://platform.claude.com/docs/en/about-claude/pricing" },
     { label: "GitHub Copilot model pricing reference", url: "https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" },
   ],
   unit: "USD per 1M tokens",
-  updatedAt: "2026-07-30",
-  note: "RepoSpend estimates API-equivalent cost from local token counts and public API-style Standard pricing. GPT-5.6 Terra and Luna use the reduced OpenAI API rates effective July 30, 2026. This is not your actual bill; subscriptions, credits, provider terms, cache behavior, regional processing, or other billing factors can make your real cost different.",
+  updatedAt: "2026-09-24",
+  note: "RepoSpend estimates API-equivalent cost from local token counts and public Standard pricing. GPT-6 defaults use short-context rates. Long-context, fast, batch, regional, and account-specific pricing can differ. This is not your actual bill.",
 };
 
 export const defaultPricing: PricingTable = {
+  "gpt-6-astra": { inputPerMillion: 10, cachedInputPerMillion: 1, cacheCreationInputPerMillion: 12.5, outputPerMillion: 50, reasoningOutputPerMillion: 50 },
+  "gpt-6-sol": { inputPerMillion: 2, cachedInputPerMillion: 0.2, cacheCreationInputPerMillion: 2.5, outputPerMillion: 10, reasoningOutputPerMillion: 10 },
+  "gpt-6-luna": { inputPerMillion: 0.1, cachedInputPerMillion: 0.01, cacheCreationInputPerMillion: 0.125, outputPerMillion: 0.5, reasoningOutputPerMillion: 0.5 },
   "gpt-5.6": { inputPerMillion: 5, cachedInputPerMillion: 0.5, cacheCreationInputPerMillion: 6.25, outputPerMillion: 30, reasoningOutputPerMillion: 30, note: "GPT-5.6 Sol flagship tier. OpenAI preview pricing lists Sol at $5 input / $30 output per 1M tokens, cache writes at 1.25x input, and cache reads at a 90% discount." },
   "gpt-5.6-sol": { inputPerMillion: 5, cachedInputPerMillion: 0.5, cacheCreationInputPerMillion: 6.25, outputPerMillion: 30, reasoningOutputPerMillion: 30 },
   "gpt-5.6-terra": { inputPerMillion: 2, cachedInputPerMillion: 0.2, cacheCreationInputPerMillion: 2.5, outputPerMillion: 12, reasoningOutputPerMillion: 12, note: "GPT-5.6 Terra reduced API pricing effective July 30, 2026. Cache reads are 90% below input and cache writes are 1.25x input." },
@@ -61,7 +65,11 @@ export const defaultPricing: PricingTable = {
   "mai-code-1-flash": { inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 4.5, note: "GitHub Copilot supported Microsoft model; API-equivalent estimate, not a Copilot bill." },
   "kimi-k2.7-code": { inputPerMillion: 0.95, cachedInputPerMillion: 0.19, outputPerMillion: 4, note: "GitHub Copilot supported Moonshot AI model; API-equivalent estimate, not a Copilot bill." },
   "claude-fable-5": { inputPerMillion: 10, cacheCreationInput5mPerMillion: 12.5, cacheCreationInput1hPerMillion: 20, cacheCreationInputPerMillion: 20, cachedInputPerMillion: 1, outputPerMillion: 50 },
+  "claude-fable-5-1": { inputPerMillion: 10, cacheCreationInput5mPerMillion: 12.5, cacheCreationInput1hPerMillion: 20, cacheCreationInputPerMillion: 20, cachedInputPerMillion: 0.25, outputPerMillion: 50 },
   "claude-mythos-5": { inputPerMillion: 10, cacheCreationInput5mPerMillion: 12.5, cacheCreationInput1hPerMillion: 20, cacheCreationInputPerMillion: 20, cachedInputPerMillion: 1, outputPerMillion: 50, note: "Limited availability Anthropic model; same public API-equivalent pricing as Claude Fable 5." },
+  "claude-mythos-5-1": { inputPerMillion: 10, cacheCreationInput5mPerMillion: 12.5, cacheCreationInput1hPerMillion: 20, cacheCreationInputPerMillion: 20, cachedInputPerMillion: 0.25, outputPerMillion: 50, note: "Limited availability Anthropic model; same public API-equivalent pricing as Claude Fable 5.1." },
+  "claude-opus-5-5": { inputPerMillion: 4, cacheCreationInput5mPerMillion: 5, cacheCreationInput1hPerMillion: 8, cacheCreationInputPerMillion: 8, cachedInputPerMillion: 0.2, outputPerMillion: 20 },
+  "claude-opus-5": { inputPerMillion: 5, cacheCreationInput5mPerMillion: 6.25, cacheCreationInput1hPerMillion: 10, cacheCreationInputPerMillion: 10, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
   "claude-opus-4-8": { inputPerMillion: 5, cacheCreationInput5mPerMillion: 6.25, cacheCreationInput1hPerMillion: 10, cacheCreationInputPerMillion: 10, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
   "claude-opus-4-8-fast-mode": { inputPerMillion: 10, cacheCreationInput5mPerMillion: 12.5, cacheCreationInput1hPerMillion: 20, cacheCreationInputPerMillion: 12.5, cachedInputPerMillion: 1, outputPerMillion: 50, note: "Claude Opus 4.8 fast mode research preview pricing. Prompt caching multipliers apply on top of fast mode pricing." },
   "claude-opus-4-7": { inputPerMillion: 5, cacheCreationInput5mPerMillion: 6.25, cacheCreationInput1hPerMillion: 10, cacheCreationInputPerMillion: 10, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
@@ -70,7 +78,7 @@ export const defaultPricing: PricingTable = {
   "claude-opus-4-5": { inputPerMillion: 5, cacheCreationInput5mPerMillion: 6.25, cacheCreationInput1hPerMillion: 10, cacheCreationInputPerMillion: 10, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
   "claude-opus-4-1": { inputPerMillion: 15, cacheCreationInput5mPerMillion: 18.75, cacheCreationInput1hPerMillion: 30, cacheCreationInputPerMillion: 30, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
   "claude-opus-4": { inputPerMillion: 15, cacheCreationInput5mPerMillion: 18.75, cacheCreationInput1hPerMillion: 30, cacheCreationInputPerMillion: 30, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
-  "claude-sonnet-5": { inputPerMillion: 2, cacheCreationInput5mPerMillion: 2.5, cacheCreationInput1hPerMillion: 4, cacheCreationInputPerMillion: 4, cachedInputPerMillion: 0.2, outputPerMillion: 10, note: "Anthropic introductory pricing through August 31, 2026. Standard pricing from September 1, 2026 is $3 input / $15 output per 1M tokens." },
+  "claude-sonnet-5": { inputPerMillion: 2, cacheCreationInput5mPerMillion: 2.5, cacheCreationInput1hPerMillion: 4, cacheCreationInputPerMillion: 4, cachedInputPerMillion: 0.2, outputPerMillion: 10, note: "Anthropic made the $2 input / $10 output introductory pricing permanent on August 10, 2026." },
   "claude-sonnet-4-6": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
   "claude-sonnet-4-5": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
   "claude-sonnet-4": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
@@ -81,7 +89,23 @@ export const defaultPricing: PricingTable = {
 const legacyBundledPricing: PricingTable = {
   "gpt-5.6-terra": { inputPerMillion: 2.5, cachedInputPerMillion: 0.25, cacheCreationInputPerMillion: 3.125, outputPerMillion: 15, reasoningOutputPerMillion: 15 },
   "gpt-5.6-luna": { inputPerMillion: 1, cachedInputPerMillion: 0.1, cacheCreationInputPerMillion: 1.25, outputPerMillion: 6, reasoningOutputPerMillion: 6 },
+  "claude-sonnet-5": { inputPerMillion: 2, cacheCreationInput5mPerMillion: 2.5, cacheCreationInput1hPerMillion: 4, cacheCreationInputPerMillion: 4, cachedInputPerMillion: 0.2, outputPerMillion: 10, note: "Anthropic introductory pricing through August 31, 2026. Standard pricing from September 1, 2026 is $3 input / $15 output per 1M tokens." },
 };
+
+// Frozen model IDs from the 0.1.3 full-table settings file. Do not derive these from
+// defaultPricing, since each new release can add rows that the saved file lacks.
+const legacyFullTableModelIds = [
+  "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.5-pro",
+  "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro", "gpt-5.3-codex", "gpt-5.3-codex-spark",
+  "gpt-5.2", "gpt-5.2-chat-latest", "gpt-5.2-codex", "gpt-5.2-pro", "gpt-5.1", "gpt-5.1-chat-latest",
+  "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5", "gpt-5-chat-latest", "gpt-5-codex", "gpt-5-pro",
+  "gpt-5-mini", "gpt-5-nano", "gpt-4.1", "gemini-2.5-pro", "gemini-3-flash", "gemini-3.1-pro",
+  "gemini-3.5-flash", "raptor-mini", "oswe-vscode-prime", "lark", "goldeneye", "mai-code-1-flash",
+  "kimi-k2.7-code", "claude-fable-5", "claude-mythos-5", "claude-opus-4-8", "claude-opus-4-8-fast-mode",
+  "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-6-fast-mode", "claude-opus-4-5", "claude-opus-4-1",
+  "claude-opus-4", "claude-sonnet-5", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-sonnet-4",
+  "claude-haiku-4-5", "claude-3-5-haiku",
+] as const;
 
 export function loadPricingTable(pricingPath?: string): PricingTable {
   if (!pricingPath) {
@@ -107,7 +131,7 @@ export function pricingOverrides(pricing: PricingTable): PricingTable {
 }
 
 function migrateLegacyBundledPricing(stored: PricingTable): PricingTable {
-  const isLegacyFullTable = Object.keys(defaultPricing).every((model) => Object.hasOwn(stored, model));
+  const isLegacyFullTable = legacyFullTableModelIds.every((model) => Object.hasOwn(stored, model));
   if (!isLegacyFullTable) return stored;
 
   const migrated = { ...stored };

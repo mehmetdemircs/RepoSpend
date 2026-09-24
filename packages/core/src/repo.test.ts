@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { groupByDay, groupByHour, groupByModel, groupByRepo, groupBySourceApp } from "./aggregate.js";
 import { calculateCostUsd, defaultPricing } from "./pricing.js";
 import { fallbackWorkspaceRoot, findGitRoot, resolveRepoInfo } from "./repo.js";
-import { isCopilotAliasModel, resolvePricingForModel, versionedFallbackModel, type NormalizedUsage } from "@repospend/types";
+import { findModelPricing, isCopilotAliasModel, resolvePricingForModel, versionedFallbackModel, type NormalizedUsage } from "@repospend/types";
 
 const tempDirs: string[] = [];
 
@@ -332,7 +332,7 @@ describe("pricing and grouping", () => {
     expect(calculateCostUsd(usageFor("claude-mythos-5"), defaultPricing)).toBe(27.2);
   });
 
-  it("prices Claude Sonnet 5 from its current bundled introductory rate card", () => {
+  it("prices Claude Sonnet 5 from its permanent bundled rate card", () => {
     const usage = {
       model: "claude-sonnet-5",
       inputTokens: 1_300_000,
@@ -341,7 +341,7 @@ describe("pricing and grouping", () => {
       outputTokens: 300_000,
       reasoningTokens: 0,
     };
-    // Current introductory pricing: standard input 1M * $2, 1h cache write 0.1M * $4, cache read 0.2M * $0.20, output 0.3M * $10.
+    // Current permanent pricing: standard input 1M * $2, 1h cache write 0.1M * $4, cache read 0.2M * $0.20, output 0.3M * $10.
     expect(calculateCostUsd(usage, defaultPricing)).toBe(5.44);
   });
 
@@ -357,8 +357,8 @@ describe("pricing and grouping", () => {
   });
 
   it("inherits the nearest older known Fable and Mythos versions", () => {
-    expect(versionedFallbackModel("claude-fable-6", Object.keys(defaultPricing))).toBe("claude-fable-5");
-    expect(versionedFallbackModel("claude-mythos-6", Object.keys(defaultPricing))).toBe("claude-mythos-5");
+    expect(versionedFallbackModel("claude-fable-6", Object.keys(defaultPricing))).toBe("claude-fable-5-1");
+    expect(versionedFallbackModel("claude-mythos-6", Object.keys(defaultPricing))).toBe("claude-mythos-5-1");
   });
 
   it("prices GPT-5.6 tiers from their own bundled rate cards", () => {
@@ -378,16 +378,23 @@ describe("pricing and grouping", () => {
 
   it("inherits the nearest older known version for unknown newer models", () => {
     const usageFor = (model: string) => ({ model, inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 });
-    // Unknown Opus 4.9 / Opus 5 fall back to Opus 4.8 ($5/$25 => 7.5), not the pricier Opus 4 base.
+    // Unknown Opus 4.9 falls back to Opus 4.8; unknown Opus 5.6 falls back to Opus 5.5.
     expect(calculateCostUsd(usageFor("claude-opus-4-9"), defaultPricing)).toBe(7.5);
-    expect(calculateCostUsd(usageFor("claude-opus-5"), defaultPricing)).toBe(7.5);
+    expect(calculateCostUsd(usageFor("claude-opus-5-6"), defaultPricing)).toBe(6);
     // Unknown future GPT 5.7 falls back to the newest same-tier GPT 5.6 rate card.
     expect(calculateCostUsd(usageFor("gpt-5.7"), defaultPricing)).toBe(8);
   });
 
   it("reports the inherited source model so the UI can label it", () => {
     expect(resolvePricingForModel("claude-opus-4-9", defaultPricing)).toMatchObject({ sourceModel: "claude-opus-4-8", inherited: true });
+    expect(resolvePricingForModel("claude-opus-5", defaultPricing)).toMatchObject({ sourceModel: "claude-opus-5", inherited: false });
+    expect(resolvePricingForModel("claude-opus-5-6", defaultPricing)).toMatchObject({ sourceModel: "claude-opus-5-5", inherited: true });
     expect(resolvePricingForModel("gpt-5.7", defaultPricing)).toMatchObject({ sourceModel: "gpt-5.6", inherited: true });
+  });
+
+  it("does not silently apply Standard rates to unlisted fast-mode model IDs", () => {
+    expect(findModelPricing("claude-opus-5-5-fast-mode", defaultPricing)).toBeUndefined();
+    expect(findModelPricing("claude-opus-4-7-fast-mode", defaultPricing)).toBeUndefined();
   });
 
   it("only inherits within the same tier and never from a newer version", () => {

@@ -2,6 +2,15 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.1.4
+
+- Add exact Standard API-equivalent rates for GPT-6 Astra, Sol, and Luna, including cached input and cache writes.
+- Add Claude Fable 5.1, Mythos 5.1, Opus 5, and Opus 5.5 rates, including the lower cache-read rates for the newest models.
+- Leave unlisted fast-mode model IDs unpriced instead of silently applying Standard rates.
+- Keep legacy full pricing files eligible for bundled rate updates as new model rows are added, while preserving custom pricing overrides.
+- Correct the Claude Sonnet 5 pricing note to reflect Anthropic's permanent $2 input and $10 output rates.
+- Document the limits of short-context Standard pricing estimates for long-context and other processing modes.
+
 ## 0.1.3
 
 - Correct GPT-5.6 Terra and Luna API-equivalent pricing to the reduced July 30, 2026 OpenAI rates, including cached-input and cache-write rates.

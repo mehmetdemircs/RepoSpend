@@ -388,8 +388,12 @@ export function normalizePricingModelId(model: string): string {
 
 export function claudePricingFamilyModel(model: string, isUsable: (model: string) => boolean = () => true): string | undefined {
   const families = [
+    "claude-fable-5-1",
     "claude-fable-5",
+    "claude-mythos-5-1",
     "claude-mythos-5",
+    "claude-opus-5-5",
+    "claude-opus-5",
     "claude-opus-4-8-fast-mode",
     "claude-opus-4-7",
     "claude-opus-4-6",
@@ -404,8 +408,11 @@ export function claudePricingFamilyModel(model: string, isUsable: (model: string
     "claude-3-5-haiku",
   ];
   const normalized = normalizePricingModelId(model);
-  if (normalized === "claude-opus-4-6-fast-mode") return undefined;
-  return families.find((candidate) => (normalized === candidate || normalized.startsWith(`${candidate}-`) || normalized.startsWith(`${candidate}.`)) && isUsable(candidate));
+  const matchesFamily = (candidate: string) => normalized === candidate || normalized.startsWith(`${candidate}-`) || normalized.startsWith(`${candidate}.`);
+  if (normalized.includes("fast-mode")) {
+    return families.find((candidate) => candidate.includes("fast-mode") && matchesFamily(candidate) && isUsable(candidate));
+  }
+  return families.find((candidate) => matchesFamily(candidate) && isUsable(candidate));
 }
 
 export function copilotPricingFamilyModel(model: string, isUsable: (model: string) => boolean = () => true): string | undefined {
