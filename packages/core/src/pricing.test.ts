@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resolvePricingForModel } from "@repospend/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { calculateCostUsd, defaultPricing, loadPricingTable, pricingOverrides, savePricingTable } from "./pricing.js";
 
@@ -87,5 +88,52 @@ describe("new model pricing", () => {
     expect(calculateCostUsd(usageFor("claude-mythos-5-1"), defaultPricing)).toBe(33.3);
     expect(calculateCostUsd(usageFor("claude-opus-5-5"), defaultPricing)).toBe(13.34);
     expect(calculateCostUsd(usageFor("claude-opus-5-5-20260922"), defaultPricing)).toBe(13.34);
+  });
+});
+
+
+describe("September 28 pricing refresh", () => {
+  const usage = (model: string) => ({ model, inputTokens: 1_300_000, cachedInputTokens: 200_000, cacheCreationInputTokens: 100_000, outputTokens: 300_000, reasoningTokens: 100_000 });
+  it("uses promotional Sol pricing and its alias", () => {
+    expect(calculateCostUsd(usage("gpt-5.6-sol"), defaultPricing)).toBe(12.58);
+    expect(calculateCostUsd(usage("gpt-5.6"), defaultPricing)).toBe(12.58);
+  });
+  it.each(["claude-sonnet-5-5", "claude-sonnet-5.5", "claude-sonnet-5-5-20260928", "copilot/claude-sonnet-5.5"])("resolves %s to the explicit Sonnet 5.5 card", (model) => {
+    expect(resolvePricingForModel(model, defaultPricing).sourceModel).toBe("claude-sonnet-5-5");
+    expect(calculateCostUsd(usage(model), defaultPricing)).toBe(6.44);
+  });
+  it.each([
+    ["gemini-3.6-flash", 2.34], ["gemini-3.7-flash", 2.34], ["gemini-3.8-flash", 2.34],
+    ["mai-code-1.1-flash", 0.704], ["grok-4.5", 4.7], ["grok-4.6", 4.7], ["grok-4.7", 4.7], ["kimi-k3", 9.36],
+  ])("prices Copilot alias %s", (model, cost) => {
+    expect(calculateCostUsd(usage(`copilot/${model}-preview`), defaultPricing)).toBe(cost);
+  });
+  it.each(["claude-opus-5-5-fast-mode", "claude-opus-5.5-fast-mode", "claude-opus-5-5-20260922-fast-mode"])("prices fast cache buckets for %s", (model) => {
+    expect(calculateCostUsd({ model, inputTokens: 1_400_000, cachedInputTokens: 200_000, cacheCreationInputTokens: 200_000, cacheCreationInputTokens5m: 100_000, cacheCreationInputTokens1h: 100_000, outputTokens: 300_000, reasoningTokens: 0 }, defaultPricing)).toBe(22.68);
+  });
+  it("migrates old Sol defaults in a full settings file but preserves custom rates", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "repospend-sol-")); tempDirs.push(dir);
+    const file = path.join(dir, "pricing.json");
+    const oldSol = { inputPerMillion: 5, cachedInputPerMillion: 0.5, cacheCreationInputPerMillion: 6.25, outputPerMillion: 30, reasoningOutputPerMillion: 30 };
+    const oldAlias = { ...oldSol, note: "GPT-5.6 Sol flagship tier. OpenAI preview pricing lists Sol at $5 input / $30 output per 1M tokens, cache writes at 1.25x input, and cache reads at a 90% discount." };
+    savePricingTable(file, { ...defaultPricing, "gpt-5.6-sol": oldSol, "gpt-5.6": oldAlias });
+    expect(loadPricingTable(file)["gpt-5.6-sol"]).toEqual(defaultPricing["gpt-5.6-sol"]);
+    expect(loadPricingTable(file)["gpt-5.6"]).toEqual(defaultPricing["gpt-5.6"]);
+    savePricingTable(file, { "gpt-5.6-sol": oldSol, "gpt-5.6": oldAlias });
+    expect(loadPricingTable(file)["gpt-5.6-sol"]).toEqual(oldSol);
+    expect(loadPricingTable(file)["gpt-5.6"]).toEqual(oldAlias);
+    savePricingTable(file, { ...defaultPricing, "gpt-5.6-sol": { ...oldSol, outputPerMillion: 22 } });
+    expect(loadPricingTable(file)["gpt-5.6-sol"]?.outputPerMillion).toBe(22);
+  });
+});
+
+
+describe("Claude snapshot version matching", () => {
+  it.each([["claude-opus-4-5@20251101", "claude-opus-4-5"], ["claude-haiku-4-5@20251001", "claude-haiku-4-5"], ["claude-opus-4-6[1m]", "claude-opus-4-6"]])("preserves version before a provider suffix in %s", (model, sourceModel) => {
+    expect(resolvePricingForModel(model, defaultPricing).sourceModel).toBe(sourceModel);
+  });
+  it.each([["claude-opus-4-20250514", 22.5, "claude-opus-4"], ["claude-sonnet-4-20250514", 4.5, "claude-sonnet-4"], ["claude-sonnet-5-20260630", 3, "claude-sonnet-5"]])("keeps %s in its own generation", (model, cost, sourceModel) => {
+    expect(calculateCostUsd({ model, inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 }, defaultPricing)).toBe(cost);
+    expect(resolvePricingForModel(model, defaultPricing).sourceModel).toBe(sourceModel);
   });
 });

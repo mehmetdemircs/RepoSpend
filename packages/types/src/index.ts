@@ -380,6 +380,7 @@ export interface ModelPricing {
 export function normalizePricingModelId(model: string): string {
   return model
     .toLowerCase()
+    .replace(/-\d{8}(?=-fast-mode(?:$|-))/, "")
     .replace(/^github_copilot\//, "")
     .replace(/^github-copilot\//, "")
     .replace(/^copilot\//, "")
@@ -392,6 +393,8 @@ export function claudePricingFamilyModel(model: string, isUsable: (model: string
     "claude-fable-5",
     "claude-mythos-5-1",
     "claude-mythos-5",
+    "claude-opus-5-5-fast-mode",
+    "claude-opus-5-fast-mode",
     "claude-opus-5-5",
     "claude-opus-5",
     "claude-opus-4-8-fast-mode",
@@ -400,6 +403,7 @@ export function claudePricingFamilyModel(model: string, isUsable: (model: string
     "claude-opus-4-5",
     "claude-opus-4-1",
     "claude-opus-4",
+    "claude-sonnet-5-5",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
@@ -424,6 +428,9 @@ export function copilotPricingFamilyModel(model: string, isUsable: (model: strin
   if ((normalized === "gemini-3-flash" || normalized.startsWith("gemini-3-flash-")) && isUsable("gemini-3-flash")) return "gemini-3-flash";
   if ((normalized === "gemini-3.1-pro" || normalized.startsWith("gemini-3.1-pro-")) && isUsable("gemini-3.1-pro")) return "gemini-3.1-pro";
   if ((normalized === "gemini-3.5-flash" || normalized.startsWith("gemini-3.5-flash-")) && isUsable("gemini-3.5-flash")) return "gemini-3.5-flash";
+  for (const candidate of ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "grok-4.5", "grok-4.6", "grok-4.7", "mai-code-1.1-flash", "kimi-k3"]) {
+    if ((normalized === candidate || normalized.startsWith(`${candidate}-`)) && isUsable(candidate)) return candidate;
+  }
   if ((normalized === "raptor-mini" || normalized.startsWith("raptor-mini-") || normalized.startsWith("oswe-vscode")) && isUsable("raptor-mini")) return "raptor-mini";
   if ((normalized === "lark" || normalized.startsWith("lark-")) && isUsable("lark")) return "lark";
   if ((normalized === "goldeneye" || normalized.startsWith("goldeneye-")) && isUsable("goldeneye")) return "goldeneye";
@@ -444,7 +451,7 @@ interface ParsedVersionedModel {
 function parseVersionedModel(normalized: string): ParsedVersionedModel | undefined {
   // Fast mode and other special rate cards are intentionally not version-inherited.
   if (normalized.includes("fast-mode")) return undefined;
-  const claude = normalized.match(/^(claude-(?:fable|mythos|opus|sonnet|haiku))-(\d+)(?:-(\d+))?/);
+  const claude = normalized.match(/^(claude-(?:fable|mythos|opus|sonnet|haiku))-(\d+)(?:-(\d{1,2}))?(?!\d)/);
   if (claude) {
     const minor = claude[3] ? Number(claude[3]) : 0;
     return { tier: claude[1]!, version: Number(claude[2]) + minor / 100 };
@@ -477,7 +484,7 @@ export function versionedFallbackModel(model: string, knownModels: string[], isU
 
 export function isCopilotAliasModel(model: string): boolean {
   const normalized = normalizePricingModelId(model);
-  return normalized.startsWith("raptor-mini") || normalized.startsWith("oswe-vscode") || normalized === "lark" || normalized.startsWith("lark-") || normalized.startsWith("goldeneye") || normalized.startsWith("mai-code-1-flash") || normalized.startsWith("kimi-k2.7-code");
+  return normalized.startsWith("raptor-mini") || normalized.startsWith("oswe-vscode") || normalized === "lark" || normalized.startsWith("lark-") || normalized.startsWith("goldeneye") || normalized.startsWith("mai-code-1-flash") || normalized.startsWith("kimi-k2.7-code") || normalized.startsWith("mai-code-1.1-flash") || (normalized === "kimi-k3" || normalized.startsWith("kimi-k3-")) || /^grok-4\.[567](?:$|-)/.test(normalized);
 }
 
 export function positiveRate(value: number | undefined): boolean {

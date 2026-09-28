@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
+import { normalizePricingModelId, type NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
 import { calculateCostUsd, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
 import type { SourceScanWindow } from "./index.js";
@@ -339,11 +339,26 @@ function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options:
     promptTimeline: breakdown.promptTimeline,
     sessionOutcome: inferOutcome(breakdown),
   };
-  const cost = hasTokenBreakdown ? calculateCostUsd(usage, options.pricing) : undefined;
+  const costBuckets = new Map<string | undefined, ClaudeSessionBreakdown>();
+  for (const event of breakdown.usageEvents) {
+    const model = event.model ?? breakdown.model;
+    const normalized = model ? normalizePricingModelId(model) : undefined;
+    // Opus 4.6 ignores fast speed and runs at Standard rates. Other fast requests
+    // require a published fast-mode card rather than inheriting Standard pricing.
+    const pricingModel = normalized && normalizedServiceTier(event.usage.speed) === "fast"
+      && !normalized.includes("fast-mode") && !/^claude-opus-4-6(?:$|-)/.test(normalized)
+      ? `${normalized}-fast-mode` : model;
+    const totals = costBuckets.get(pricingModel) ?? emptyBreakdown();
+    applyUsage(totals, event.usage);
+    costBuckets.set(pricingModel, totals);
+  }
+  const costs = hasTokenBreakdown ? [...costBuckets].map(([model, totals]) => calculateCostUsd({ ...totals, model, reasoningTokens: 0 }, options.pricing)) : [];
+  const cost = costs.length && costs.every((value) => value !== undefined)
+    ? Number(costs.reduce<number>((sum, value) => sum + (value ?? 0), 0).toFixed(6)) : undefined;
   return {
     ...usage,
     estimatedCostUsd: cost,
-    warnings: cost === undefined ? [...usage.warnings, "unknown_pricing"] : usage.warnings,
+    warnings: cost === undefined ? [...usage.warnings, "unknown_pricing", ...(costs.some((value, index) => value === undefined && [...costBuckets.keys()][index]?.includes("fast-mode")) ? ["unknown_fast_mode_pricing"] : [])] : usage.warnings,
   };
 }
 

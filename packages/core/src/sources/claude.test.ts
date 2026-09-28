@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { defaultPricing } from "../pricing.js";
 import { scanClaude } from "./claude.js";
 
 const tempDirs: string[] = [];
@@ -67,7 +68,7 @@ describe("Claude Code adapter", () => {
                 ephemeral_1h_input_tokens: 60_000,
               },
               service_tier: "priority",
-              speed: "fast",
+              speed: "standard",
             },
           },
         }),
@@ -93,7 +94,7 @@ describe("Claude Code adapter", () => {
     expect(result.sessions[0]?.serviceTier).toBe("priority");
     expect(result.sessions[0]?.serviceTierSource).toBe("session_usage");
     expect(result.sessions[0]?.serviceTierConfidence).toBe("high");
-    expect(result.sessions[0]?.sourceMetadata?.claude).toMatchObject({ serviceTiers: ["priority"], speeds: ["fast"], cacheCreationInputTokens5m: 40_000, cacheCreationInputTokens1h: 60_000 });
+    expect(result.sessions[0]?.sourceMetadata?.claude).toMatchObject({ serviceTiers: ["priority"], speeds: ["standard"], cacheCreationInputTokens5m: 40_000, cacheCreationInputTokens1h: 60_000 });
     expect(result.sessions[0]?.estimatedCostUsd).toBe(8.07);
     expect(result.sessions[0]?.messageCount).toBe(2);
     expect(result.sessions[0]?.fileEditCount).toBe(1);
@@ -484,3 +485,52 @@ function withEnv<T>(env: Record<string, string>, callback: () => T): T {
     }
   }
 }
+
+
+describe("Claude speed-aware costs", () => {
+  it("prices Standard and fast turns independently without splitting one same-day session", () => {
+    const claudeHome = makeTempDir();
+    const project = path.join(claudeHome, "projects", "test"); fs.mkdirSync(project, { recursive: true });
+    const rows = ["standard", "fast"].map((speed, index) => ({ type: "assistant", uuid: `speed-${index}`, sessionId: "mixed-speed", timestamp: `2026-09-28T10:00:0${index}.000Z`, cwd: project, message: { id: `message-${index}`, role: "assistant", model: "claude-opus-5-5", content: [{ type: "text", text: "test" }], usage: { input_tokens: 1_000_000, output_tokens: 100_000, speed } } }));
+    fs.writeFileSync(path.join(project, "mixed.jsonl"), rows.map(row => JSON.stringify(row)).join("\n"));
+    const result = scanClaude({ claudeHome, pricing: defaultPricing });
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0]?.estimatedCostUsd).toBe(18);
+    expect(result.sessions[0]?.totalTokens).toBe(2_200_000);
+    expect(result.sessions[0]?.sourceMetadata?.claude).toMatchObject({ speed: "mixed" });
+  });
+  it("keeps cost unknown when a fast turn has no published rate", () => {
+    const claudeHome = makeTempDir(); const project = path.join(claudeHome, "projects", "test"); fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, "unknown.jsonl"), JSON.stringify({ type: "assistant", timestamp: "2026-09-28T10:00:00Z", message: { role: "assistant", model: "claude-opus-5-6", usage: { input_tokens: 1000, output_tokens: 100, speed: "fast" } } }));
+    expect(scanClaude({ claudeHome, pricing: defaultPricing }).sessions[0]?.estimatedCostUsd).toBeUndefined();
+  });
+});
+
+
+describe("Claude fast-mode regression coverage", () => {
+  const record = (model: string, speed: string, timestamp = "2026-09-28T10:00:00Z") => ({ type: "assistant", requestId: `${model}-${speed}-${timestamp}`, timestamp, message: { id: `${model}-${speed}-${timestamp}`, role: "assistant", model, usage: { input_tokens: 1_000_000, cache_read_input_tokens: 200_000, cache_creation_input_tokens: 200_000, cache_creation: { ephemeral_5m_input_tokens: 100_000, ephemeral_1h_input_tokens: 100_000 }, output_tokens: 300_000, speed } } });
+  const scan = (rows: unknown[]) => {
+    const claudeHome = makeTempDir(); const project = path.join(claudeHome, "projects", "test"); fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, "speed.jsonl"), rows.map(row => JSON.stringify(row)).join("\n"));
+    return scanClaude({ claudeHome, pricing: defaultPricing }).sessions;
+  };
+  it("deduplicates dated fast turns and prices both cache TTLs once", () => {
+    const fast = record("claude-opus-5-5-20260922", "fast");
+    const sessions = scan([fast, fast]);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.estimatedCostUsd).toBe(22.68);
+    expect(sessions[0]?.totalTokens).toBe(1_700_000);
+  });
+  it("preserves speed costs across activity days", () => {
+    const sessions = scan([record("claude-opus-5-5", "standard", "2026-09-27T10:00:00Z"), record("claude-opus-5-5", "fast")]);
+    expect(sessions.map(s => s.estimatedCostUsd)).toEqual([11.34, 22.68]);
+  });
+  it("uses Standard rates when Opus 4.6 ignores fast speed", () => {
+    expect(scan([record("claude-opus-4-6", "fast")])[0]?.estimatedCostUsd).toBe(14.225);
+  });
+  it("keeps unsupported Sonnet fast requests visibly unpriced", () => {
+    const session = scan([record("claude-sonnet-4-5", "fast")])[0];
+    expect(session?.estimatedCostUsd).toBeUndefined();
+    expect(session?.warnings).toContain("unknown_fast_mode_pricing");
+  });
+});

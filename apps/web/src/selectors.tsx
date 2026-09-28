@@ -452,6 +452,7 @@ export function readableWarning(warning: string): string {
   if (normalized.startsWith("invalid_token_snapshots")) return "Invalid token snapshots were skipped while counting tokens.";
   if (normalized === "copilot_partial_token_breakdown") return "GitHub Copilot exposed a partial token breakdown for this session.";
   if (normalized === "copilot_duplicate_session_merged") return "Duplicate GitHub Copilot session fragments were merged.";
+  if (normalized === "unknown_fast_mode_pricing") return "This session's API-equivalent cost is unavailable because it includes fast-mode turns without a published rate.";
   if (normalized === "model_inferred_from_import_source") return "Model name was inferred from local import metadata.";
   return warning.replaceAll("_", " ");
 }

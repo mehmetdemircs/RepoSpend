@@ -4,13 +4,19 @@ RepoSpend estimates API-equivalent cost from a local pricing table. The bundled 
 
 The bundled table is seeded from public OpenAI, Anthropic, Google, and GitHub Copilot model references and is expressed as USD per 1M tokens. Pricing changes over time, so treat RepoSpend costs as API-equivalent estimates rather than invoice-grade accounting.
 
-The bundled defaults use currently published standard API prices. Claude Sonnet 5 remains at $2 input and $10 output per 1M tokens because Anthropic made its introductory rate permanent on August 10, 2026.
+The bundled defaults were checked on September 28, 2026 and use published Standard API prices. Claude Sonnet 5.5 has explicit $2 input / $10 output rates with the same cache rates as Sonnet 5. Claude Sonnet 5 remains at $2 input and $10 output per 1M tokens because Anthropic made its introductory rate permanent on August 10, 2026.
 
 GPT-6 Astra, Sol, and Luna use OpenAI's Standard short-context rates. Their long-context requests above 272,000 input tokens use different rates, and local session totals do not identify every request's pricing tier. Fast, batch, and regional processing can also differ from these defaults. RepoSpend keeps the result labeled as an API-equivalent estimate.
 
 Claude Fable 5.1 and Mythos 5.1 retain their predecessor's base rates but have lower cache-read pricing. Claude Opus 5.5 has its own lower base and cache rates. These model rows use Anthropic's global Standard rates.
 
 OpenAI reduced GPT-5.6 pricing effective July 30, 2026. RepoSpend uses $2 input and $12 output per 1M tokens for Terra, and $0.20 input and $1.20 output for Luna. Cached input remains 90% below the uncached input rate, and cache writes are billed at 1.25x the uncached input rate, so Luna's bundled cache-write rate is $0.25 per 1M tokens.
+
+GPT-5.6 Sol and its `gpt-5.6` alias use promotional $4 input, $0.40 cached input, $5 cache writes, and $20 output/reasoning per 1M tokens, available at least through November 21, 2026. Older full bundled pricing files receive this correction; intentionally saved sparse overrides remain unchanged.
+
+Gemini 3.6, 3.7, and 3.8 Flash use GitHub Copilot promotional rates through December 31, 2026. MAI-Code-1.1-Flash, Grok 4.5–4.7, and Kimi K3 have explicit Copilot reference cards. Grok rates use the up-to-200K input tier; longer requests cost more.
+
+Claude transcript `usage.speed: "fast"` selects a fast-mode card per model and speed bucket, preserving accurate estimates for mixed-speed sessions. Opus 5.5 uses $8 input / $40 output, and Opus 5 uses $10 / $50; caching multipliers apply. Unknown fast cards remain unpriced with a visible warning. [Anthropic's current pricing documentation](https://platform.claude.com/docs/en/about-claude/pricing) states that Opus 4.6 ignores fast speed and uses Standard pricing. Regional and account modifiers are not applied.
 
 The Settings page persists only custom or intentionally edited model rows. This lets future bundled rate updates flow through automatically. Older full pricing files are migrated for the GPT-5.6 Terra and Luna reductions when they still contain the previous bundled rates.
 
@@ -61,7 +67,7 @@ sessions that mostly used 5-minute cache writes. RepoSpend prices the buckets
 recorded in the local Claude transcript instead of forcing every cache write into
 one column.
 
-When an exact model id is not present in the pricing table, RepoSpend first tries conservative family matching for known provider naming patterns. For example, a nearby newer Claude Opus 4.x or GPT 5.x variant can inherit the closest older bundled rate so the dashboard stays useful while public rate cards catch up. Inherited rates are labeled in Settings.
+When an exact model id is not present in the pricing table, RepoSpend first tries the closest older version in the same model tier, then conservative family matching for known provider naming patterns. For example, a nearby newer Claude Opus 4.x or GPT 5.x variant can inherit the closest older bundled rate so the dashboard stays useful while public rate cards catch up. Inherited rates are labeled in Settings.
 
 If RepoSpend cannot resolve a usable rate, it still displays token totals and marks cost as unknown. Unknown pricing does not stop scans, dashboard responses, CLI output, or exports.
 

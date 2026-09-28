@@ -2,6 +2,15 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.1.5
+
+- Correct GPT-5.6 Sol and its alias to the current promotional rates, preserving custom pricing overrides.
+- Add explicit Claude Sonnet 5.5 rates and newer Gemini Flash, MAI-Code, Grok, and Kimi Copilot models.
+- Price Claude Opus 4.8, 5, and 5.5 fast-mode usage separately, including mixed-speed sessions and cached token buckets.
+- Keep fast requests without a published rate unpriced rather than inheriting Standard rates.
+- Prevent date-suffixed older Claude model IDs from inheriting newer model prices.
+- Record promotional pricing dates and update model aliases and pricing documentation.
+
 ## 0.1.4
 
 - Add exact Standard API-equivalent rates for GPT-6 Astra, Sol, and Luna, including cached input and cache writes.

@@ -370,8 +370,8 @@ describe("pricing and grouping", () => {
       outputTokens: 300_000,
       reasoningTokens: 100_000,
     });
-    expect(calculateCostUsd(usageFor("gpt-5.6"), defaultPricing)).toBe(17.725);
-    expect(calculateCostUsd(usageFor("gpt-5.6-sol"), defaultPricing)).toBe(17.725);
+    expect(calculateCostUsd(usageFor("gpt-5.6"), defaultPricing)).toBe(12.58);
+    expect(calculateCostUsd(usageFor("gpt-5.6-sol"), defaultPricing)).toBe(12.58);
     expect(calculateCostUsd(usageFor("gpt-5.6-terra"), defaultPricing)).toBe(7.09);
     expect(calculateCostUsd(usageFor("gpt-5.6-luna"), defaultPricing)).toBe(0.709);
   });
@@ -382,7 +382,7 @@ describe("pricing and grouping", () => {
     expect(calculateCostUsd(usageFor("claude-opus-4-9"), defaultPricing)).toBe(7.5);
     expect(calculateCostUsd(usageFor("claude-opus-5-6"), defaultPricing)).toBe(6);
     // Unknown future GPT 5.7 falls back to the newest same-tier GPT 5.6 rate card.
-    expect(calculateCostUsd(usageFor("gpt-5.7"), defaultPricing)).toBe(8);
+    expect(calculateCostUsd(usageFor("gpt-5.7"), defaultPricing)).toBe(6);
   });
 
   it("reports the inherited source model so the UI can label it", () => {
@@ -393,7 +393,7 @@ describe("pricing and grouping", () => {
   });
 
   it("does not silently apply Standard rates to unlisted fast-mode model IDs", () => {
-    expect(findModelPricing("claude-opus-5-5-fast-mode", defaultPricing)).toBeUndefined();
+    expect(findModelPricing("claude-opus-5-6-fast-mode", defaultPricing)).toBeUndefined();
     expect(findModelPricing("claude-opus-4-7-fast-mode", defaultPricing)).toBeUndefined();
   });
 
