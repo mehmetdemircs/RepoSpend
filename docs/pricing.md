@@ -4,9 +4,15 @@ RepoSpend estimates API-equivalent cost from a local pricing table. The bundled 
 
 The bundled table is seeded from public OpenAI, Anthropic, Google, and GitHub Copilot model references and is expressed as USD per 1M tokens. Pricing changes over time, so treat RepoSpend costs as API-equivalent estimates rather than invoice-grade accounting.
 
-The bundled defaults were checked on September 28, 2026 and use published Standard API prices. Claude Sonnet 5.5 has explicit $2 input / $10 output rates with the same cache rates as Sonnet 5. Claude Sonnet 5 remains at $2 input and $10 output per 1M tokens because Anthropic made its introductory rate permanent on August 10, 2026.
+The GPT-6.1 Sol card was checked on September 29, 2026; other bundled defaults were checked on September 28, 2026. Defaults use published Standard API prices. Claude Sonnet 5.5 has explicit $2 input / $10 output rates with the same cache rates as Sonnet 5. Claude Sonnet 5 remains at $2 input and $10 output per 1M tokens because Anthropic made its introductory rate permanent on August 10, 2026.
 
 GPT-6 Astra, Sol, and Luna use OpenAI's Standard short-context rates. Their long-context requests above 272,000 input tokens use different rates, and local session totals do not identify every request's pricing tier. Fast, batch, and regional processing can also differ from these defaults. RepoSpend keeps the result labeled as an API-equivalent estimate.
+
+### GPT-6.1 Sol (September 29, 2026)
+
+The explicit `gpt-6.1-sol` card uses $2 input, $0.10 cached input, $2.50 cache writes, and $10 output/reasoning per 1M tokens, verified against [OpenAI's model reference](https://developers.openai.com/api/docs/models/gpt-6.1-sol) on September 29. GPT-6 Sol remains separate at $0.20 for cached input. Case-insensitive and Copilot-prefixed IDs resolve to the same card; terminal snapshot dates preserve the model generation. Snapshot support is defensive parsing, not a claim that OpenAI publishes those snapshot IDs. Custom exact-ID overrides continue to take precedence.
+
+Above 272K input tokens per request, GPT-6.1 Sol's Standard rates become $4 input, $0.20 cached input, $5 cache writes, and $15 output per 1M tokens. Fast costs twice Standard; Batch and Flex cost half Standard. RepoSpend's default estimate uses Standard short-context pricing because aggregate local usage cannot reliably identify these modifiers for every request. See the [GPT-6.1 Sol pricing and Codex tracking guide](https://repospend.com/guides/gpt-6-1-sol-pricing) for a worked example.
 
 Claude Fable 5.1 and Mythos 5.1 retain their predecessor's base rates but have lower cache-read pricing. Claude Opus 5.5 has its own lower base and cache rates. These model rows use Anthropic's global Standard rates.
 

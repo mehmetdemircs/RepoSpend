@@ -1,4 +1,4 @@
-# RepoSpend
+# RepoSpend — local AI coding cost tracker
 
 RepoSpend is a local-first dashboard for tracking AI coding token usage and API-equivalent spend by repository, session, model, and tool. It supports local Codex, Claude Code, and GitHub Copilot usage data, runs with `npx repospend`, and does not upload prompts, code, transcripts, or usage data.
 
@@ -18,6 +18,18 @@ Project links:
 - GitHub: [https://github.com/mehmetdemircs/RepoSpend](https://github.com/mehmetdemircs/RepoSpend)
 - npm package: [`repospend`](https://www.npmjs.com/package/repospend)
 - AI-readable summary: [docs/llms.txt](docs/llms.txt)
+
+## Model pricing and usage guides
+
+RepoSpend includes explicit **GPT-6.1 Sol** API-equivalent pricing: $2 input,
+$0.10 cached input, $2.50 cache writes, and $10 output per million tokens at
+Standard short-context rates. GPT-6 Sol keeps its separate $0.20 cache-read rate.
+Estimates describe local token usage, not your ChatGPT or Codex subscription bill.
+
+- [GPT-6.1 Sol pricing and Codex cost tracking](https://repospend.com/guides/gpt-6-1-sol-pricing) — caching, a worked estimate, and local repository usage.
+- [The AI coding price war: Claude 5.5 vs GPT-6.1 Sol](https://repospend.com/guides/ai-coding-price-war) — provider rates and cost per successful task.
+- [Pricing methodology and local overrides](docs/pricing.md)
+- [Token accounting: input, caching, output, and reasoning](docs/token-accounting.md)
 
 ```bash
 npx repospend

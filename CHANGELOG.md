@@ -2,6 +2,12 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## 0.1.6
+
+- Add explicit GPT-6.1 Sol Standard API-equivalent pricing, including its lower $0.10 cached-input rate, without changing GPT-6 Sol estimates.
+- Resolve date-suffixed GPT model IDs to the correct generation while preserving custom snapshot overrides, including case-insensitive and provider-prefixed aliases, and unknown fast-mode cards.
+- Add model pricing and Codex usage guide links to the README and AI-readable documentation, with current pricing sources and estimate limits.
+
 ## 0.1.5
 
 - Correct GPT-5.6 Sol and its alias to the current promotional rates, preserving custom pricing overrides.

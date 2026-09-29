@@ -458,7 +458,10 @@ function parseVersionedModel(normalized: string): ParsedVersionedModel | undefin
   }
   // Single-digit major keeps dot-less aliases like "gpt-41" (meaning gpt-4.1) from parsing as
   // version 41; those fall through to the existing alias handling instead.
-  const gpt = normalized.match(/^(gpt)-(\d)(?:\.(\d+))?(-[a-z][a-z0-9-]*)?$/);
+  // Parse snapshot dates only for fallback. Keep normalized session IDs intact so
+  // exact, case-insensitive, and provider-prefixed custom snapshot cards still win.
+  const gptModel = normalized.replace(/-(?:\d{4}-\d{2}-\d{2}|\d{8})$/, "");
+  const gpt = gptModel.match(/^(gpt)-(\d)(?:\.(\d+))?(-[a-z][a-z0-9-]*)?$/);
   if (gpt) {
     const minor = gpt[3] ? Number(gpt[3]) : 0;
     return { tier: `gpt${gpt[4] ?? ""}`, version: Number(gpt[2]) + minor / 100 };

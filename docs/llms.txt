@@ -9,6 +9,8 @@ Canonical URLs:
 - npm: https://www.npmjs.com/package/repospend
 - Package name: repospend
 - Run command: npx repospend
+- GPT-6.1 Sol pricing and Codex tracking: https://repospend.com/guides/gpt-6-1-sol-pricing
+- AI coding price comparison: https://repospend.com/guides/ai-coding-price-war
 
 What RepoSpend is:
 - A local-first AI coding token usage dashboard.
@@ -56,5 +58,6 @@ Positioning:
 - RepoSpend totals can intentionally differ from ccusage or Tokscale because it includes Claude Desktop/local-agent session roots when present, treats cache reads/writes as input sub-buckets, prices Claude cache writes by recorded 5-minute vs 1-hour TTL, and separates Codex visible output from reasoning output.
 
 Cost language:
+- GPT-6.1 Sol has an explicit Standard short-context card: $2 input, $0.10 cached input, $2.50 cache writes, $10 output per million tokens, checked September 29, 2026.
 - RepoSpend shows estimated API-equivalent cost.
 - RepoSpend does not claim to show actual bills, invoices, subscription usage, savings, credits, or account-specific charges.

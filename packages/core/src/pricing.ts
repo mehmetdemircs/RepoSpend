@@ -13,19 +13,21 @@ export const pricingInfo = {
   sourceUrls: [
     { label: "OpenAI pricing reference", url: "https://developers.openai.com/api/docs/pricing" },
     { label: "OpenAI GPT-6 model reference", url: "https://developers.openai.com/api/docs/models" },
+    { label: "OpenAI GPT-6.1 Sol reference", url: "https://developers.openai.com/api/docs/models/gpt-6.1-sol" },
     { label: "OpenAI GPT-5.6 preview pricing", url: "https://openai.com/index/previewing-gpt-5-6-sol/" },
     { label: "OpenAI GPT-5.6 price update", url: "https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/" },
     { label: "Claude pricing reference", url: "https://platform.claude.com/docs/en/about-claude/pricing" },
     { label: "GitHub Copilot model pricing reference", url: "https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" },
   ],
   unit: "USD per 1M tokens",
-  updatedAt: "2026-09-28",
+  updatedAt: "2026-09-29",
   note: "RepoSpend estimates API-equivalent cost from local token counts and public Standard pricing. GPT-6 defaults use short-context rates. Claude transcript fast-mode speeds use explicit published cards. Long-context, other processing modes, regional, and account-specific pricing can differ. This is not your actual bill.",
 };
 
 export const defaultPricing: PricingTable = {
   "gpt-6-astra": { inputPerMillion: 10, cachedInputPerMillion: 1, cacheCreationInputPerMillion: 12.5, outputPerMillion: 50, reasoningOutputPerMillion: 50 },
   "gpt-6-sol": { inputPerMillion: 2, cachedInputPerMillion: 0.2, cacheCreationInputPerMillion: 2.5, outputPerMillion: 10, reasoningOutputPerMillion: 10 },
+  "gpt-6.1-sol": { inputPerMillion: 2, cachedInputPerMillion: 0.1, cacheCreationInputPerMillion: 2.5, outputPerMillion: 10, reasoningOutputPerMillion: 10 },
   "gpt-6-luna": { inputPerMillion: 0.1, cachedInputPerMillion: 0.01, cacheCreationInputPerMillion: 0.125, outputPerMillion: 0.5, reasoningOutputPerMillion: 0.5 },
   "gpt-5.6": { inputPerMillion: 4, cachedInputPerMillion: 0.4, cacheCreationInputPerMillion: 5, outputPerMillion: 20, reasoningOutputPerMillion: 20, note: "GPT-5.6 aliases Sol. Promotional Standard short-context rates are available at least through November 21, 2026: $4 input / $20 output, $0.40 cache reads, and $5 cache writes per 1M tokens." },
   "gpt-5.6-sol": { inputPerMillion: 4, cachedInputPerMillion: 0.4, cacheCreationInputPerMillion: 5, outputPerMillion: 20, reasoningOutputPerMillion: 20, note: "Promotional Standard short-context rates available at least through November 21, 2026." },

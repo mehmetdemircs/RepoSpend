@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolvePricingForModel } from "@repospend/types";
+import { normalizePricingModelId, resolvePricingForModel } from "@repospend/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { calculateCostUsd, defaultPricing, loadPricingTable, pricingOverrides, savePricingTable } from "./pricing.js";
 
@@ -61,6 +61,40 @@ describe("pricing persistence", () => {
     savePricingTable(pricingPath, { "gpt-5.6-luna": override });
 
     expect(loadPricingTable(pricingPath)["gpt-5.6-luna"]).toEqual(override);
+  });
+});
+
+describe("GPT-6.1 Sol pricing", () => {
+  const usage = (model: string) => ({ model, inputTokens: 1_400_000, cachedInputTokens: 200_000, cacheCreationInputTokens: 200_000, outputTokens: 300_000, reasoningTokens: 100_000 });
+
+  it.each(["gpt-6.1-sol", "GPT-6.1-SOL", "copilot/gpt-6.1-sol", "gpt-6.1-sol-2026-09-29", "gpt-6.1-sol-20260929"])("uses the explicit card for %s", (model) => {
+    expect(resolvePricingForModel(model, defaultPricing).sourceModel).toBe("gpt-6.1-sol");
+    expect(calculateCostUsd(usage(model), defaultPricing)).toBe(6.52);
+  });
+
+  it("keeps GPT-6 Sol's original cache rate and inherits the newest same-tier card for future Sol versions", () => {
+    expect(calculateCostUsd(usage("gpt-6-sol"), defaultPricing)).toBe(6.54);
+    expect(resolvePricingForModel("gpt-6.2-sol", defaultPricing)).toMatchObject({ sourceModel: "gpt-6.1-sol", inherited: true });
+    expect(resolvePricingForModel("gpt-6.1-astra", defaultPricing).sourceModel).toBe("gpt-6-astra");
+    expect(calculateCostUsd(usage("gpt-6.1-sol-fast-mode"), defaultPricing)).toBeUndefined();
+  });
+
+  it("adds the new card to saved tables and preserves custom base and snapshot overrides", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "repospend-sol61-"));
+    tempDirs.push(dir);
+    const file = path.join(dir, "pricing.json");
+    const custom = { inputPerMillion: 3, cachedInputPerMillion: 0.3, outputPerMillion: 12 };
+    savePricingTable(file, { "gpt-6-sol": custom });
+    expect(loadPricingTable(file)["gpt-6.1-sol"]).toMatchObject({ inputPerMillion: 2, cachedInputPerMillion: 0.1, cacheCreationInputPerMillion: 2.5, outputPerMillion: 10 });
+    expect(loadPricingTable(file)["gpt-6.1-sol"]).toEqual(defaultPricing["gpt-6.1-sol"]);
+    expect(loadPricingTable(file)["gpt-6-sol"]).toEqual(custom);
+    savePricingTable(file, { "gpt-6.1-sol": custom });
+    expect(loadPricingTable(file)["gpt-6.1-sol"]).toEqual(custom);
+    const snapshot = "gpt-6.1-sol-2026-09-29";
+    for (const model of [snapshot, snapshot.toUpperCase(), `copilot/${snapshot}`, `copilot/${snapshot.toUpperCase()}`]) {
+      expect(resolvePricingForModel(model, { ...defaultPricing, [snapshot]: custom })).toMatchObject({ pricing: custom, sourceModel: snapshot, inherited: false });
+    }
+    expect(normalizePricingModelId(`copilot/${snapshot.toUpperCase()}`)).toBe(snapshot);
   });
 });
 
