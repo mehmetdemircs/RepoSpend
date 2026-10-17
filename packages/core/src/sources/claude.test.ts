@@ -14,6 +14,48 @@ afterEach(() => {
 });
 
 describe("Claude Code adapter", () => {
+  it("emits only one unknown-pricing warning when a request has no model", () => {
+    const claudeHome = makeTempDir();
+    const project = path.join(claudeHome, "projects", "unknown-model");
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, "unknown.jsonl"), JSON.stringify({ type: "assistant", sessionId: "unknown", timestamp: "2026-10-17T10:00:00Z", message: { role: "assistant", usage: { input_tokens: 10, output_tokens: 1 } } }));
+    const result = scanClaude({ claudeHome, pricing: defaultPricing });
+    expect(result.sessions[0]?.warnings.filter((warning) => warning === "unknown_pricing")).toHaveLength(1);
+  });
+
+  it("preserves numeric-string input counts across deduplicated streaming records", () => {
+    const claudeHome = makeTempDir();
+    const project = path.join(claudeHome, "projects", "numeric-input");
+    fs.mkdirSync(project, { recursive: true });
+    const rows = ["5000", "6000"].map((input) => ({ type: "assistant", sessionId: "numeric", requestId: "request", timestamp: "2026-10-17T10:00:00Z", message: { id: "message", role: "assistant", model: "claude-haiku-5-5", usage: { input_tokens: input, output_tokens: 1 } } }));
+    fs.writeFileSync(path.join(project, "numeric.jsonl"), rows.map((row) => JSON.stringify(row)).join("\n"));
+    const result = scanClaude({ claudeHome, pricing: defaultPricing });
+    expect(result.sessions[0]?.inputTokens).toBe(6_000);
+    expect(result.sessions[0]?.estimatedCostUsd).toBe(0.000601);
+  });
+
+  it("keeps Haiku cost unknown when the uncached prompt count is absent", () => {
+    const claudeHome = makeTempDir();
+    const project = path.join(claudeHome, "projects", "partial-haiku");
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, "partial.jsonl"), JSON.stringify({ type: "assistant", sessionId: "partial-haiku", timestamp: "2026-10-17T10:00:00Z", requestId: "partial", message: { id: "partial", role: "assistant", model: "claude-haiku-5-5", usage: { cache_read_input_tokens: 95_000, output_tokens: 1_000 } } }));
+    const result = scanClaude({ claudeHome, pricing: defaultPricing });
+    expect(result.sessions[0]?.estimatedCostUsd).toBeUndefined();
+  });
+
+  it("prices mixed Haiku context tiers per deduplicated request including cached prompt tokens", () => {
+    const claudeHome = makeTempDir();
+    const project = path.join(claudeHome, "projects", "haiku");
+    fs.mkdirSync(project, { recursive: true });
+    const record = (id: string, input: number, cached: number, writes: number) => ({ type: "assistant", sessionId: "haiku", timestamp: "2026-10-17T10:00:00Z", requestId: id, message: { id, role: "assistant", model: "claude-haiku-5-5", usage: { input_tokens: input, cache_read_input_tokens: cached, cache_creation_input_tokens: writes, cache_creation: { ephemeral_5m_input_tokens: writes }, output_tokens: 1_000 } } });
+    const records = [record("one", 60_000, 30_000, 10_000), record("two", 60_000, 30_000, 10_000), record("large", 60_001, 30_000, 10_000)];
+    fs.writeFileSync(path.join(project, "haiku.jsonl"), [...records, records[2]].map((row) => JSON.stringify(row)).join("\n"));
+    const result = scanClaude({ claudeHome, pricing: defaultPricing });
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0]?.inputTokens).toBe(300_001);
+    expect(result.sessions[0]?.estimatedCostUsd).toBe(0.056351);
+  });
+
   it("handles a missing Claude directory gracefully", () => {
     const claudeHome = makeTempDir();
     fs.rmSync(claudeHome, { recursive: true, force: true });

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import type { NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
-import { calculateCostUsd, type PricingTable } from "../pricing.js";
+import { calculateRequestCosts, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
 import type { SourceScanWindow } from "./index.js";
 
@@ -698,12 +698,13 @@ function candidateToUsage(candidate: CursorSessionCandidate, index: number, opti
       },
     },
   };
-  const pricedCost = hasTokenBreakdown ? calculateCostUsd(usage, options.pricing) : undefined;
+  const estimate = hasTokenBreakdown ? calculateRequestCosts([usage], options.pricing) : undefined;
+  const pricedCost = estimate?.costUsd;
   const estimatedCostUsd = pricedCost ?? breakdown.estimatedCostUsd;
   return {
     ...usage,
     estimatedCostUsd,
-    warnings: estimatedCostUsd === undefined ? [...usage.warnings, breakdown.hasEstimatedPromptTokens ? "cursor_cost_not_estimated_from_prompt_tokens" : hasTokenBreakdown ? "unknown_pricing" : "unknown_cost"] : usage.warnings,
+    warnings: estimatedCostUsd === undefined ? [...new Set([...usage.warnings, breakdown.hasEstimatedPromptTokens ? "cursor_cost_not_estimated_from_prompt_tokens" : hasTokenBreakdown ? "unknown_pricing" : "unknown_cost", ...(estimate?.warnings ?? [])])] : usage.warnings,
   };
 }
 

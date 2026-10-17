@@ -2,6 +2,19 @@
 
 All notable changes to RepoSpend will be documented in this file.
 
+## Unreleased
+
+## 0.1.7
+
+- Correct Claude Sonnet 5.5 cache reads to $0.10 per million tokens following the October 7 price reduction, without changing Sonnet 5 or intentional custom overrides.
+- Add Claude Haiku 5.5 pricing for prompts up to and over 100,000 tokens, including both cache-write TTLs. Price deduplicated Claude and Copilot inference requests before summing session costs; leave aggregate-only Haiku usage unpriced when request lengths are unknown.
+- Add Gemini 4 Argon and Copilot aliases at introductory $2 input / $0.10 cached input / $10 output rates, with the November 30 promotion expiry recorded in pricing documentation.
+- Preserve exact custom snapshot cards and migrate unchanged Sonnet 5.5 rows in legacy full-table pricing settings.
+- Sum unrounded request costs before rounding the session estimate to six decimal places.
+- Keep inherited Haiku snapshot edits on the shared base card, expose the higher-tier card alongside used models, and explain missing request context and auxiliary model rates in pricing triage.
+- Preserve Haiku rate-card identity while typing or clearing numeric fields, keep pricing columns compact, and show readable request-pricing diagnostics across repo views.
+- Cache model resolution within each session's cost calculation and preserve tolerated numeric-string Claude input counts during deduplication.
+
 ## 0.1.6
 
 - Add explicit GPT-6.1 Sol Standard API-equivalent pricing, including its lower $0.10 cached-input rate, without changing GPT-6 Sol estimates.

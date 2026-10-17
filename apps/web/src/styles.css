@@ -1962,7 +1962,7 @@ input {
 }
 
 .price-input {
-  width: 124px;
+  width: 100px;
   height: 38px;
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 7px;
@@ -2197,6 +2197,8 @@ input {
   display: grid;
   gap: 4px;
   min-width: 260px;
+  max-width: 280px;
+  overflow-wrap: anywhere;
 }
 
 .pricing-model-meta {

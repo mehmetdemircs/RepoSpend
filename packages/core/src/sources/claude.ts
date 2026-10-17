@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { normalizePricingModelId, type NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
-import { calculateCostUsd, type PricingTable } from "../pricing.js";
+import { calculateRequestCosts, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
 import type { SourceScanWindow } from "./index.js";
 
@@ -339,8 +339,7 @@ function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options:
     promptTimeline: breakdown.promptTimeline,
     sessionOutcome: inferOutcome(breakdown),
   };
-  const costBuckets = new Map<string | undefined, ClaudeSessionBreakdown>();
-  for (const event of breakdown.usageEvents) {
+  const requests = breakdown.usageEvents.map((event) => {
     const model = event.model ?? breakdown.model;
     const normalized = model ? normalizePricingModelId(model) : undefined;
     // Opus 4.6 ignores fast speed and runs at Standard rates. Other fast requests
@@ -348,17 +347,21 @@ function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options:
     const pricingModel = normalized && normalizedServiceTier(event.usage.speed) === "fast"
       && !normalized.includes("fast-mode") && !/^claude-opus-4-6(?:$|-)/.test(normalized)
       ? `${normalized}-fast-mode` : model;
-    const totals = costBuckets.get(pricingModel) ?? emptyBreakdown();
+    const totals = emptyBreakdown();
     applyUsage(totals, event.usage);
-    costBuckets.set(pricingModel, totals);
-  }
-  const costs = hasTokenBreakdown ? [...costBuckets].map(([model, totals]) => calculateCostUsd({ ...totals, model, reasoningTokens: 0 }, options.pricing)) : [];
-  const cost = costs.length && costs.every((value) => value !== undefined)
-    ? Number(costs.reduce<number>((sum, value) => sum + (value ?? 0), 0).toFixed(6)) : undefined;
+    return {
+      model: pricingModel, inputTokens: totals.inputTokens, cachedInputTokens: totals.cachedInputTokens,
+      cacheCreationInputTokens: totals.cacheCreationInputTokens, cacheCreationInputTokens5m: totals.cacheCreationInputTokens5m,
+      cacheCreationInputTokens1h: totals.cacheCreationInputTokens1h, outputTokens: totals.outputTokens,
+      reasoningTokens: 0, requestInputTokens: hasInputTokenCount(event.usage) ? totals.inputTokens : undefined,
+    };
+  });
+  const estimate = hasTokenBreakdown ? calculateRequestCosts(requests, options.pricing) : undefined;
+  const cost = estimate?.costUsd;
   return {
     ...usage,
     estimatedCostUsd: cost,
-    warnings: cost === undefined ? [...usage.warnings, "unknown_pricing", ...(costs.some((value, index) => value === undefined && [...costBuckets.keys()][index]?.includes("fast-mode")) ? ["unknown_fast_mode_pricing"] : [])] : usage.warnings,
+    warnings: cost === undefined ? [...new Set([...usage.warnings, "unknown_pricing", ...(estimate?.warnings ?? []), ...(estimate?.warnings.some((warning) => warning.startsWith("unknown_pricing_model:") && warning.includes("fast-mode")) ? ["unknown_fast_mode_pricing"] : [])])] : usage.warnings,
   };
 }
 
@@ -476,10 +479,15 @@ function occurrenceKey(filePath: string, recordIndex: number): string {
   return `${path.resolve(filePath)}:${recordIndex}`;
 }
 
+function hasInputTokenCount(usage: Record<string, unknown>): boolean {
+  const value = usage.input_tokens;
+  return (typeof value === "number" || (typeof value === "string" && value.trim() !== "")) && Number.isFinite(Number(value)) && Number(value) >= 0;
+}
+
 function cloneUsage(usage: Record<string, unknown>): Record<string, unknown> {
   const cacheCreation = firstObject(usage.cache_creation);
   return {
-    input_tokens: numberValue(usage.input_tokens),
+    input_tokens: hasInputTokenCount(usage) ? numberValue(usage.input_tokens) : undefined,
     cache_read_input_tokens: numberValue(usage.cache_read_input_tokens),
     cache_creation_input_tokens: numberValue(usage.cache_creation_input_tokens),
     cache_creation: cacheCreation
@@ -497,7 +505,7 @@ function cloneUsage(usage: Record<string, unknown>): Record<string, unknown> {
 function mergeUsageMax(target: Record<string, unknown>, usage: Record<string, unknown>): void {
   const targetCacheCreation = firstObject(target.cache_creation) ?? {};
   const usageCacheCreation = firstObject(usage.cache_creation) ?? {};
-  target.input_tokens = Math.max(numberValue(target.input_tokens), numberValue(usage.input_tokens));
+  if (hasInputTokenCount(target) || hasInputTokenCount(usage)) target.input_tokens = Math.max(numberValue(target.input_tokens), numberValue(usage.input_tokens));
   target.cache_read_input_tokens = Math.max(numberValue(target.cache_read_input_tokens), numberValue(usage.cache_read_input_tokens));
   target.cache_creation_input_tokens = Math.max(numberValue(target.cache_creation_input_tokens), numberValue(usage.cache_creation_input_tokens));
   target.cache_creation = {

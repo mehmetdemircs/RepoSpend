@@ -4,7 +4,26 @@ RepoSpend estimates API-equivalent cost from a local pricing table. The bundled 
 
 The bundled table is seeded from public OpenAI, Anthropic, Google, and GitHub Copilot model references and is expressed as USD per 1M tokens. Pricing changes over time, so treat RepoSpend costs as API-equivalent estimates rather than invoice-grade accounting.
 
-The GPT-6.1 Sol card was checked on September 29, 2026; other bundled defaults were checked on September 28, 2026. Defaults use published Standard API prices. Claude Sonnet 5.5 has explicit $2 input / $10 output rates with the same cache rates as Sonnet 5. Claude Sonnet 5 remains at $2 input and $10 output per 1M tokens because Anthropic made its introductory rate permanent on August 10, 2026.
+The October 17, 2026 update checks Claude Haiku 5.5, Sonnet 5.5, and Gemini 4 Argon against provider documentation. The GPT-6.1 Sol card was checked on September 29; the other bundled defaults retain the September 28 snapshot. Defaults use published Standard API prices. Sonnet 5.5 cache reads fell from $0.20 to $0.10 per 1M tokens on October 7; its $2 input, $10 output, $2.50 5-minute writes, and $4 1-hour writes are unchanged. Sonnet 5 retains its $0.20 cache-read rate.
+
+### Claude Haiku 5.5 and request-length pricing
+
+All rates are USD per 1M tokens, using Anthropic's global Standard API prices:
+
+| Prompt length per request | Input | Cache reads | 5m writes | 1h writes | Output |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Up to and including 100,000 tokens | $0.10 | $0.01 | $0.125 | $0.20 | $0.50 |
+| Over 100,000 tokens | $0.50 | $0.05 | $0.625 | $1 | $2.50 |
+
+Prompt length includes uncached input, cache reads, and cache writes. The higher rates apply to the whole qualifying request, not just tokens above 100K. Multiple short requests keep the lower rates even when combined session input exceeds 100K. Claude's deduplicated usage events and Copilot chat/inference records are priced individually, then their unrounded costs are summed before rounding the session estimate once.
+
+Settings exposes `claude-haiku-5-5` for the lower tier and `claude-haiku-5-5-long-context` for the higher tier. The latter is a RepoSpend rate card, not a provider model ID; both can be edited separately. The higher-tier card appears with used Haiku models. Editing an inherited Haiku snapshot updates the shared base card and retains automatic tier selection. Use Add model to intentionally create an exact custom snapshot with flat rates; such overrides remain authoritative. Haiku usage without a known request length (including aggregate-only Copilot, Codex, or experimental Cursor totals) stays unpriced unless an explicit custom flat snapshot card or recorded Cursor cost is available. Pricing triage distinguishes missing request lengths from missing rates and exposes any unpriced auxiliary request models. Unknown fast-mode cards remain unpriced.
+
+These are current API-equivalent rates applied to the selected usage window, not historical date-effective billing. The Sonnet reduction does not claim that pre-October 7 API requests were billed at the new price. Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing), [October 7 announcement](https://www.anthropic.com/claude-haiku-5-5).
+
+### Gemini 4 Argon introductory rates
+
+`gemini-4-argon`, including Copilot-prefixed/suffixed aliases, uses $2 input, $0.10 cached input, and $10 output (including thinking) per 1M tokens through November 30, 2026. Google lists $4 input, $0.20 cached input, and $20 output from December 1. Argon has no explicit cache-write charge. Bundled rates are a verified snapshot: the application does not silently switch prices based on the machine clock. Refresh the table at the promotion boundary or save intentional overrides. Source: [Google's model and pricing guide](https://ai.google.dev/gemini-api/docs/latest-model?hl=en).
 
 GPT-6 Astra, Sol, and Luna use OpenAI's Standard short-context rates. Their long-context requests above 272,000 input tokens use different rates, and local session totals do not identify every request's pricing tier. Fast, batch, and regional processing can also differ from these defaults. RepoSpend keeps the result labeled as an API-equivalent estimate.
 

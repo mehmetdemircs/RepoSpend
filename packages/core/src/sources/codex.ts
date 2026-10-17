@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import type { CommandCategory, CommandIssueClassification, CommandIssueImpact, CommandIssueSample, CommandIssueSeverity, CompactionStats, NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
 import { readJsonCache, writeJsonCache } from "../cache.js";
-import { calculateCostUsd, type PricingTable } from "../pricing.js";
+import { calculateRequestCosts, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
 import { analyzeAgentFriction, type CommandIssue } from "./agent-friction.js";
 import { aggregateTokens, type CodexTokenAggregation } from "./codex-token.js";
@@ -393,12 +393,13 @@ function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<str
     sessionOutcome: inferOutcome(sessionBreakdown),
     compaction: sessionBreakdown.compaction,
   };
-  const cost = hasPricedBreakdown ? calculateCostUsd(usage, options.pricing) : undefined;
+  const estimate = hasPricedBreakdown ? calculateRequestCosts([usage], options.pricing) : undefined;
+  const cost = estimate?.costUsd;
   const costWarnings = hasPricedBreakdown ? warnings : [...warnings, "missing_token_breakdown"];
   return {
     ...usage,
     estimatedCostUsd: cost,
-    warnings: cost === undefined ? [...costWarnings, "unknown_pricing"] : warnings,
+    warnings: cost === undefined ? [...new Set([...costWarnings, "unknown_pricing", ...(estimate?.warnings ?? [])])] : warnings,
   };
 }
 
@@ -469,11 +470,12 @@ function readStandaloneSessions(sessionFiles: Map<string, string>, options: Code
       compaction: breakdown.compaction,
     };
     const hasPricedBreakdown = breakdown.inputTokens + breakdown.cachedInputTokens + breakdown.outputTokens + breakdown.reasoningTokens > 0;
-    const cost = hasPricedBreakdown ? calculateCostUsd(usage, options.pricing) : undefined;
+    const estimate = hasPricedBreakdown ? calculateRequestCosts([usage], options.pricing) : undefined;
+    const cost = estimate?.costUsd;
     return {
       ...usage,
       estimatedCostUsd: cost,
-      warnings: cost === undefined ? [...usage.warnings, hasPricedBreakdown ? "unknown_pricing" : "missing_token_breakdown"] : usage.warnings,
+      warnings: cost === undefined ? [...new Set([...usage.warnings, hasPricedBreakdown ? "unknown_pricing" : "missing_token_breakdown", ...(estimate?.warnings ?? [])])] : usage.warnings,
     };
   });
 }

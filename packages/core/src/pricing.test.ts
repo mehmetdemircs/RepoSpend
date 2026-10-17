@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { normalizePricingModelId, resolvePricingForModel } from "@repospend/types";
 import { afterEach, describe, expect, it } from "vitest";
-import { calculateCostUsd, defaultPricing, loadPricingTable, pricingOverrides, savePricingTable } from "./pricing.js";
+import { calculateCostUsd, calculateRequestCosts, calculateRequestCostsUsd, defaultPricing, loadPricingTable, pricingOverrides, savePricingTable } from "./pricing.js";
 
 const tempDirs: string[] = [];
 
@@ -134,7 +134,7 @@ describe("September 28 pricing refresh", () => {
   });
   it.each(["claude-sonnet-5-5", "claude-sonnet-5.5", "claude-sonnet-5-5-20260928", "copilot/claude-sonnet-5.5"])("resolves %s to the explicit Sonnet 5.5 card", (model) => {
     expect(resolvePricingForModel(model, defaultPricing).sourceModel).toBe("claude-sonnet-5-5");
-    expect(calculateCostUsd(usage(model), defaultPricing)).toBe(6.44);
+    expect(calculateCostUsd(usage(model), defaultPricing)).toBe(6.42);
   });
   it.each([
     ["gemini-3.6-flash", 2.34], ["gemini-3.7-flash", 2.34], ["gemini-3.8-flash", 2.34],
@@ -158,6 +158,71 @@ describe("September 28 pricing refresh", () => {
     expect(loadPricingTable(file)["gpt-5.6"]).toEqual(oldAlias);
     savePricingTable(file, { ...defaultPricing, "gpt-5.6-sol": { ...oldSol, outputPerMillion: 22 } });
     expect(loadPricingTable(file)["gpt-5.6-sol"]?.outputPerMillion).toBe(22);
+  });
+});
+
+describe("October pricing corrections", () => {
+  const usage = (model: string, inputTokens = 100_000) => ({ model, inputTokens, cachedInputTokens: 20_000, cacheCreationInputTokens: 20_000, cacheCreationInputTokens5m: 10_000, cacheCreationInputTokens1h: 10_000, outputTokens: 10_000, reasoningTokens: 0 });
+
+  it.each(["claude-haiku-5-5", "CLAUDE-HAIKU-5.5", "claude-haiku-5-5-20261007", "copilot/claude-haiku-5.5"])("prices %s at the exact 100K boundary and above it", (model) => {
+    expect(resolvePricingForModel(model, defaultPricing).sourceModel).toBe("claude-haiku-5-5");
+    expect(calculateCostUsd(usage(model), defaultPricing, 100_000)).toBe(0.01445);
+    expect(calculateCostUsd(usage(model, 100_001), defaultPricing, 100_001)).toBe(0.072251);
+    expect(calculateCostUsd(usage(model), defaultPricing)).toBeUndefined();
+    expect(calculateCostUsd(usage(`${model}-fast-mode`), defaultPricing, 100_000)).toBeUndefined();
+  });
+
+  it("sums request prices without applying a tier to the session or rounding each request", () => {
+    const requests = Array.from({ length: 100 }, () => ({ ...usage("claude-haiku-5-5", 2), cachedInputTokens: 0, cacheCreationInputTokens: 0, cacheCreationInputTokens5m: 0, cacheCreationInputTokens1h: 0, outputTokens: 0, requestInputTokens: 2 }));
+    expect(calculateRequestCostsUsd(requests, defaultPricing)).toBe(0.00002);
+    expect(calculateRequestCostsUsd([usage("unknown")], defaultPricing)).toBeUndefined();
+    expect(calculateRequestCosts([usage("claude-haiku-5-5")], defaultPricing).warnings).toEqual(["unknown_request_context"]);
+  });
+
+  it("keeps custom snapshot overrides and separately editable long-context rates", () => {
+    const snapshot = "claude-haiku-5-5-20261007";
+    const custom = { inputPerMillion: 7, outputPerMillion: 9 };
+    expect(calculateCostUsd({ ...usage(snapshot), cachedInputTokens: 0, cacheCreationInputTokens: 0, cacheCreationInputTokens5m: 0, cacheCreationInputTokens1h: 0 }, { ...defaultPricing, [snapshot]: custom })).toBe(0.79);
+    expect(calculateCostUsd(usage("claude-haiku-5-5"), { ...defaultPricing, "claude-haiku-5-5-long-context": { ...defaultPricing["claude-haiku-5-5-long-context"]!, outputPerMillion: 3 } }, 100_001)).toBe(0.07725);
+  });
+
+  it("corrects only Sonnet 5.5 and adds Gemini Argon aliases", () => {
+    expect(defaultPricing["claude-sonnet-5-5"]?.cachedInputPerMillion).toBe(0.1);
+    expect(defaultPricing["claude-sonnet-5"]?.cachedInputPerMillion).toBe(0.2);
+    for (const model of ["gemini-4-argon", "copilot/gemini-4-argon-preview"]) {
+      expect(resolvePricingForModel(model, defaultPricing).sourceModel).toBe("gemini-4-argon");
+      expect(calculateCostUsd({ ...usage(model), cacheCreationInputTokens: 0, cacheCreationInputTokens5m: 0, cacheCreationInputTokens1h: 0 }, defaultPricing)).toBe(0.262);
+    }
+  });
+
+  it("migrates stale Sonnet defaults only in legacy full tables and keeps custom rows", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "repospend-october-"));
+    tempDirs.push(directory);
+    const file = path.join(directory, "pricing.json");
+    const oldSonnet = { ...defaultPricing["claude-sonnet-5-5"]!, cachedInputPerMillion: 0.2 };
+    savePricingTable(file, { ...defaultPricing, "claude-sonnet-5-5": oldSonnet });
+    expect(loadPricingTable(file)["claude-sonnet-5-5"]?.cachedInputPerMillion).toBe(0.1);
+    savePricingTable(file, { "claude-sonnet-5-5": oldSonnet });
+    expect(loadPricingTable(file)["claude-sonnet-5-5"]).toEqual(oldSonnet);
+    const custom = { ...oldSonnet, outputPerMillion: 7 };
+    savePricingTable(file, { ...defaultPricing, "claude-sonnet-5-5": custom });
+    expect(loadPricingTable(file)["claude-sonnet-5-5"]).toEqual(custom);
+    expect(pricingOverrides(defaultPricing)).toEqual({});
+  });
+
+  it("does not let an invalid internal context card inherit the base tier", () => {
+    const high = "claude-haiku-5-5-long-context";
+    const pricing = { ...defaultPricing, [high]: { ...defaultPricing[high]!, inputPerMillion: 0 } };
+    expect(resolvePricingForModel(high, pricing).inherited).toBe(false);
+    expect(resolvePricingForModel(high, pricing).sourceModel).not.toBe("claude-haiku-5-5");
+  });
+
+  it("does not fall back to an internal context card or older generation when the base card is invalid", () => {
+    const pricing = { ...defaultPricing, "claude-haiku-5-5": { ...defaultPricing["claude-haiku-5-5"]!, inputPerMillion: 0 } };
+    expect(resolvePricingForModel("claude-haiku-5-5", pricing).sourceModel).not.toBe("claude-haiku-5-5-long-context");
+    expect(calculateCostUsd(usage("claude-haiku-5-5"), pricing)).toBeUndefined();
+    expect(calculateCostUsd(usage("claude-haiku-5-5"), pricing, 100_000)).toBeUndefined();
+    expect(calculateCostUsd(usage("copilot/claude-haiku-5.5-20261007"), pricing)).toBeUndefined();
   });
 });
 

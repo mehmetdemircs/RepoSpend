@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { scanCopilot } from "./copilot.js";
+import { defaultPricing } from "../pricing.js";
 
 const tempDirs: string[] = [];
 
@@ -14,6 +15,59 @@ afterEach(() => {
 });
 
 describe("Copilot adapter", () => {
+  it("reports an unpriced auxiliary event model in a mixed-model conversation", () => {
+    const copilotHome = makeTempDir();
+    fs.mkdirSync(path.join(copilotHome, "otel"));
+    const rows = ["unknown-auxiliary-model", "claude-haiku-5-5"].map((model, index) => ({ type: "span", traceId: `trace-${index}`, spanId: `span-${index}`, name: `chat ${model}`, attributes: { "gen_ai.operation.name": "chat", "gen_ai.conversation.id": "mixed", "gen_ai.response.model": model, "gen_ai.usage.input_tokens": 100, "gen_ai.usage.output_tokens": 1 } }));
+    fs.writeFileSync(path.join(copilotHome, "otel", "mixed.jsonl"), rows.map((row) => JSON.stringify(row)).join("\n"));
+    const result = scanCopilot({ copilotHome, codeUserRoots: [], pricing: defaultPricing });
+    expect(result.sessions[0]?.estimatedCostUsd).toBeUndefined();
+    expect(result.sessions[0]?.warnings).toContain("unknown_pricing_model:unknown-auxiliary-model");
+  });
+
+  it.each(["auto", "copilot/auto"])("prices %s inference records using the recovered VS Code model", (model) => {
+    const copilotHome = makeTempDir();
+    const userRoot = testCodeUserRoot(makeTempDir());
+    const chatRoot = path.join(userRoot, "workspaceStorage", "hinted", "chatSessions");
+    fs.mkdirSync(chatRoot, { recursive: true });
+    fs.mkdirSync(path.join(userRoot, "workspaceStorage", "hinted", "GitHub.copilot-chat"));
+    fs.mkdirSync(path.join(copilotHome, "otel"));
+    fs.writeFileSync(path.join(chatRoot, "hinted.jsonl"), JSON.stringify({ v: { sessionId: "hinted", inputState: { selectedModel: { metadata: { family: "gpt-5-mini" } } } } }));
+    fs.writeFileSync(path.join(copilotHome, "otel", "usage.jsonl"), JSON.stringify({ type: "span", traceId: "hinted", spanId: "chat", name: "chat auto", attributes: { "gen_ai.operation.name": "chat", "gen_ai.conversation.id": "hinted", "gen_ai.response.model": model, "gen_ai.usage.input_tokens": 1_000, "gen_ai.usage.output_tokens": 20 } }));
+    const result = scanCopilot({ copilotHome, codeUserRoots: [userRoot], pricing: defaultPricing });
+    expect(result.sessions[0]?.model).toBe("gpt-5-mini");
+    expect(result.sessions[0]?.estimatedCostUsd).toBe(0.00029);
+  });
+
+  it.each([undefined, -1, "unknown", 50_000])("keeps mixed Haiku sessions unknown when an inference has invalid input %s", (input) => {
+    const copilotHome = makeTempDir();
+    fs.mkdirSync(path.join(copilotHome, "otel"));
+    const records = [100_000, input].map((count, index) => ({ type: "span", traceId: `trace-${index}`, spanId: `span-${index}`, name: "chat claude-haiku-5.5", attributes: { "gen_ai.operation.name": "chat", "gen_ai.conversation.id": "partial", "gen_ai.response.model": "claude-haiku-5.5", "gen_ai.usage.input_tokens": count, "gen_ai.usage.cache_read.input_tokens": 95_000, "gen_ai.usage.output_tokens": 1_000 } }));
+    fs.writeFileSync(path.join(copilotHome, "otel", "usage.jsonl"), records.map((row) => JSON.stringify(row)).join("\n"));
+    expect(scanCopilot({ copilotHome, codeUserRoots: [], pricing: defaultPricing }).sessions[0]?.estimatedCostUsd).toBeUndefined();
+  });
+
+  it("prices Haiku per inference instead of applying the tier to session totals", () => {
+    const copilotHome = makeTempDir();
+    fs.mkdirSync(path.join(copilotHome, "otel"));
+    const records = [100_000, 100_000, 100_001].map((input, index) => ({ type: "span", traceId: `trace-${index}`, spanId: `span-${index}`, name: "chat claude-haiku-5.5", attributes: { "gen_ai.operation.name": "chat", "gen_ai.conversation.id": "haiku", "gen_ai.response.model": "claude-haiku-5.5", "gen_ai.usage.input_tokens": input, "gen_ai.usage.cache_read.input_tokens": 40_000, "gen_ai.usage.output_tokens": 1_000 } }));
+    fs.writeFileSync(path.join(copilotHome, "otel", "usage.jsonl"), records.map((row) => JSON.stringify(row)).join("\n"));
+    const result = scanCopilot({ copilotHome, codeUserRoots: [], pricing: defaultPricing });
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0]?.inputTokens).toBe(300_001);
+    expect(result.sessions[0]?.estimatedCostUsd).toBe(0.048301);
+  });
+
+  it("does not infer a Haiku request tier from an aggregate agent span", () => {
+    const copilotHome = makeTempDir();
+    fs.mkdirSync(path.join(copilotHome, "otel"));
+    fs.writeFileSync(path.join(copilotHome, "otel", "usage.jsonl"), JSON.stringify({ type: "span", traceId: "aggregate", spanId: "agent", name: "invoke_agent Copilot", attributes: { "gen_ai.operation.name": "invoke_agent", "gen_ai.response.model": "claude-haiku-5.5", "gen_ai.usage.input_tokens": 300_000, "gen_ai.usage.output_tokens": 1_000 } }));
+    const result = scanCopilot({ copilotHome, codeUserRoots: [], pricing: defaultPricing });
+    expect(result.sessions[0]?.estimatedCostUsd).toBeUndefined();
+    expect(result.sessions[0]?.warnings).toContain("unknown_pricing");
+    expect(result.sessions[0]?.warnings).toContain("unknown_request_context");
+  });
+
   it("handles a missing Copilot directory gracefully", () => {
     const copilotHome = makeTempDir();
     fs.rmSync(copilotHome, { recursive: true, force: true });

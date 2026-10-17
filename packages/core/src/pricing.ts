@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findModelPricing, type ModelPricing, type NormalizedUsage, type RepoSpendConfig } from "@repospend/types";
+import { isUsableModelPricing, normalizePricingModelId, resolvePricingForModel, type ModelPricing, type NormalizedUsage, type PricingResolution, type RepoSpendConfig } from "@repospend/types";
 
 export type { ModelPricing } from "@repospend/types";
 
@@ -17,10 +17,12 @@ export const pricingInfo = {
     { label: "OpenAI GPT-5.6 preview pricing", url: "https://openai.com/index/previewing-gpt-5-6-sol/" },
     { label: "OpenAI GPT-5.6 price update", url: "https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/" },
     { label: "Claude pricing reference", url: "https://platform.claude.com/docs/en/about-claude/pricing" },
+    { label: "Claude Haiku 5.5 and Sonnet cache update", url: "https://www.anthropic.com/claude-haiku-5-5" },
+    { label: "Gemini 4 Argon pricing", url: "https://ai.google.dev/gemini-api/docs/latest-model?hl=en" },
     { label: "GitHub Copilot model pricing reference", url: "https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" },
   ],
   unit: "USD per 1M tokens",
-  updatedAt: "2026-09-29",
+  updatedAt: "2026-10-17",
   note: "RepoSpend estimates API-equivalent cost from local token counts and public Standard pricing. GPT-6 defaults use short-context rates. Claude transcript fast-mode speeds use explicit published cards. Long-context, other processing modes, regional, and account-specific pricing can differ. This is not your actual bill.",
 };
 
@@ -63,6 +65,7 @@ export const defaultPricing: PricingTable = {
   "gemini-3.6-flash": { inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 3.75, note: "GitHub Copilot promotional rates through December 31, 2026; API-equivalent estimate." },
   "gemini-3.7-flash": { inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 3.75, note: "GitHub Copilot promotional rates through December 31, 2026; API-equivalent estimate." },
   "gemini-3.8-flash": { inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 3.75, note: "GitHub Copilot promotional rates through December 31, 2026; API-equivalent estimate." },
+  "gemini-4-argon": { inputPerMillion: 2, cachedInputPerMillion: 0.1, outputPerMillion: 10, reasoningOutputPerMillion: 10, note: "Introductory rates through November 30, 2026. From December 1: $4 input / $0.20 cached input / $20 output (including thinking) per 1M tokens. No explicit cache-write charge. Bundled prices are a dated snapshot, not an automatic future rate switch." },
   "grok-4.5": { inputPerMillion: 2, cachedInputPerMillion: 0.5, outputPerMillion: 6, note: "GitHub Copilot Standard rates up to 200K input tokens; longer requests use different rates." },
   "grok-4.6": { inputPerMillion: 2, cachedInputPerMillion: 0.5, outputPerMillion: 6, note: "GitHub Copilot Standard rates up to 200K input tokens; longer requests use different rates." },
   "grok-4.7": { inputPerMillion: 2, cachedInputPerMillion: 0.5, outputPerMillion: 6, note: "GitHub Copilot Standard rates up to 200K input tokens; longer requests use different rates." },
@@ -90,16 +93,19 @@ export const defaultPricing: PricingTable = {
   "claude-opus-4-5": { inputPerMillion: 5, cacheCreationInput5mPerMillion: 6.25, cacheCreationInput1hPerMillion: 10, cacheCreationInputPerMillion: 10, cachedInputPerMillion: 0.5, outputPerMillion: 25 },
   "claude-opus-4-1": { inputPerMillion: 15, cacheCreationInput5mPerMillion: 18.75, cacheCreationInput1hPerMillion: 30, cacheCreationInputPerMillion: 30, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
   "claude-opus-4": { inputPerMillion: 15, cacheCreationInput5mPerMillion: 18.75, cacheCreationInput1hPerMillion: 30, cacheCreationInputPerMillion: 30, cachedInputPerMillion: 1.5, outputPerMillion: 75 },
-  "claude-sonnet-5-5": { inputPerMillion: 2, cacheCreationInput5mPerMillion: 2.5, cacheCreationInput1hPerMillion: 4, cacheCreationInputPerMillion: 4, cachedInputPerMillion: 0.2, outputPerMillion: 10 },
+  "claude-sonnet-5-5": { inputPerMillion: 2, cacheCreationInput5mPerMillion: 2.5, cacheCreationInput1hPerMillion: 4, cacheCreationInputPerMillion: 4, cachedInputPerMillion: 0.1, outputPerMillion: 10 },
   "claude-sonnet-5": { inputPerMillion: 2, cacheCreationInput5mPerMillion: 2.5, cacheCreationInput1hPerMillion: 4, cacheCreationInputPerMillion: 4, cachedInputPerMillion: 0.2, outputPerMillion: 10, note: "Anthropic made the $2 input / $10 output introductory pricing permanent on August 10, 2026." },
   "claude-sonnet-4-6": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
   "claude-sonnet-4-5": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
   "claude-sonnet-4": { inputPerMillion: 3, cacheCreationInput5mPerMillion: 3.75, cacheCreationInput1hPerMillion: 6, cacheCreationInputPerMillion: 6, cachedInputPerMillion: 0.3, outputPerMillion: 15 },
   "claude-haiku-4-5": { inputPerMillion: 1, cacheCreationInput5mPerMillion: 1.25, cacheCreationInput1hPerMillion: 2, cacheCreationInputPerMillion: 2, cachedInputPerMillion: 0.1, outputPerMillion: 5 },
+  "claude-haiku-5-5": { inputPerMillion: 0.1, cacheCreationInput5mPerMillion: 0.125, cacheCreationInput1hPerMillion: 0.2, cacheCreationInputPerMillion: 0.2, cachedInputPerMillion: 0.01, outputPerMillion: 0.5, note: "Prompts up to 100,000 input tokens per request, including cache reads and writes. Larger prompts use the separately editable claude-haiku-5-5-long-context card. Aggregate-only usage stays unpriced when request lengths are unknown." },
+  "claude-haiku-5-5-long-context": { inputPerMillion: 0.5, cacheCreationInput5mPerMillion: 0.625, cacheCreationInput1hPerMillion: 1, cacheCreationInputPerMillion: 1, cachedInputPerMillion: 0.05, outputPerMillion: 2.5, note: "RepoSpend pricing card, not a provider model ID. Applied to the whole Haiku 5.5 request when total prompt length exceeds 100,000 tokens." },
   "claude-3-5-haiku": { inputPerMillion: 0.8, cacheCreationInput5mPerMillion: 1, cacheCreationInput1hPerMillion: 1.6, cacheCreationInputPerMillion: 1.6, cachedInputPerMillion: 0.08, outputPerMillion: 4 },
 };
 
 const legacyBundledPricing: PricingTable = {
+  "claude-sonnet-5-5": { inputPerMillion: 2, cacheCreationInput5mPerMillion: 2.5, cacheCreationInput1hPerMillion: 4, cacheCreationInputPerMillion: 4, cachedInputPerMillion: 0.2, outputPerMillion: 10 },
   "gpt-5.6": { inputPerMillion: 5, cachedInputPerMillion: 0.5, cacheCreationInputPerMillion: 6.25, outputPerMillion: 30, reasoningOutputPerMillion: 30, note: "GPT-5.6 Sol flagship tier. OpenAI preview pricing lists Sol at $5 input / $30 output per 1M tokens, cache writes at 1.25x input, and cache reads at a 90% discount." },
   "gpt-5.6-sol": { inputPerMillion: 5, cachedInputPerMillion: 0.5, cacheCreationInputPerMillion: 6.25, outputPerMillion: 30, reasoningOutputPerMillion: 30 },
   "gpt-5.6-terra": { inputPerMillion: 2.5, cachedInputPerMillion: 0.25, cacheCreationInputPerMillion: 3.125, outputPerMillion: 15, reasoningOutputPerMillion: 15 },
@@ -175,12 +181,54 @@ export function repospendHome(): string {
   return process.env.REPOSPEND_HOME || path.join(os.homedir(), ".repospend");
 }
 
-export function calculateCostUsd(usage: Pick<NormalizedUsage, "model" | "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens" | "cacheCreationInputTokens5m" | "cacheCreationInputTokens1h" | "outputTokens" | "reasoningTokens">, pricing: PricingTable): number | undefined {
+type CostUsage = Pick<NormalizedUsage, "model" | "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens" | "cacheCreationInputTokens5m" | "cacheCreationInputTokens1h" | "outputTokens" | "reasoningTokens">;
+
+export function calculateCostUsd(usage: CostUsage, pricing: PricingTable, requestInputTokens?: number): number | undefined {
+  const cost = unroundedCostUsd(usage, pricing, requestInputTokens);
+  return cost === undefined ? undefined : Number((cost + Number.EPSILON).toFixed(6));
+}
+
+export function calculateRequestCostsUsd(requests: Array<CostUsage & { requestInputTokens?: number | undefined }>, pricing: PricingTable): number | undefined {
+  return calculateRequestCosts(requests, pricing).costUsd;
+}
+
+export function calculateRequestCosts(requests: Array<CostUsage & { requestInputTokens?: number | undefined }>, pricing: PricingTable): { costUsd: number | undefined; warnings: string[] } {
+  const resolutions = new Map<string, PricingResolution>();
+  const warnings = new Set<string>();
+  let total = 0;
+  for (const request of requests) {
+    let resolution = request.model ? resolutions.get(request.model) : undefined;
+    if (request.model && !resolution) {
+      resolution = resolvePricingForModel(request.model, pricing);
+      resolutions.set(request.model, resolution);
+    }
+    const cost = unroundedCostUsd(request, pricing, request.requestInputTokens, resolution);
+    if (cost !== undefined) total += cost;
+    else if (request.model && resolution) {
+      const missingContext = needsHaikuContext(request.model, resolution)
+        && (request.requestInputTokens === undefined || !Number.isFinite(request.requestInputTokens) || request.requestInputTokens < 0);
+      warnings.add(missingContext ? "unknown_request_context" : `unknown_pricing_model:${normalizePricingModelId(request.model)}`);
+    } else warnings.add("unknown_pricing");
+  }
+  return { costUsd: requests.length && !warnings.size ? Number((total + Number.EPSILON).toFixed(6)) : undefined, warnings: [...warnings] };
+}
+
+function needsHaikuContext(model: string, resolution: PricingResolution): boolean {
+  return resolution.sourceModel === "claude-haiku-5-5"
+    || (resolution.inherited && /^claude-haiku-5-5(?:$|[-.@[])/.test(normalizePricingModelId(model)));
+}
+
+function unroundedCostUsd(usage: CostUsage, pricing: PricingTable, requestInputTokens?: number, cachedResolution?: PricingResolution): number | undefined {
   if (!usage.model) {
     return undefined;
   }
-  const modelPricing = findModelPricing(usage.model, pricing);
-  if (!modelPricing) {
+  const resolution = cachedResolution ?? resolvePricingForModel(usage.model, pricing);
+  let modelPricing = resolution.pricing;
+  if (needsHaikuContext(usage.model, resolution)) {
+    if (requestInputTokens === undefined || !Number.isFinite(requestInputTokens) || requestInputTokens < 0) return undefined;
+    modelPricing = pricing[requestInputTokens > 100_000 ? "claude-haiku-5-5-long-context" : "claude-haiku-5-5"]!;
+  }
+  if (!isUsableModelPricing(modelPricing)) {
     return undefined;
   }
   const cacheCreationInput5m = usage.cacheCreationInputTokens5m ?? 0;
@@ -203,7 +251,7 @@ export function calculateCostUsd(usage: Pick<NormalizedUsage, "model" | "inputTo
     (unclassifiedCacheCreationInput / 1_000_000) * cacheCreationRate +
     (usage.outputTokens / 1_000_000) * modelPricing.outputPerMillion +
     (usage.reasoningTokens / 1_000_000) * reasoningRate;
-  return Number(cost.toFixed(6));
+  return cost;
 }
 
 function firstPositiveRate(...rates: Array<number | undefined>): number {

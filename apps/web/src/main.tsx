@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { AppWindow, ArrowDownUp, Blocks, Bot, BrainCircuit, Calculator, ChartNoAxesCombined, CircleDollarSign, Code2, Columns3, Command, Copy, Cpu, Database, Download, ExternalLink, Filter, FolderGit2, FolderOpen, Github, GitBranch, Info, LayoutDashboard, LayoutPanelTop, MonitorCog, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings, Sparkles, SquareTerminal, Terminal, TriangleAlert, X } from "lucide-react";
-import { isUsableModelPricing, resolvePricingForModel } from "@repospend/types";
+import { resolvePricingForModel } from "@repospend/types";
 import {
   Bar,
   BarChart,
@@ -113,8 +113,13 @@ import {
   parseTokenAmount,
   polishCostLanguage,
   pricingMissing,
+  pricingEditModel,
+  pricingGapReason,
   pricingProvider,
   pricingRows,
+  pricingRowNote,
+  unpricedModelsFromWarnings,
+  usedPricingModels,
   readableCommandName,
   readableIssueLabel,
   readableWarning,
@@ -2377,6 +2382,9 @@ function repoWarningDetail(warning: string): RepoWarningDetail {
     tone: "info" as const,
     actionLabel: "Review context",
   };
+  if (normalized === "unknown_request_context" || normalized.startsWith("unknown_pricing_model:")) {
+    return { key: warning, title: normalized === "unknown_request_context" ? "Missing request lengths" : "Unpriced request model", detail: readableWarning(warning), category: "pricing", categoryLabel: "Pricing incomplete", tone: "warning", actionLabel: "Pricing review" };
+  }
   if (normalizedText === "expensive session concentration") {
     return { key: warning, title: "Cost concentrated in one session", detail: "One session accounts for most of this repo or folder's estimated API-equivalent cost.", category: "review", categoryLabel: "Needs review", tone: "warning", actionLabel: "Top sessions" };
   }
@@ -3235,7 +3243,6 @@ function SettingsStatusBanner({ data, onRescan }: { data: ApiData; onRescan: () 
   );
 }
 
-type PricingGapReason = "missingPrice" | "missingTokenDetail" | "missingModel" | "other";
 type PricingGapSummary = {
   total: number;
   missingPrice: number;
@@ -3259,7 +3266,7 @@ function PricingGapPanel({ gap, onReviewUnpricedSessions }: { gap: PricingGapSum
             : "Every used model with detailed token data has a usable rate."}
           {" "}
           {gap.missingTokenDetail > 0
-            ? `${count(gap.missingTokenDetail, "session")} are missing detailed token splits, so adding prices will not fix those rows.`
+            ? `${count(gap.missingTokenDetail, "session")} are missing token splits or per-request input lengths; adding rates or rescanning the same records will not recover missing detail.`
             : "No token-split gaps were detected."}
           {" "}
           {gap.other > 0 ? `${count(gap.other, "session")} need session review after the next scan because the model rate looks usable but no cost was produced.` : null}
@@ -3305,7 +3312,9 @@ function pricingGapSummary(sessions: Session[], draft: Record<string, ModelPrici
     const reason = pricingGapReason(session, draft);
     if (reason === "missingPrice") {
       summary.missingPrice += 1;
-      if (session.model) modelIds.add(session.model);
+      const unpriced = unpricedModelsFromWarnings(session.warnings);
+      if (unpriced.length) unpriced.forEach((model) => modelIds.add(model));
+      else if (session.model) modelIds.add(session.model);
     } else if (reason === "missingTokenDetail") {
       summary.missingTokenDetail += 1;
     } else if (reason === "missingModel") {
@@ -3316,23 +3325,6 @@ function pricingGapSummary(sessions: Session[], draft: Record<string, ModelPrici
   }
   summary.missingPriceModels = [...modelIds].sort();
   return summary;
-}
-
-function pricingGapReason(session: Session, draft: Record<string, ModelPricing>): PricingGapReason {
-  if (session.warnings.includes("missing_token_breakdown") || session.warnings.includes("unknown_cost") || session.warnings.includes("cursor_cost_not_estimated_from_prompt_tokens") || session.warnings.includes("copilot_partial_token_breakdown") || !sessionHasDetailedTokenInputs(session)) {
-    return "missingTokenDetail";
-  }
-  const model = session.model?.trim();
-  if (!model || model === "unknown-model") return "missingModel";
-  return isUsableModelPricing(resolvePricingForModel(model, draft).pricing) ? "other" : "missingPrice";
-}
-
-function sessionHasDetailedTokenInputs(session: Session): boolean {
-  return session.inputTokens > 0
-    || session.cachedInputTokens > 0
-    || (session.cacheCreationInputTokens ?? 0) > 0
-    || session.outputTokens > 0
-    || session.reasoningTokens > 0;
 }
 
 function SettingsPricingTab({
@@ -3356,14 +3348,16 @@ function SettingsPricingTab({
   const [search, setSearch] = React.useState("");
   const [providerFilter, setProviderFilter] = React.useState<PricingProviderFilter>("all");
   const [viewFilter, setViewFilter] = React.useState<PricingViewFilter>("used");
-  const usedModels = React.useMemo(() => new Set(data.models.map((model) => model.id)), [data.models]);
+  const warningModels = React.useMemo(() => unpricedModelsFromWarnings(data.sessions.flatMap((session) => session.warnings)), [data.sessions]);
+  const usedModels = React.useMemo(() => usedPricingModels(draft, data.models.map((model) => model.id), warningModels), [draft, data.models, warningModels]);
   const usageCounts = React.useMemo(() => new Map(data.models.map((model) => [model.id, model.sessionCount])), [data.models]);
-  const rows = pricingRows(draft, data.models);
+  const rows = pricingRows(draft, data.models, warningModels);
   const pricingGap = React.useMemo(() => pricingGapSummary(data.sessions, draft), [data.sessions, draft]);
 
   const updatePrice = (model: string, key: keyof ModelPricing, value: string) => {
+    model = pricingEditModel(model, draft);
     const parsed = value === "" ? undefined : Number(value);
-    const basePricing = resolvePricingForModel(model, draft).pricing;
+    const basePricing = Object.hasOwn(draft, model) ? draft[model] : resolvePricingForModel(model, draft).pricing;
     setDraft({
       ...draft,
       [model]: {
@@ -3485,8 +3479,8 @@ function SettingsPricingTab({
                   <div className="pricing-model-cell">
                   <div className="font-medium"><ModelLabel model={row.model} /></div>
                     <div className="pricing-model-meta">
-                      {usedModels.has(row.model) ? `${count(usageCounts.get(row.model) ?? 0, "session")} in current scan` : "Unused in current scan"}
-                      {row.inherited && row.sourceModel ? <span>Uses {row.sourceModel} pricing</span> : null}
+                      {row.model === "claude-haiku-5-5-long-context" ? "Rate card for Haiku 5.5 prompts above 100K" : warningModels.includes(row.model) ? "Unpriced request model in current scan" : usedModels.has(row.model) ? `${count(usageCounts.get(row.model) ?? 0, "session")} in current scan` : "Unused in current scan"}
+                      {pricingRowNote(row, draft) ? <span>{pricingRowNote(row, draft)}</span> : null}
                       {pricingMissing(row) ? <span className="warning-text">Missing price</span> : null}
                     </div>
                   </div>
@@ -3510,6 +3504,8 @@ function SettingsPricingTab({
         </p>
       ) : null}
       <div className="settings-supporting-copy">
+        <p>Haiku 5.5 uses the base card for prompts up to 100K tokens and the separate <code>claude-haiku-5-5-long-context</code> rate card above 100K, selected per request. That second card is a pricing assumption, not a provider model ID. Aggregate-only Haiku usage stays unpriced when request lengths are unknown.</p>
+        <p>Gemini 4 Argon rates are introductory through November 30, 2026. Published December 1 rates are $4 input, $0.20 cached input, and $20 output per million tokens. Bundled rates are a dated snapshot; they do not switch automatically.</p>
         <p>Rates are USD per 1M tokens. Claude cache writes are priced by the TTL recorded in local usage: 5-minute writes use the 5m rate, 1-hour writes use the 1h rate, and unsplit cache writes fall back to the legacy cache-write rate when present. Saving writes local RepoSpend settings under <code>~/.repospend/</code> unless <code>repospend.config.json</code> sets <code>pricingPath</code>.</p>
         {(data.pricing.info.sourceUrls ?? [{ label: data.pricing.info.sourceName, url: data.pricing.info.sourceUrl }]).map((source) => (
           <a className="text-button" href={source.url} key={source.url}>{source.label}</a>
@@ -5633,6 +5629,8 @@ function prioritizeBadges(labels: string[]): string[] {
 function repoWarningBadgeItem(warning: string): WarningBadgeItem {
   const normalized = warning.toLowerCase().replace(/[:_]+/g, " ");
   const title = readableWarning(warning);
+  if (warning.toLowerCase() === "unknown_request_context") return { label: "Missing request lengths", title, tone: "warning" };
+  if (warning.toLowerCase().startsWith("unknown_pricing_model:")) return { label: "Unpriced request model", title, tone: "warning" };
   if (normalized === "expensive session concentration") return { label: "Cost concentration", title, tone: "warning" };
   if (normalized === "failed commands" || normalized === "command issues") return { label: "Possible failed commands", title, tone: "critical" };
   if (normalized === "repo unverified no git root") return { label: "Repo unverified", title, tone: "info" };

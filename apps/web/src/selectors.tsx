@@ -1,6 +1,6 @@
 import React from "react";
 import { CircleDollarSign, FolderGit2, Info, Terminal, TriangleAlert } from "lucide-react";
-import { isCopilotAliasModel, isUsableModelPricing, resolvePricingForModel } from "@repospend/types";
+import { isCopilotAliasModel, isUsableModelPricing, normalizePricingModelId, resolvePricingForModel, versionedFallbackModel } from "@repospend/types";
 import type {
   AgentFrictionRepo,
   ApiData,
@@ -436,6 +436,8 @@ export function sessionBadges(session: Session): string[] {
 
 export function readableWarning(warning: string): string {
   const normalized = warning.toLowerCase();
+  if (normalized === "unknown_request_context") return "This session lacks per-request input lengths, so context-tier pricing cannot be determined. Adding model rates or rescanning the same records will not recover those lengths.";
+  if (normalized.startsWith("unknown_pricing_model:")) return `A request used ${warning.slice("unknown_pricing_model:".length)}, which needs a usable rate in Settings.`;
   if (normalized === "expensive_session_concentration") return "Cost concentration is very high. One session accounts for most of this repo or folder’s estimated cost.";
   if (normalized === "failed commands" || normalized === "command issues") return "Possible failed commands were detected in this repo or folder.";
   if (normalized === "repo_unverified_no_git_root") return "Repo/folder grouping is unverified because no Git root was detected.";
@@ -457,10 +459,50 @@ export function readableWarning(warning: string): string {
   return warning.replaceAll("_", " ");
 }
 
-export function pricingRows(draft: Record<string, ModelPricing>, models: UsageGroup[]): PricingRow[] {
-  const usedModels = models.map((model) => model.id).filter((model) => model !== "unknown-model");
+export function unpricedModelsFromWarnings(warnings: string[]): string[] {
+  return [...new Set(warnings.filter((warning) => warning.startsWith("unknown_pricing_model:")).map((warning) => warning.slice("unknown_pricing_model:".length)).filter(Boolean))];
+}
+
+export function pricingEditModel(model: string, draft: Record<string, ModelPricing>): string {
+  if (Object.hasOwn(draft, model)) return model;
+  const normalized = normalizePricingModelId(model);
+  if (Object.hasOwn(draft, normalized)) return normalized;
+  const inheritsHaiku = /^claude-haiku-5-5(?:$|[-.@[])/.test(normalized) || versionedFallbackModel(normalized, Object.keys(draft)) === "claude-haiku-5-5";
+  return !normalized.includes("fast-mode") && !normalized.includes("-long-context") && inheritsHaiku ? "claude-haiku-5-5" : model;
+}
+
+export function pricingRowNote(row: PricingRow, draft: Record<string, ModelPricing>): string | undefined {
+  const target = pricingEditModel(row.model, draft);
+  if (target === "claude-haiku-5-5") return "Tiered by request length · edits shared base card";
+  if (target !== row.model) return `Edits shared ${target} card`;
+  if (Object.hasOwn(draft, row.model) && versionedFallbackModel(row.model, ["claude-haiku-5-5"]) === "claude-haiku-5-5") return "Explicit custom card · flat rates";
+  return row.inherited && row.sourceModel ? `Uses ${row.sourceModel} pricing` : undefined;
+}
+
+export function usedPricingModels(draft: Record<string, ModelPricing>, modelIds: string[], warningModels: string[] = []): Set<string> {
+  const used = new Set([...modelIds, ...warningModels]);
+  if ([...used].some((model) => pricingEditModel(model, draft) === "claude-haiku-5-5")) used.add("claude-haiku-5-5-long-context");
+  return used;
+}
+
+export function pricingGapReason(session: Session, draft: Record<string, ModelPricing>): "missingPrice" | "missingTokenDetail" | "missingModel" | "other" {
+  if (session.warnings.some((warning) => ["unknown_request_context", "missing_token_breakdown", "unknown_cost", "cursor_cost_not_estimated_from_prompt_tokens", "copilot_partial_token_breakdown"].includes(warning))
+    || !(session.inputTokens > 0 || session.cachedInputTokens > 0 || (session.cacheCreationInputTokens ?? 0) > 0 || session.outputTokens > 0 || session.reasoningTokens > 0)) return "missingTokenDetail";
+  const model = session.model?.trim();
+  if (!model || model === "unknown-model") return "missingModel";
+  if (unpricedModelsFromWarnings(session.warnings).length) return "missingPrice";
+  return isUsableModelPricing(resolvePricingForModel(model, draft).pricing) ? "other" : "missingPrice";
+}
+
+export function pricingRows(draft: Record<string, ModelPricing>, models: UsageGroup[], warningModels: string[] = []): PricingRow[] {
+  const usedModels = [...models.map((model) => model.id), ...warningModels].filter((model) => model !== "unknown-model");
   const modelNames = [...new Set([...usedModels, ...Object.keys(draft).sort()])];
-  return modelNames.map((model) => ({ model, ...resolvePricingForModel(model, draft) }));
+  return modelNames.map((model) => {
+    const resolution = resolvePricingForModel(model, draft);
+    const editModel = pricingEditModel(model, draft);
+    const ownPricing = draft[editModel];
+    return { model, ...resolution, ...(ownPricing ? { pricing: ownPricing, sourceModel: editModel, inherited: editModel !== model } : {}) };
+  });
 }
 
 export function pricingProvider(model: string): Exclude<PricingProviderFilter, "all"> {

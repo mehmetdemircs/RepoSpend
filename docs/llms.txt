@@ -58,6 +58,10 @@ Positioning:
 - RepoSpend totals can intentionally differ from ccusage or Tokscale because it includes Claude Desktop/local-agent session roots when present, treats cache reads/writes as input sub-buckets, prices Claude cache writes by recorded 5-minute vs 1-hour TTL, and separates Codex visible output from reasoning output.
 
 Cost language:
+- October 17, 2026 pricing update: Sonnet 5.5 cache reads are $0.10 per million tokens; Sonnet 5 remains at $0.20.
+- Haiku 5.5 has two per-request prompt-length tiers: input/cache read/output $0.10/$0.01/$0.50 up to 100K, and $0.50/$0.05/$2.50 above 100K. Cache writes have separate 5-minute and 1-hour rates. Unknown request lengths stay unpriced.
+- Gemini 4 Argon introductory input/cache read/output rates are $2/$0.10/$10 through November 30, 2026, then published rates become $4/$0.20/$20. Bundled tables are a dated snapshot, not an automatic future rate switch.
+- Current API-equivalent pricing applied to older usage is not historical billing reconstruction.
 - GPT-6.1 Sol has an explicit Standard short-context card: $2 input, $0.10 cached input, $2.50 cache writes, $10 output per million tokens, checked September 29, 2026.
 - RepoSpend shows estimated API-equivalent cost.
 - RepoSpend does not claim to show actual bills, invoices, subscription usage, savings, credits, or account-specific charges.

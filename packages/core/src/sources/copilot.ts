@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isCopilotAliasModel, normalizePricingModelId, type NormalizedUsage, type PromptTimelineItem, type RepoSpendConfig, type SourceStatus } from "@repospend/types";
-import { calculateCostUsd, type PricingTable } from "../pricing.js";
+import { calculateRequestCosts, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
 import type { SourceScanWindow } from "./index.js";
 
@@ -86,6 +86,7 @@ interface TraceContext {
 }
 
 interface CopilotUsageCandidate {
+  requestInputTokens: number | undefined;
   source: CopilotUsageSource;
   traceId: string | undefined;
   responseId: string | undefined;
@@ -102,6 +103,8 @@ interface CopilotUsageCandidate {
 }
 
 interface CopilotTokenEvent {
+  model?: string | undefined;
+  requestInputTokens?: number | undefined;
   dedupKey: string;
   detailed: boolean;
   inputTokens: number;
@@ -420,6 +423,8 @@ function usageCandidateFromRecord(record: Record<string, unknown>, index: number
   const output = numberValue(attributes["gen_ai.usage.output_tokens"]);
   const cached = numberValue(attributes["gen_ai.usage.cache_read.input_tokens"]);
   const cacheCreation = firstPositiveNumber(attributes, ["gen_ai.usage.cache_write.input_tokens", "gen_ai.usage.cache_creation.input_tokens"]);
+  const rawInput = attributes["gen_ai.usage.input_tokens"];
+  const requestInputTokens = typeof rawInput === "number" && Number.isFinite(rawInput) && rawInput >= cached + cacheCreation ? rawInput : undefined;
   const reasoning = firstPositiveNumber(attributes, ["gen_ai.usage.reasoning.output_tokens", "gen_ai.usage.reasoning_tokens"]);
   const total = firstPositiveNumber(attributes, ["gen_ai.usage.total_tokens", "gen_ai.usage.total.token_count"]);
   const outputWithFallback = output || outputTokensFromTotal(total, input, reasoning);
@@ -437,6 +442,7 @@ function usageCandidateFromRecord(record: Record<string, unknown>, index: number
     model: firstNonEmptyAttr(attributes, modelAttrs) ?? traceContext?.model,
     timestamp,
     durationMs: durationMsFromRecord(record),
+    requestInputTokens,
     inputTokens: input,
     cachedInputTokens: cached,
     cacheCreationInputTokens: cacheCreation,
@@ -509,6 +515,8 @@ function applyCandidate(breakdown: CopilotSessionBreakdown, candidate: CopilotUs
   breakdown.endedAt = maxDate(breakdown.endedAt, candidate.timestamp);
   applyTokenEvent(breakdown, {
     dedupKey: candidate.dedupKey,
+    model: candidate.model,
+    requestInputTokens: candidate.source === "chat_span" || candidate.source === "inference_log" ? candidate.requestInputTokens : undefined,
     detailed: candidate.inputTokens > 0 || candidate.cachedInputTokens > 0 || candidate.cacheCreationInputTokens > 0 || candidate.reasoningTokens > 0,
     inputTokens: candidate.inputTokens,
     cachedInputTokens: candidate.cachedInputTokens,
@@ -632,8 +640,9 @@ function breakdownToUsage(breakdown: CopilotSessionBreakdown, index: number, opt
     fileEditCount: breakdown.fileEditCount,
     sourceMetadata: { copilot: { sourcePaths: breakdown.sourcePaths, surface: breakdown.surface } },
   };
-  const cost = hasPricedBreakdown ? calculateCostUsd(usage, options.pricing) : undefined;
-  return { ...usage, estimatedCostUsd: cost, warnings: hasPricedBreakdown && cost === undefined ? [...usage.warnings, "unknown_pricing"] : usage.warnings };
+  const estimate = hasPricedBreakdown ? calculateRequestCosts(breakdown.tokenEvents.map((event) => ({ ...event, model: normalizeCopilotModel(hasKnownModel(event.model) ? event.model : breakdown.model) })), options.pricing) : undefined;
+  const cost = estimate?.costUsd;
+  return { ...usage, estimatedCostUsd: cost, warnings: hasPricedBreakdown && cost === undefined ? [...new Set([...usage.warnings, "unknown_pricing", ...(estimate?.warnings ?? [])])] : usage.warnings };
 }
 
 function unknownCopilotRepoInfo() {

@@ -409,9 +409,11 @@ export function claudePricingFamilyModel(model: string, isUsable: (model: string
     "claude-sonnet-4-5",
     "claude-sonnet-4",
     "claude-haiku-4-5",
+    "claude-haiku-5-5",
     "claude-3-5-haiku",
   ];
   const normalized = normalizePricingModelId(model);
+  if (normalized.includes("-long-context")) return undefined;
   const matchesFamily = (candidate: string) => normalized === candidate || normalized.startsWith(`${candidate}-`) || normalized.startsWith(`${candidate}.`);
   if (normalized.includes("fast-mode")) {
     return families.find((candidate) => candidate.includes("fast-mode") && matchesFamily(candidate) && isUsable(candidate));
@@ -428,7 +430,7 @@ export function copilotPricingFamilyModel(model: string, isUsable: (model: strin
   if ((normalized === "gemini-3-flash" || normalized.startsWith("gemini-3-flash-")) && isUsable("gemini-3-flash")) return "gemini-3-flash";
   if ((normalized === "gemini-3.1-pro" || normalized.startsWith("gemini-3.1-pro-")) && isUsable("gemini-3.1-pro")) return "gemini-3.1-pro";
   if ((normalized === "gemini-3.5-flash" || normalized.startsWith("gemini-3.5-flash-")) && isUsable("gemini-3.5-flash")) return "gemini-3.5-flash";
-  for (const candidate of ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "grok-4.5", "grok-4.6", "grok-4.7", "mai-code-1.1-flash", "kimi-k3"]) {
+  for (const candidate of ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-4-argon", "grok-4.5", "grok-4.6", "grok-4.7", "mai-code-1.1-flash", "kimi-k3"]) {
     if ((normalized === candidate || normalized.startsWith(`${candidate}-`)) && isUsable(candidate)) return candidate;
   }
   if ((normalized === "raptor-mini" || normalized.startsWith("raptor-mini-") || normalized.startsWith("oswe-vscode")) && isUsable("raptor-mini")) return "raptor-mini";
@@ -450,7 +452,7 @@ interface ParsedVersionedModel {
 // versions are dot-separated with an optional variant suffix (gpt-5.5, gpt-5-mini, gpt-5.1-codex-max).
 function parseVersionedModel(normalized: string): ParsedVersionedModel | undefined {
   // Fast mode and other special rate cards are intentionally not version-inherited.
-  if (normalized.includes("fast-mode")) return undefined;
+  if (normalized.includes("fast-mode") || normalized.includes("-long-context")) return undefined;
   const claude = normalized.match(/^(claude-(?:fable|mythos|opus|sonnet|haiku))-(\d+)(?:-(\d{1,2}))?(?!\d)/);
   if (claude) {
     const minor = claude[3] ? Number(claude[3]) : 0;

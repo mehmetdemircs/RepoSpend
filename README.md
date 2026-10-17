@@ -21,6 +21,14 @@ Project links:
 
 ## Model pricing and usage guides
 
+The 0.1.7 pricing update (October 17) adds Claude Haiku 5.5's two prompt-length tiers,
+reduces Sonnet 5.5 cache reads to $0.10 per million tokens, and adds Gemini 4
+Argon's introductory rates through November 30. Claude and Copilot inference
+records are priced per request; aggregate-only Haiku usage stays unpriced when
+request lengths are unavailable. These are current API-equivalent estimates,
+not historical invoices. See [pricing methodology](docs/pricing.md) for rates,
+promotion dates, and custom overrides.
+
 RepoSpend includes explicit **GPT-6.1 Sol** API-equivalent pricing: $2 input,
 $0.10 cached input, $2.50 cache writes, and $10 output per million tokens at
 Standard short-context rates. GPT-6 Sol keeps its separate $0.20 cache-read rate.
