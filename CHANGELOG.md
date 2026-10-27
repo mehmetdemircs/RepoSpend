@@ -4,6 +4,17 @@ All notable changes to RepoSpend will be documented in this file.
 
 ## Unreleased
 
+## 0.1.8
+
+- Add explicit GPT-6.1 Terra Standard API-equivalent pricing ($1 input / $0.05 cached input / $5 output per 1M) with alias, snapshot, and custom-override handling, and per-request long-context cards for GPT-6/6.1 models: a single request over 272,000 input tokens reprices that request at 2x input/cache rates and 1.5x output rates. The same per-request tiers now cover the GPT-5.x Standard cards (5.6 Sol/Terra/Luna, 5.5, 5.5 Pro, 5.4, 5.4 Pro); mini and nano have no published tier and stay flat.
+- Price each Codex request with the model that was active for it instead of the session's first model, keep per-model token/cost slices on the session for accurate model rollups and filters without duplicating sessions, and fall back to session-level pricing with an explicit `assumed_short_context_rates` / `missing_long_context_pricing` assumption when per-request detail is unavailable.
+- Normalize OpenAI nested cache usage (`input_tokens_details.cached_tokens`, `cache_write_tokens`) and 30-minute/12-hour cache-write TTLs through token aggregation, pricing, exports, and the pricing editor; unclassified writes keep billing at the generic cache-write rate, and the Codex parse cache is versioned (`parse-v2`/`codex-session-v2`) so older cached breakdowns are rebuilt.
+- Protect the local dashboard, JSON, and CSV export endpoints against DNS-rebinding via non-local `Host` headers, while still allowing localhost, `127.0.0.1`, `[::1]`, health checks, and CLI requests without a Host header; no login or auth UX added. Encoded forms of those paths (for example `/api/%64ashboard`) are decoded the same way the router decodes them before the guard runs, so percent-encoded GET and HEAD requests cannot evade the check.
+- Keep intentional flat custom prices for canonical GPT-6/6.1 and tiered GPT-5.x models at request sizes above 272K input tokens instead of silently switching to the bundled long-context card; a user-saved long-context card still re-enables tiered pricing for that model. Settings reads the engine's base→long-context mapping so alias bases such as `gpt-5.6` label their real long-context card correctly, and a shared card is only called "not applied" when every base that maps to it is a custom flat card.
+- Project only the selected models' `modelUsage` slices into filtered accounting — tokens, costs, cache totals, model groups, repo/day/hour summaries, and exports — while preserving one session identity per filtered session, and rank each model's top repository by that model's own slices rather than whole-session spend.
+- Refresh runtime dependencies within approved ranges (Fastify 5.12.7, @fastify/static 10.1.8) and patch transitive audit findings via scoped overrides (find-my-way, fast-uri 3.x, tinypool, postcss, nanoid, js-yaml, brace-expansion, vite 6.4.5 for the test toolchain). The public runtime floor is now Node >=22.12 because @fastify/static 10 requires `content-disposition` 3 (ESM-only) — the packaged CLI and dashboard were verified on Node 22.12.0, and CI checks Node 22.12.0 and 24.
+- Bump Vitest to 3.2.7 and esbuild/sharp to their latest compatible patch releases; remaining audit findings are moderate and limited to Vitest's browser-mode mocker, which RepoSpend does not use.
+
 ## 0.1.7
 
 - Correct Claude Sonnet 5.5 cache reads to $0.10 per million tokens following the October 7 price reduction, without changing Sonnet 5 or intentional custom overrides.

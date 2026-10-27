@@ -4,8 +4,8 @@ RepoSpend is a local-first AI coding usage dashboard. The product promise is rep
 
 ## Current Release
 
-- Version: `0.1.7`
-- Pricing and request-context corrections released October 17, 2026
+- Version: `0.1.8`
+- Request-level Codex model pricing, GPT-6.1 Terra rates, OpenAI cache-write TTLs, and local read hardening released October 27, 2026
 - Scope: early debug release
 - Source clients: Codex, Claude Code, GitHub Copilot, and opt-in experimental Cursor support
 - Server: localhost-only local Fastify API

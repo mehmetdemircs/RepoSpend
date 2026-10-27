@@ -16,7 +16,7 @@ For product context, domain terms, and UX principles, read `CONTEXT.md` first.
 
 ## Environment
 
-- Node `>=20`, pnpm `9.15.9` (pinned via `packageManager` — use corepack: `corepack enable`).
+- Node `>=22.12`, pnpm `9.15.9` (pinned via `packageManager` — use corepack: `corepack enable`).
 - Monorepo is plain pnpm workspaces — no turbo/nx. Root scripts orchestrate packages with `pnpm --filter`/`-r`.
 - `pnpm dev` builds `types`+`core`, then runs server + web in parallel via `pnpm --parallel`.
 

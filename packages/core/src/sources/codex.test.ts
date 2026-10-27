@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { defaultPricing } from "../pricing.js";
 import { scanCodex } from "./codex.js";
 
 const tempDirs: string[] = [];
@@ -587,6 +588,87 @@ describe("Codex adapter", () => {
     expect(result.sessions[0]?.tokenConfidence).toBe("high");
     expect(result.sessions[0]?.tokenSnapshotCount).toBe(3);
     expect(result.sessions[0]?.warnings).toContain("token_direct_usage_ignored_after_cumulative_snapshot");
+  });
+
+  it("prices each request with its active model when a session switches models", () => {
+    const codexHome = makeTempDir();
+    const sessionsDir = path.join(codexHome, "sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionsDir, "rollout-model-switch.jsonl"),
+      [
+        JSON.stringify({ type: "response", model: "gpt-6-astra", usage: { input_tokens: 100_000, output_tokens: 10_000, total_tokens: 110_000 } }),
+        JSON.stringify({ type: "response", model: "gpt-6-sol", usage: { input_tokens: 100_000, output_tokens: 10_000, total_tokens: 110_000 } }),
+      ].join("\n"),
+    );
+
+    const result = scanCodex({ codexHome, pricing: defaultPricing });
+    const session = result.sessions[0];
+
+    // Astra request: 100K*10 + 10K*50 = 1.50; Sol request: 100K*2 + 10K*10 = 0.30.
+    expect(session?.estimatedCostUsd).toBe(1.8);
+    expect(session?.modelUsage).toEqual([
+      expect.objectContaining({ model: "gpt-6-astra", requestCount: 1, inputTokens: 100_000, estimatedCostUsd: 1.5 }),
+      expect.objectContaining({ model: "gpt-6-sol", requestCount: 1, inputTokens: 100_000, estimatedCostUsd: 0.3 }),
+    ]);
+    expect(session?.inputTokens).toBe(200_000);
+  });
+
+  it("prices nested cache-write usage at the request level", () => {
+    const codexHome = makeTempDir();
+    const sessionsDir = path.join(codexHome, "sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionsDir, "rollout-nested-cache.jsonl"),
+      JSON.stringify({
+        type: "response",
+        model: "gpt-6.1-sol",
+        usage: {
+          input_tokens: 15_000,
+          input_tokens_details: { cached_tokens: 12_000, cache_write_tokens: 3_000 },
+          output_tokens: 1_000,
+          total_tokens: 16_000,
+        },
+      }),
+    );
+
+    const result = scanCodex({ codexHome, pricing: defaultPricing });
+    const session = result.sessions[0];
+
+    // Billable input 0; cached 12K*0.1 + unclassified write 3K*2.5 + output 1K*10 = 0.0187.
+    expect(session?.estimatedCostUsd).toBe(0.0187);
+    expect(session?.modelUsage).toEqual([
+      expect.objectContaining({ model: "gpt-6.1-sol", cacheCreationInputTokens: 3_000, cachedInputTokens: 12_000 }),
+    ]);
+  });
+
+  it("flags aggregate fallback instead of inventing per-request sizes for cumulative sessions", () => {
+    const codexHome = makeTempDir();
+    const sessionsDir = path.join(codexHome, "sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionsDir, "rollout-cumulative.jsonl"),
+      [
+        JSON.stringify({
+          type: "session_meta",
+          payload: { id: "cumulative-session", timestamp: "2026-10-20T10:00:00Z", cwd: "/tmp/demo", model: "gpt-6-sol" },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: { total_token_usage: { input_tokens: 200_000, cached_input_tokens: 50_000, output_tokens: 80_000, reasoning_output_tokens: 20_000, total_tokens: 300_000 } },
+          },
+        }),
+      ].join("\n"),
+    );
+
+    const result = scanCodex({ codexHome, pricing: defaultPricing });
+    const session = result.sessions[0];
+
+    expect(session?.tokenAggregationMethod).toBe("final_snapshot");
+    expect(session?.estimatedCostUsd).toBeDefined();
+    expect(session?.warnings).toContain("assumed_short_context_rates:gpt-6-sol");
   });
 
   it("classifies exploratory non-zero commands as harmless", () => {

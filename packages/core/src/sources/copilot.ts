@@ -642,7 +642,7 @@ function breakdownToUsage(breakdown: CopilotSessionBreakdown, index: number, opt
   };
   const estimate = hasPricedBreakdown ? calculateRequestCosts(breakdown.tokenEvents.map((event) => ({ ...event, model: normalizeCopilotModel(hasKnownModel(event.model) ? event.model : breakdown.model) })), options.pricing) : undefined;
   const cost = estimate?.costUsd;
-  return { ...usage, estimatedCostUsd: cost, warnings: hasPricedBreakdown && cost === undefined ? [...new Set([...usage.warnings, "unknown_pricing", ...(estimate?.warnings ?? [])])] : usage.warnings };
+  return { ...usage, estimatedCostUsd: cost, warnings: hasPricedBreakdown && cost === undefined ? [...new Set([...usage.warnings, "unknown_pricing", ...(estimate?.warnings ?? []), ...(estimate?.assumptions ?? [])])] : [...new Set([...usage.warnings, ...(estimate?.assumptions ?? [])])] };
 }
 
 function unknownCopilotRepoInfo() {

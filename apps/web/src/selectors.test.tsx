@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "./app-types";
-import { compactModelLabel, objectsToCsv, pricingEditModel, pricingGapReason, pricingRows, pricingRowNote, readableWarning, sessionDisplayTitle, sessionMatchesSearch, unpricedModelsFromWarnings, usedPricingModels } from "./selectors";
+import { compactModelLabel, modelUsageRows, objectsToCsv, pricingEditModel, pricingGapReason, pricingRows, pricingRowNote, readableWarning, repoModelBreakdown, sessionDisplayTitle, sessionMatchesSearch, unpricedModelsFromWarnings, usedPricingModels } from "./selectors";
 
 describe("web selectors", () => {
   it("edits inherited Haiku snapshots through their base card and keeps explicit overrides", () => {
@@ -110,6 +110,221 @@ describe("web selectors", () => {
     });
 
     expect(sessionDisplayTitle(session)).toBe("Use $ui-ux-pro-max on this screen");
+  });
+
+  it("labels a custom GPT base as a flat card only while its long-context card is untouched", () => {
+    const defaults = {
+      "gpt-6.1-terra": { inputPerMillion: 1, outputPerMillion: 5 },
+      "gpt-6.1-terra-long-context": { inputPerMillion: 2, outputPerMillion: 7.5 },
+      "claude-haiku-5-5": { inputPerMillion: 0.1, outputPerMillion: 0.5 },
+      "claude-haiku-5-5-long-context": { inputPerMillion: 0.5, outputPerMillion: 2.5 },
+    };
+    const row = (model: string, pricing: { inputPerMillion: number; outputPerMillion: number }) => ({ model, pricing, sourceModel: model, inherited: false });
+
+    // Unedited draft: base still tiers through the bundled long-context card.
+    expect(pricingRowNote(row("gpt-6.1-terra", defaults["gpt-6.1-terra"]), { ...defaults }, defaults)).toBe("Tiered by request length · edits shared base card");
+
+    // Custom base + untouched bundled long card: the engine prices flat — the note must say so.
+    const flatDraft = { ...defaults, "gpt-6.1-terra": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    expect(pricingRowNote(row("gpt-6.1-terra", flatDraft["gpt-6.1-terra"]), flatDraft, defaults)).toBe("Custom flat card · long-context card not applied");
+    expect(pricingRowNote(row("gpt-6.1-terra-long-context", defaults["gpt-6.1-terra-long-context"]), flatDraft, defaults)).toBe("Not applied while the base card is a custom flat card");
+
+    // A user-saved long-context card re-enables tiering, so the note stays tiered.
+    const tieredDraft = { ...flatDraft, "gpt-6.1-terra-long-context": { inputPerMillion: 4, outputPerMillion: 16 } };
+    expect(pricingRowNote(row("gpt-6.1-terra", flatDraft["gpt-6.1-terra"]), tieredDraft, defaults)).toBe("Tiered by request length · edits shared base card");
+    expect(pricingRowNote(row("gpt-6.1-terra-long-context", tieredDraft["gpt-6.1-terra-long-context"]), tieredDraft, defaults)).toBeUndefined();
+
+    // Haiku keeps its separately editable tier contract — a custom base still reprices long requests.
+    const haikuDraft = { ...defaults, "claude-haiku-5-5": { inputPerMillion: 0.2, outputPerMillion: 0.5 } };
+    expect(pricingRowNote(row("claude-haiku-5-5", haikuDraft["claude-haiku-5-5"]), haikuDraft, defaults)).toBe("Tiered by request length · edits shared base card");
+    expect(pricingRowNote(row("claude-haiku-5-5-long-context", defaults["claude-haiku-5-5-long-context"]), haikuDraft, defaults)).toBeUndefined();
+
+    // Without bundled defaults supplied the note falls back to the prior label.
+    expect(pricingRowNote(row("gpt-6.1-terra", flatDraft["gpt-6.1-terra"]), flatDraft)).toBe("Tiered by request length · edits shared base card");
+  });
+
+  it("maps alias bases to their engine long-context card across all mapped bases", () => {
+    const defaults = {
+      "gpt-5.6": { inputPerMillion: 4, outputPerMillion: 20 },
+      "gpt-5.6-sol": { inputPerMillion: 4, outputPerMillion: 20 },
+      "gpt-5.6-sol-long-context": { inputPerMillion: 8, outputPerMillion: 30 },
+      "claude-haiku-5-5": { inputPerMillion: 0.1, outputPerMillion: 0.5 },
+      "claude-haiku-5-5-long-context": { inputPerMillion: 0.5, outputPerMillion: 2.5 },
+    };
+    const rules = [
+      { baseModel: "claude-haiku-5-5", longContextModel: "claude-haiku-5-5-long-context", thresholdInputTokens: 100_000 },
+      { baseModel: "gpt-5.6", longContextModel: "gpt-5.6-sol-long-context", thresholdInputTokens: 272_000 },
+      { baseModel: "gpt-5.6-sol", longContextModel: "gpt-5.6-sol-long-context", thresholdInputTokens: 272_000 },
+    ];
+    const row = (model: string, pricing = defaults[model as keyof typeof defaults]) => ({ model, pricing, sourceModel: model, inherited: false });
+    const draft = { ...defaults };
+
+    // Raw gpt-5.6 alias row: engine prices it through the Sol long-context card.
+    expect(pricingRowNote(row("gpt-5.6"), draft, defaults, rules)).toBe("Tiered by request length · edits shared base card");
+    // Used raw alias and dated snapshots surface the actual card under Used models.
+    expect(usedPricingModels(draft, ["gpt-5.6"], [], rules).has("gpt-5.6-sol-long-context")).toBe(true);
+    expect(usedPricingModels(draft, ["gpt-5.6-sol-2026-10-26"], [], rules).has("gpt-5.6-sol-long-context")).toBe(true);
+
+    // A customized alias base is a flat card for its own requests.
+    const aliasFlat = { ...draft, "gpt-5.6": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    expect(pricingRowNote(row("gpt-5.6", aliasFlat["gpt-5.6"]), aliasFlat, defaults, rules)).toBe("Custom flat card · long-context card not applied");
+
+    // One mapped base flat does NOT make the shared card inactive: gpt-5.6-sol still tiers through it.
+    const solFlat = { ...draft, "gpt-5.6-sol": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    expect(pricingRowNote(row("gpt-5.6-sol-long-context"), solFlat, defaults, rules)).toBeUndefined();
+
+    // Only when every mapped base is a custom flat card is the shared card not applied.
+    const allFlat = { ...solFlat, "gpt-5.6": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    expect(pricingRowNote(row("gpt-5.6-sol-long-context"), allFlat, defaults, rules)).toBe("Not applied while the base card is a custom flat card");
+
+    // A custom long-context card re-enables tiering even while both bases are flat.
+    const tiered = { ...allFlat, "gpt-5.6-sol-long-context": { inputPerMillion: 4, outputPerMillion: 16 } };
+    expect(pricingRowNote(row("gpt-5.6-sol-long-context", tiered["gpt-5.6-sol-long-context"]), tiered, defaults, rules)).toBeUndefined();
+    expect(pricingRowNote(row("gpt-5.6-sol", allFlat["gpt-5.6-sol"]), tiered, defaults, rules)).toBe("Tiered by request length · edits shared base card");
+
+    // Haiku keeps its own tier contract through the same mapping.
+    const haikuDraft = { ...draft, "claude-haiku-5-5": { inputPerMillion: 0.2, outputPerMillion: 0.5 } };
+    expect(pricingRowNote(row("claude-haiku-5-5", haikuDraft["claude-haiku-5-5"]), haikuDraft, defaults, rules)).toBe("Tiered by request length · edits shared base card");
+    expect(pricingRowNote(row("claude-haiku-5-5-long-context"), haikuDraft, defaults, rules)).toBeUndefined();
+  });
+
+  it("labels inherited GPT snapshot rows truthfully about exact-ID editing", () => {
+    const defaults = {
+      "gpt-5.6-sol": { inputPerMillion: 4, outputPerMillion: 20 },
+      "gpt-5.6-sol-long-context": { inputPerMillion: 8, outputPerMillion: 30 },
+      "gpt-5.6": { inputPerMillion: 4, outputPerMillion: 20 },
+    };
+    const rules = [
+      { baseModel: "gpt-5.6", longContextModel: "gpt-5.6-sol-long-context", thresholdInputTokens: 272_000 },
+      { baseModel: "gpt-5.6-sol", longContextModel: "gpt-5.6-sol-long-context", thresholdInputTokens: 272_000 },
+    ];
+    const draft = { ...defaults };
+    const dated = "gpt-5.6-sol-2026-07-30";
+    const row = (model: string, sourceModel = model, inherited = false, pricing = draft[model as keyof typeof draft]) => ({ model, pricing, sourceModel, inherited });
+
+    // Editing a dated row writes an exact-ID card (pricingEditModel keeps the raw id),
+    // so the note must not claim a shared tiered edit.
+    expect(pricingEditModel(dated, draft)).toBe(dated);
+    const datedDefault = pricingRows(draft, [{ id: dated } as never], []);
+    expect(pricingRowNote(datedDefault.find((item) => item.model === dated)!, draft, defaults, rules))
+      .toBe("Uses gpt-5.6-sol pricing · tiered · editing creates a flat exact-ID card");
+
+    // A custom flat canonical base makes inherited dated rows flat too.
+    const flatBase = { ...draft, "gpt-5.6-sol": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    expect(pricingRowNote(pricingRows(flatBase, [{ id: dated } as never], []).find((item) => item.model === dated)!, flatBase, defaults, rules))
+      .toBe("Uses gpt-5.6-sol pricing · custom flat · editing creates a flat exact-ID card");
+
+    // Editing the long-context card re-enables tiering for inherited rows.
+    const customLc = { ...flatBase, "gpt-5.6-sol-long-context": { inputPerMillion: 4, outputPerMillion: 16 } };
+    expect(pricingRowNote(pricingRows(customLc, [{ id: dated } as never], []).find((item) => item.model === dated)!, customLc, defaults, rules))
+      .toBe("Uses gpt-5.6-sol pricing · tiered · editing creates a flat exact-ID card");
+
+    // Provider-prefixed used IDs resolve to the shared base and truly edit it.
+    expect(pricingEditModel("copilot/gpt-5.6-sol", draft)).toBe("gpt-5.6-sol");
+    const copilotRow = pricingRows(draft, [{ id: "copilot/gpt-5.6-sol" } as never], []).find((item) => item.model === "copilot/gpt-5.6-sol")!;
+    expect(pricingRowNote(copilotRow, draft, defaults, rules)).toBe("Tiered by request length · edits shared base card");
+
+    // Once edited, the exact card is clearly flat — no shared-tier claim.
+    const exactDraft = { ...draft, [dated]: { inputPerMillion: 1, outputPerMillion: 3 } };
+    expect(pricingEditModel(dated, exactDraft)).toBe(dated);
+    expect(pricingRowNote(row(dated), exactDraft, defaults, rules)).toBe("Explicit custom card · flat rates");
+  });
+
+  it("breaks a mixed-model repo session into its model slices", () => {
+    const slice = (model: string, inputTokens: number, outputTokens: number, estimatedCostUsd: number | undefined) => ({
+      model,
+      requestCount: 1,
+      inputTokens,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens,
+      reasoningTokens: 0,
+      totalTokens: inputTokens + outputTokens,
+      estimatedCostUsd,
+    });
+    const mixed = usage({
+      id: "mixed",
+      model: "gpt-6-astra",
+      inputTokens: 200_000,
+      outputTokens: 20_000,
+      totalTokens: 220_000,
+      estimatedCostUsd: 1.8,
+      modelUsage: [slice("gpt-6-astra", 100_000, 10_000, 1.5), slice("gpt-6-sol", 100_000, 10_000, 0.3)],
+    });
+    const unpriced = usage({
+      id: "unpriced",
+      model: "custom-model",
+      totalTokens: 50,
+      estimatedCostUsd: undefined,
+      modelUsage: [slice("custom-model", 40, 10, undefined)],
+    });
+    const legacy = usage({ id: "legacy", model: "gpt-5", totalTokens: 30, estimatedCostUsd: 0.01 });
+    const repo = { id: "/tmp/repo", label: "repo", estimatedCostUsd: 2.1 } as Parameters<typeof repoModelBreakdown>[1];
+
+    const rows = repoModelBreakdown([mixed, unpriced, legacy], repo);
+    const astra = rows.find((entry) => entry.id === "gpt-6-astra");
+    const sol = rows.find((entry) => entry.id === "gpt-6-sol");
+    const custom = rows.find((entry) => entry.id === "custom-model");
+    const gpt5 = rows.find((entry) => entry.id === "gpt-5");
+    expect(astra?.estimatedCostUsd).toBe(1.5);
+    expect(astra?.totalTokens).toBe(110_000);
+    expect(astra?.sessionCount).toBe(1);
+    expect(sol?.estimatedCostUsd).toBe(0.3);
+    expect(sol?.totalTokens).toBe(110_000);
+    expect(sol?.costShare).toBeCloseTo(0.3 / 2.1, 5);
+    expect(custom?.estimatedCostUsd).toBeUndefined();
+    expect(custom?.totalTokens).toBe(50);
+    expect(gpt5?.estimatedCostUsd).toBe(0.01);
+    expect(gpt5?.totalTokens).toBe(30);
+  });
+
+  it("ranks a model's top repo by that model's slices, not whole-session spend", () => {
+    const slice = (model: string, inputTokens: number, outputTokens: number, estimatedCostUsd: number) => ({
+      model,
+      requestCount: 1,
+      inputTokens,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens,
+      reasoningTokens: 0,
+      totalTokens: inputTokens + outputTokens,
+      estimatedCostUsd,
+    });
+    // Repo A's session is mostly Sol spend; only $0.01 of Astra. Repo B is a small
+    // session that is entirely Astra at $5. Whole-session ranking would wrongly crown A.
+    const repoASession = usage({
+      id: "repo-a-session",
+      repoRoot: "/repos/a",
+      repoName: "repo-a",
+      model: "gpt-6-sol",
+      inputTokens: 9_010,
+      outputTokens: 1_000,
+      totalTokens: 10_010,
+      estimatedCostUsd: 90.01,
+      modelUsage: [slice("gpt-6-sol", 9_000, 990, 90), slice("gpt-6-astra", 10, 10, 0.01)],
+    });
+    const repoBSession = usage({
+      id: "repo-b-session",
+      repoRoot: "/repos/b",
+      repoName: "repo-b",
+      model: "gpt-6-astra",
+      inputTokens: 400,
+      outputTokens: 100,
+      totalTokens: 500,
+      estimatedCostUsd: 5,
+      modelUsage: [slice("gpt-6-astra", 400, 100, 5)],
+    });
+    const data = {
+      repos: [
+        { id: "/repos/a", label: "repo-a", sessionCount: 1, totalTokens: 10_010, estimatedCostUsd: 90.01 },
+        { id: "/repos/b", label: "repo-b", sessionCount: 1, totalTokens: 500, estimatedCostUsd: 5 },
+      ],
+      models: [{ id: "gpt-6-astra", label: "gpt-6-astra", sessionCount: 2, inputTokens: 410, cachedInputTokens: 0, outputTokens: 110, totalTokens: 520, estimatedCostUsd: 5.01 }],
+      sessions: [repoASession, repoBSession],
+    } as unknown as Parameters<typeof modelUsageRows>[0];
+
+    const astra = modelUsageRows(data).find((row) => row.id === "gpt-6-astra");
+    expect(astra?.topRepo?.id).toBe("/repos/b");
   });
 });
 

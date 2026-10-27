@@ -15,6 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    strategy:
+      matrix:
+        # Public runtime floor is Node >=22.12 per package.json engines; also verify
+        # the current line used by publish.yml.
+        node-version: ["22.12.0", "24"]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,7 +33,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
 
       - name: Install dependencies

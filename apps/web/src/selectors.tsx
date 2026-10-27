@@ -8,6 +8,7 @@ import type {
   BreakdownTab,
   InsightItem,
   ModelPricing,
+  PricingContextRule,
   ModelSortKey,
   ModelUsageRow,
   PricingProviderFilter,
@@ -161,12 +162,15 @@ export function repoRowsFromGroup(repo: UsageGroup, sessions: Session[]): RepoRo
 export function modelUsageRows(data: ApiData): ModelUsageRow[] {
   const repos = repoRows(data);
   return data.models.filter((model) => model.sessionCount > 0 || model.totalTokens > 0 || model.estimatedCostUsd !== undefined).map((model) => {
-    const sessions = data.sessions.filter((session) => (session.model ?? "unknown-model") === model.id);
+    const sessions = data.sessions.filter((session) => {
+      const models = session.modelUsage?.length ? session.modelUsage.map((entry) => entry.model ?? "unknown-model") : [session.model ?? "unknown-model"];
+      return models.includes(model.id);
+    });
     const topRepo = repos
       .map((repo) => ({
         repo,
-        cost: sessions.filter((session) => session.repoRoot === repo.id).reduce((sum, session) => sum + (session.estimatedCostUsd ?? 0), 0),
-        tokens: sessions.filter((session) => session.repoRoot === repo.id).reduce((sum, session) => sum + session.totalTokens, 0),
+        cost: sessions.filter((session) => session.repoRoot === repo.id).reduce((sum, session) => sum + (modelSliceTotals(session, model.id).cost ?? 0), 0),
+        tokens: sessions.filter((session) => session.repoRoot === repo.id).reduce((sum, session) => sum + modelSliceTotals(session, model.id).tokens, 0),
       }))
       .filter((item) => item.tokens > 0 || item.cost > 0)
       .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens)[0]?.repo;
@@ -180,6 +184,20 @@ export function modelUsageRows(data: ApiData): ModelUsageRow[] {
       latestSession,
     };
   }).sort((a, b) => nullableNumber(b.estimatedCostUsd) - nullableNumber(a.estimatedCostUsd) || b.totalTokens - a.totalTokens || a.label.localeCompare(b.label));
+}
+
+// Cost/token totals for just one model inside a session. Sessions with per-model
+// slices contribute only the matching slice; sessions without a breakdown fall back
+// to whole-session totals.
+function modelSliceTotals(session: Session, modelId: string): { cost: number | undefined; tokens: number } {
+  if (session.modelUsage?.length) {
+    const slices = session.modelUsage.filter((entry) => (entry.model ?? "unknown-model") === modelId);
+    return {
+      cost: slices.every((entry) => entry.estimatedCostUsd !== undefined) ? slices.reduce((sum, entry) => sum + (entry.estimatedCostUsd ?? 0), 0) : undefined,
+      tokens: slices.reduce((sum, entry) => sum + entry.totalTokens, 0),
+    };
+  }
+  return { cost: session.estimatedCostUsd, tokens: session.totalTokens };
 }
 
 export function modelProviderLabel(model: string): string {
@@ -303,12 +321,16 @@ export function repoModelBreakdown(sessions: Session[], repo: RepoRow): RepoMode
   const rows = new Map<string, RepoModelSpend>();
   const totalCost = repo.estimatedCostUsd ?? sessions.reduce((sum, session) => sum + (session.estimatedCostUsd ?? 0), 0);
   for (const session of sessions) {
-    const id = session.model ?? "unknown-model";
-    const row = rows.get(id) ?? { id, label: session.model ?? "Model not recorded", sessionCount: 0, totalTokens: 0, estimatedCostUsd: undefined, costShare: 0 };
-    row.sessionCount += 1;
-    row.totalTokens += session.totalTokens;
-    if (session.estimatedCostUsd !== undefined) row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + session.estimatedCostUsd).toFixed(6));
-    rows.set(id, row);
+    // Sessions with request-level attribution contribute each model's own slice;
+    // sessions without a breakdown fall back to the session-level model and totals.
+    for (const slice of session.modelUsage?.length ? session.modelUsage : [{ model: session.model, totalTokens: session.totalTokens, estimatedCostUsd: session.estimatedCostUsd }]) {
+      const id = slice.model ?? "unknown-model";
+      const row = rows.get(id) ?? { id, label: slice.model ?? "Model not recorded", sessionCount: 0, totalTokens: 0, estimatedCostUsd: undefined, costShare: 0 };
+      row.sessionCount += 1;
+      row.totalTokens += slice.totalTokens;
+      if (slice.estimatedCostUsd !== undefined) row.estimatedCostUsd = Number(((row.estimatedCostUsd ?? 0) + slice.estimatedCostUsd).toFixed(6));
+      rows.set(id, row);
+    }
   }
   return [...rows.values()]
     .map((row) => ({ ...row, costShare: totalCost > 0 && row.estimatedCostUsd !== undefined ? row.estimatedCostUsd / totalCost : 0 }))
@@ -471,17 +493,69 @@ export function pricingEditModel(model: string, draft: Record<string, ModelPrici
   return !normalized.includes("fast-mode") && !normalized.includes("-long-context") && inheritsHaiku ? "claude-haiku-5-5" : model;
 }
 
-export function pricingRowNote(row: PricingRow, draft: Record<string, ModelPricing>): string | undefined {
+export function pricingRowNote(row: PricingRow, draft: Record<string, ModelPricing>, defaults?: Record<string, ModelPricing>, contextRules?: PricingContextRule[]): string | undefined {
   const target = pricingEditModel(row.model, draft);
-  if (target === "claude-haiku-5-5") return "Tiered by request length · edits shared base card";
+  // Prefer the engine's base→long-context mapping (serialized in the pricing
+  // response): alias bases such as gpt-5.6 price at gpt-5.6-sol-long-context,
+  // which a `${target}-long-context` naming heuristic would miss.
+  const sourceModel = resolvePricingForModel(target, draft).sourceModel;
+  const rule = contextRules?.find((candidate) => candidate.baseModel === sourceModel);
+  const longContextModel = rule?.longContextModel ?? `${target}-long-context`;
+  if (rule && target === row.model && row.model !== rule.baseModel) {
+    // Inherited GPT variant (dated snapshot, compact date, provider prefix) whose
+    // edit target is its own exact ID: current rates come from the canonical base
+    // card, but editing writes a separate flat exact-ID card — say both.
+    const baseFlat = Boolean(defaults && draft[rule.baseModel] && defaults[rule.baseModel]
+      && !samePricingRow(draft[rule.baseModel], defaults[rule.baseModel])
+      && samePricingRow(draft[rule.longContextModel], defaults[rule.longContextModel]));
+    return `Uses ${rule.baseModel} pricing · ${baseFlat ? "custom flat" : "tiered"} · editing creates a flat exact-ID card`;
+  }
+  if (target === "claude-haiku-5-5" || Object.hasOwn(draft, longContextModel)) {
+    // Mirrors the GPT-only canonical flat-override rule in requestContextPricing: a
+    // customized base card with an untouched bundled long-context card is priced flat
+    // at every request size, so "tiered" would be untruthful. Haiku is excluded — its
+    // base and long-context cards stay independently tiered.
+    if (target !== "claude-haiku-5-5" && defaults && !samePricingRow(draft[target], defaults[target]) && samePricingRow(draft[longContextModel], defaults[longContextModel])) {
+      return "Custom flat card · long-context card not applied";
+    }
+    return "Tiered by request length · edits shared base card";
+  }
+  if (row.model !== "claude-haiku-5-5-long-context" && defaults) {
+    // A long-context card is "not applied" only when every base that maps to it is
+    // an intentional custom flat card — one untouched base still uses the tier.
+    const baseModels = contextRules
+      ? contextRules.filter((candidate) => candidate.longContextModel === row.model).map((candidate) => candidate.baseModel)
+      : row.model.endsWith("-long-context") ? [row.model.slice(0, -"-long-context".length)] : [];
+    const everyBaseFlat = baseModels.length > 0 && baseModels.every((base) => draft[base] && !samePricingRow(draft[base], defaults[base]));
+    if (everyBaseFlat && samePricingRow(draft[row.model], defaults[row.model])) {
+      return "Not applied while the base card is a custom flat card";
+    }
+  }
   if (target !== row.model) return `Edits shared ${target} card`;
   if (Object.hasOwn(draft, row.model) && versionedFallbackModel(row.model, ["claude-haiku-5-5"]) === "claude-haiku-5-5") return "Explicit custom card · flat rates";
+  // An own-row card that is neither bundled nor a mapped base is a standalone flat card.
+  if (Object.hasOwn(draft, row.model) && defaults && !Object.hasOwn(defaults, row.model)) return "Explicit custom card · flat rates";
   return row.inherited && row.sourceModel ? `Uses ${row.sourceModel} pricing` : undefined;
 }
 
-export function usedPricingModels(draft: Record<string, ModelPricing>, modelIds: string[], warningModels: string[] = []): Set<string> {
+function samePricingRow(left: ModelPricing | undefined, right: ModelPricing | undefined): boolean {
+  if (!left || !right) return left === right;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)] as Array<keyof ModelPricing>);
+  return [...keys].every((key) => left[key] === right[key]);
+}
+
+export function usedPricingModels(draft: Record<string, ModelPricing>, modelIds: string[], warningModels: string[] = [], contextRules?: PricingContextRule[]): Set<string> {
   const used = new Set([...modelIds, ...warningModels]);
-  if ([...used].some((model) => pricingEditModel(model, draft) === "claude-haiku-5-5")) used.add("claude-haiku-5-5-long-context");
+  for (const model of [...used]) {
+    const target = pricingEditModel(model, draft);
+    const canonical = resolvePricingForModel(target, draft).sourceModel;
+    const rules = contextRules?.filter((candidate) => candidate.baseModel === canonical);
+    if (rules?.length) {
+      for (const rule of rules) if (Object.hasOwn(draft, rule.longContextModel)) used.add(rule.longContextModel);
+    } else if (target === "claude-haiku-5-5" || Object.hasOwn(draft, `${target}-long-context`)) {
+      used.add(`${target}-long-context`);
+    }
+  }
   return used;
 }
 

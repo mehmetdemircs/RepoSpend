@@ -2385,6 +2385,12 @@ function repoWarningDetail(warning: string): RepoWarningDetail {
   if (normalized === "unknown_request_context" || normalized.startsWith("unknown_pricing_model:")) {
     return { key: warning, title: normalized === "unknown_request_context" ? "Missing request lengths" : "Unpriced request model", detail: readableWarning(warning), category: "pricing", categoryLabel: "Pricing incomplete", tone: "warning", actionLabel: "Pricing review" };
   }
+  if (normalized.startsWith("assumed_short_context_rates:")) {
+    return { key: warning, title: "Short-context rates assumed", detail: readableWarning(warning), category: "pricing", categoryLabel: "Pricing assumption", tone: "info", actionLabel: "Pricing review" };
+  }
+  if (normalized.startsWith("missing_long_context_pricing:")) {
+    return { key: warning, title: "Long-context card missing", detail: readableWarning(warning), category: "pricing", categoryLabel: "Pricing assumption", tone: "warning", actionLabel: "Pricing review" };
+  }
   if (normalizedText === "expensive session concentration") {
     return { key: warning, title: "Cost concentrated in one session", detail: "One session accounts for most of this repo or folder's estimated API-equivalent cost.", category: "review", categoryLabel: "Needs review", tone: "warning", actionLabel: "Top sessions" };
   }
@@ -3349,7 +3355,7 @@ function SettingsPricingTab({
   const [providerFilter, setProviderFilter] = React.useState<PricingProviderFilter>("all");
   const [viewFilter, setViewFilter] = React.useState<PricingViewFilter>("used");
   const warningModels = React.useMemo(() => unpricedModelsFromWarnings(data.sessions.flatMap((session) => session.warnings)), [data.sessions]);
-  const usedModels = React.useMemo(() => usedPricingModels(draft, data.models.map((model) => model.id), warningModels), [draft, data.models, warningModels]);
+  const usedModels = React.useMemo(() => usedPricingModels(draft, data.models.map((model) => model.id), warningModels, data.pricing.contextRules), [draft, data.models, warningModels, data.pricing.contextRules]);
   const usageCounts = React.useMemo(() => new Map(data.models.map((model) => [model.id, model.sessionCount])), [data.models]);
   const rows = pricingRows(draft, data.models, warningModels);
   const pricingGap = React.useMemo(() => pricingGapSummary(data.sessions, draft), [data.sessions, draft]);
@@ -3375,6 +3381,8 @@ function SettingsPricingTab({
         inputPerMillion: 0,
         cacheCreationInput5mPerMillion: 0,
         cacheCreationInput1hPerMillion: 0,
+        cacheCreationInput30mPerMillion: 0,
+        cacheCreationInput12hPerMillion: 0,
         cacheCreationInputPerMillion: 0,
         cachedInputPerMillion: 0,
         outputPerMillion: 0,
@@ -3467,6 +3475,8 @@ function SettingsPricingTab({
               <th>Input</th>
               <th>Cache write 5m</th>
               <th>Cache write 1h</th>
+              <th>Cache write 30m</th>
+              <th>Cache write 12h</th>
               <th>Cached input</th>
               <th>Output</th>
               <th>Reasoning</th>
@@ -3479,8 +3489,8 @@ function SettingsPricingTab({
                   <div className="pricing-model-cell">
                   <div className="font-medium"><ModelLabel model={row.model} /></div>
                     <div className="pricing-model-meta">
-                      {row.model === "claude-haiku-5-5-long-context" ? "Rate card for Haiku 5.5 prompts above 100K" : warningModels.includes(row.model) ? "Unpriced request model in current scan" : usedModels.has(row.model) ? `${count(usageCounts.get(row.model) ?? 0, "session")} in current scan` : "Unused in current scan"}
-                      {pricingRowNote(row, draft) ? <span>{pricingRowNote(row, draft)}</span> : null}
+                      {row.model === "claude-haiku-5-5-long-context" ? "Rate card for Haiku 5.5 prompts above 100K" : row.model.endsWith("-long-context") ? "Rate card for requests above 272K input tokens" : warningModels.includes(row.model) ? "Unpriced request model in current scan" : usedModels.has(row.model) ? `${count(usageCounts.get(row.model) ?? 0, "session")} in current scan` : "Unused in current scan"}
+                      {pricingRowNote(row, draft, data.pricing.defaults, data.pricing.contextRules) ? <span>{pricingRowNote(row, draft, data.pricing.defaults, data.pricing.contextRules)}</span> : null}
                       {pricingMissing(row) ? <span className="warning-text">Missing price</span> : null}
                     </div>
                   </div>
@@ -3488,6 +3498,8 @@ function SettingsPricingTab({
                 <PriceInput value={row.pricing.inputPerMillion} onChange={(value) => updatePrice(row.model, "inputPerMillion", value)} />
                 <PriceInput value={row.pricing.cacheCreationInput5mPerMillion ?? row.pricing.cacheCreationInputPerMillion} onChange={(value) => updatePrice(row.model, "cacheCreationInput5mPerMillion", value)} />
                 <PriceInput value={row.pricing.cacheCreationInput1hPerMillion ?? row.pricing.cacheCreationInputPerMillion} onChange={(value) => updatePrice(row.model, "cacheCreationInput1hPerMillion", value)} />
+                <PriceInput value={row.pricing.cacheCreationInput30mPerMillion ?? row.pricing.cacheCreationInputPerMillion} onChange={(value) => updatePrice(row.model, "cacheCreationInput30mPerMillion", value)} />
+                <PriceInput value={row.pricing.cacheCreationInput12hPerMillion ?? row.pricing.cacheCreationInputPerMillion} onChange={(value) => updatePrice(row.model, "cacheCreationInput12hPerMillion", value)} />
                 <PriceInput value={row.pricing.cachedInputPerMillion} onChange={(value) => updatePrice(row.model, "cachedInputPerMillion", value)} />
                 <PriceInput value={row.pricing.outputPerMillion} onChange={(value) => updatePrice(row.model, "outputPerMillion", value)} />
                 <PriceInput value={row.pricing.reasoningOutputPerMillion} onChange={(value) => updatePrice(row.model, "reasoningOutputPerMillion", value)} />
@@ -3504,9 +3516,9 @@ function SettingsPricingTab({
         </p>
       ) : null}
       <div className="settings-supporting-copy">
-        <p>Haiku 5.5 uses the base card for prompts up to 100K tokens and the separate <code>claude-haiku-5-5-long-context</code> rate card above 100K, selected per request. That second card is a pricing assumption, not a provider model ID. Aggregate-only Haiku usage stays unpriced when request lengths are unknown.</p>
+        <p>Haiku 5.5 uses the base card for prompts up to 100K tokens and the separate <code>claude-haiku-5-5-long-context</code> rate card above 100K, selected per request. GPT-6/6.1 and tiered GPT-5.x models use their own <code>-long-context</code> cards for requests above 272K input tokens. Customizing a GPT base card makes it a flat card at every request size; its bundled long-context card no longer applies unless you also edit that card. Long-context cards are pricing assumptions, not provider model IDs. Aggregate-only Haiku usage stays unpriced when request lengths are unknown; aggregate-only GPT usage stays at short-context rates and is flagged.</p>
         <p>Gemini 4 Argon rates are introductory through November 30, 2026. Published December 1 rates are $4 input, $0.20 cached input, and $20 output per million tokens. Bundled rates are a dated snapshot; they do not switch automatically.</p>
-        <p>Rates are USD per 1M tokens. Claude cache writes are priced by the TTL recorded in local usage: 5-minute writes use the 5m rate, 1-hour writes use the 1h rate, and unsplit cache writes fall back to the legacy cache-write rate when present. Saving writes local RepoSpend settings under <code>~/.repospend/</code> unless <code>repospend.config.json</code> sets <code>pricingPath</code>.</p>
+        <p>Rates are USD per 1M tokens. Cache writes are priced by the TTL recorded in local usage: Claude 5-minute and 1-hour writes use the 5m and 1h rates, OpenAI 30-minute and 12-hour writes use the 30m and 12h rates, and unsplit cache writes fall back to the generic cache-write rate when present. Saving writes local RepoSpend settings under <code>~/.repospend/</code> unless <code>repospend.config.json</code> sets <code>pricingPath</code>.</p>
         {(data.pricing.info.sourceUrls ?? [{ label: data.pricing.info.sourceName, url: data.pricing.info.sourceUrl }]).map((source) => (
           <a className="text-button" href={source.url} key={source.url}>{source.label}</a>
         ))}
@@ -5631,6 +5643,8 @@ function repoWarningBadgeItem(warning: string): WarningBadgeItem {
   const title = readableWarning(warning);
   if (warning.toLowerCase() === "unknown_request_context") return { label: "Missing request lengths", title, tone: "warning" };
   if (warning.toLowerCase().startsWith("unknown_pricing_model:")) return { label: "Unpriced request model", title, tone: "warning" };
+  if (warning.toLowerCase().startsWith("assumed_short_context_rates:")) return { label: "Short-context assumed", title, tone: "info" };
+  if (warning.toLowerCase().startsWith("missing_long_context_pricing:")) return { label: "Long-context card missing", title, tone: "warning" };
   if (normalized === "expensive session concentration") return { label: "Cost concentration", title, tone: "warning" };
   if (normalized === "failed commands" || normalized === "command issues") return { label: "Possible failed commands", title, tone: "critical" };
   if (normalized === "repo unverified no git root") return { label: "Repo unverified", title, tone: "info" };

@@ -4,7 +4,7 @@ RepoSpend estimates API-equivalent cost from a local pricing table. The bundled 
 
 The bundled table is seeded from public OpenAI, Anthropic, Google, and GitHub Copilot model references and is expressed as USD per 1M tokens. Pricing changes over time, so treat RepoSpend costs as API-equivalent estimates rather than invoice-grade accounting.
 
-The October 17, 2026 update checks Claude Haiku 5.5, Sonnet 5.5, and Gemini 4 Argon against provider documentation. The GPT-6.1 Sol card was checked on September 29; the other bundled defaults retain the September 28 snapshot. Defaults use published Standard API prices. Sonnet 5.5 cache reads fell from $0.20 to $0.10 per 1M tokens on October 7; its $2 input, $10 output, $2.50 5-minute writes, and $4 1-hour writes are unchanged. Sonnet 5 retains its $0.20 cache-read rate.
+The October 27, 2026 update adds the GPT-6.1 Terra card and OpenAI's 30-minute and 12-hour cache-write rates, and checks Claude Haiku 5.5, Sonnet 5.5, Fable 5.1, Mythos 5.1, and Gemini 4 Argon against provider documentation. The GPT-6.1 Sol card was checked on September 29; the other bundled defaults retain the September 28 snapshot. Defaults use published Standard API prices. Sonnet 5.5 cache reads fell from $0.20 to $0.10 per 1M tokens on October 7; its $2 input, $10 output, $2.50 5-minute writes, and $4 1-hour writes are unchanged. Sonnet 5 retains its $0.20 cache-read rate.
 
 ### Claude Haiku 5.5 and request-length pricing
 
@@ -25,19 +25,25 @@ These are current API-equivalent rates applied to the selected usage window, not
 
 `gemini-4-argon`, including Copilot-prefixed/suffixed aliases, uses $2 input, $0.10 cached input, and $10 output (including thinking) per 1M tokens through November 30, 2026. Google lists $4 input, $0.20 cached input, and $20 output from December 1. Argon has no explicit cache-write charge. Bundled rates are a verified snapshot: the application does not silently switch prices based on the machine clock. Refresh the table at the promotion boundary or save intentional overrides. Source: [Google's model and pricing guide](https://ai.google.dev/gemini-api/docs/latest-model?hl=en).
 
-GPT-6 Astra, Sol, and Luna use OpenAI's Standard short-context rates. Their long-context requests above 272,000 input tokens use different rates, and local session totals do not identify every request's pricing tier. Fast, batch, and regional processing can also differ from these defaults. RepoSpend keeps the result labeled as an API-equivalent estimate.
+GPT-6 Astra, Sol, and Luna use OpenAI's Standard short-context rates. Their long-context requests above 272,000 input tokens use different rates, applied per request when local records carry request sizes (Codex per-turn and Copilot per-request usage); aggregate-only usage stays at short-context rates and is flagged with an `assumed_short_context_rates` warning instead of guessing a tier. Fast, batch, and regional processing can also differ from these defaults. RepoSpend keeps the result labeled as an API-equivalent estimate.
+
+The GPT-5.x Standard cards carry the same per-request 272K threshold: GPT-5.6 Sol ($8 input / $0.80 cache read / $10 30m and $20 12h writes / $30 output), GPT-5.6 Terra ($4 / $0.40 / $5 and $10 / $18), GPT-5.6 Luna ($0.40 / $0.04 / $0.50 and $1 / $1.80), GPT-5.5 ($10 / $1 / $45), GPT-5.5 Pro ($60 / $270, no published cache rates), GPT-5.4 ($5 / $0.50 / $22.50), and GPT-5.4 Pro ($60 / $270, no published cache rates) each expose an editable `-long-context` card. GPT-5.4 mini and nano have no published long-context tier and stay flat at every request size. The same semantics apply as GPT-6/6.1: a request over 272,000 input tokens reprices at 2x input/cache rates and 1.5x output rates, an intentional custom flat base card stays flat unless the long-context card is also edited, and unknown request lengths use short-context rates with an assumption warning.
 
 ### GPT-6.1 Sol (September 29, 2026)
 
 The explicit `gpt-6.1-sol` card uses $2 input, $0.10 cached input, $2.50 cache writes, and $10 output/reasoning per 1M tokens, verified against [OpenAI's model reference](https://developers.openai.com/api/docs/models/gpt-6.1-sol) on September 29. GPT-6 Sol remains separate at $0.20 for cached input. Case-insensitive and Copilot-prefixed IDs resolve to the same card; terminal snapshot dates preserve the model generation. Snapshot support is defensive parsing, not a claim that OpenAI publishes those snapshot IDs. Custom exact-ID overrides continue to take precedence.
 
-Above 272K input tokens per request, GPT-6.1 Sol's Standard rates become $4 input, $0.20 cached input, $5 cache writes, and $15 output per 1M tokens. Fast costs twice Standard; Batch and Flex cost half Standard. RepoSpend's default estimate uses Standard short-context pricing because aggregate local usage cannot reliably identify these modifiers for every request. See the [GPT-6.1 Sol pricing and Codex tracking guide](https://repospend.com/guides/gpt-6-1-sol-pricing) for a worked example.
+Above 272K input tokens per request, GPT-6.1 Sol's Standard rates become $4 input, $0.20 cached input, $5 cache writes, and $15 output per 1M tokens, selected per request through the `gpt-6.1-sol-long-context` card (a RepoSpend rate card, not a provider model ID). Fast costs twice Standard; Batch and Flex cost half Standard. Requests without a recorded size use short-context rates with an assumption note; sessions whose saved table lacks the long-context card fall back to base rates and are flagged with `missing_long_context_pricing`. See the [GPT-6.1 Sol pricing and Codex tracking guide](https://repospend.com/guides/gpt-6-1-sol-pricing) for a worked example.
+
+### GPT-6.1 Terra (October 26, 2026)
+
+The explicit `gpt-6.1-terra` card uses $1 input, $0.05 cached input, $1.25 30-minute cache writes, $2.50 12-hour cache writes, and $5 output/reasoning per 1M tokens, verified against [OpenAI's model reference](https://developers.openai.com/api/docs/models/gpt-6.1-terra) on October 27. Above 272K input tokens per request the whole request reprices at 2x input/cache rates and 1.5x output rates through the editable `gpt-6.1-terra-long-context` card. Terra does not inherit the older GPT-5.6 Terra rates; custom exact-ID overrides continue to take precedence.
 
 Claude Fable 5.1 and Mythos 5.1 retain their predecessor's base rates but have lower cache-read pricing. Claude Opus 5.5 has its own lower base and cache rates. These model rows use Anthropic's global Standard rates.
 
 OpenAI reduced GPT-5.6 pricing effective July 30, 2026. RepoSpend uses $2 input and $12 output per 1M tokens for Terra, and $0.20 input and $1.20 output for Luna. Cached input remains 90% below the uncached input rate, and cache writes are billed at 1.25x the uncached input rate, so Luna's bundled cache-write rate is $0.25 per 1M tokens.
 
-GPT-5.6 Sol and its `gpt-5.6` alias use promotional $4 input, $0.40 cached input, $5 cache writes, and $20 output/reasoning per 1M tokens, available at least through November 21, 2026. Older full bundled pricing files receive this correction; intentionally saved sparse overrides remain unchanged.
+GPT-5.6 Sol and its `gpt-5.6` alias use promotional $4 input, $0.40 cached input, $5 cache writes, and $20 output/reasoning per 1M tokens, available at least through November 21, 2026 — recheck the promotional card on November 22, 2026. Older full bundled pricing files receive this correction; intentionally saved sparse overrides remain unchanged.
 
 Gemini 3.6, 3.7, and 3.8 Flash use GitHub Copilot promotional rates through December 31, 2026. MAI-Code-1.1-Flash, Grok 4.5–4.7, and Kimi K3 have explicit Copilot reference cards. Grok rates use the up-to-200K input tier; longer requests cost more.
 
@@ -55,11 +61,20 @@ cache-write rate. If a source only exposes the older aggregate
 `cache_creation_input_tokens` field, RepoSpend falls back to the model's generic
 cache-write rate.
 
+For OpenAI models, RepoSpend uses the TTL split recorded in
+`usage.cache_write_tokens_details` (or the nested
+`input_tokens_details.cache_write_tokens_details` shape): `ttl_30m_tokens` use
+the 30-minute cache-write rate and `ttl_12h_tokens` use the 12-hour rate. Writes
+without a TTL breakdown use the generic cache-write rate, which equals the
+30-minute rate on bundled OpenAI cards.
+
 Each model can define:
 
 - input tokens
-- 5-minute cache write input tokens
-- 1-hour cache write input tokens
+- 5-minute cache write input tokens (Claude)
+- 1-hour cache write input tokens (Claude)
+- 30-minute cache write input tokens (OpenAI)
+- 12-hour cache write input tokens (OpenAI)
 - generic cache write input tokens for sources without a TTL split
 - cached input tokens
 - output tokens

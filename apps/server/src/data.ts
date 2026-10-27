@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { buildDashboardSnapshot, clearRepoSpendCache, configPath, loadConfig, loadConfigWithWarnings, loadPricingTable, lowerBound, pricingOverrides, repospendHome, resolvePricingPath, saveConfig, savePricingTable, scanUsageSources, toCsv, upperBound, type PricingTable } from "@repospend/core";
+import { buildDashboardSnapshot, clearRepoSpendCache, configPath, defaultPricing, loadConfig, loadConfigWithWarnings, loadPricingTable, lowerBound, pricingContextRules, pricingOverrides, repospendHome, resolvePricingPath, saveConfig, savePricingTable, scanUsageSources, toCsv, upperBound, type PricingTable } from "@repospend/core";
 import type { DashboardSnapshot, NormalizedUsage, UsageFilters } from "@repospend/types";
 
 export type DashboardData = DashboardSnapshot;
@@ -117,12 +117,14 @@ export function parseDashboardOptions(query: Record<string, unknown>): Dashboard
   };
 }
 
-export function readPricingData(): { path: string; models: PricingTable } {
+export function readPricingData(): { path: string; models: PricingTable; defaults: PricingTable; contextRules: ReturnType<typeof pricingContextRules> } {
   const config = loadConfig();
   const pricingPath = resolvePricingPath(config);
   return {
     path: pricingPath,
     models: loadPricingTable(pricingPath),
+    defaults: defaultPricing,
+    contextRules: pricingContextRules(),
   };
 }
 
@@ -142,7 +144,7 @@ export function writeConfigData(nextConfig: ReturnType<typeof loadConfig>): { pa
   };
 }
 
-export function writePricingData(models: PricingTable): { path: string; models: PricingTable } {
+export function writePricingData(models: PricingTable): { path: string; models: PricingTable; defaults: PricingTable; contextRules: ReturnType<typeof pricingContextRules> } {
   const config = loadConfig();
   const pricingPath = resolvePricingPath(config);
   savePricingTable(pricingPath, pricingOverrides(models));
@@ -150,6 +152,8 @@ export function writePricingData(models: PricingTable): { path: string; models: 
   return {
     path: pricingPath,
     models: loadPricingTable(pricingPath),
+    defaults: defaultPricing,
+    contextRules: pricingContextRules(),
   };
 }
 

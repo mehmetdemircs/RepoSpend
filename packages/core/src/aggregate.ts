@@ -10,6 +10,8 @@ export function summarize(sessions: NormalizedUsage[]): Summary {
   const cacheCreationInputTokens = optionalSum(sessions, "cacheCreationInputTokens");
   const cacheCreationInputTokens5m = optionalSum(sessions, "cacheCreationInputTokens5m");
   const cacheCreationInputTokens1h = optionalSum(sessions, "cacheCreationInputTokens1h");
+  const cacheCreationInputTokens30m = optionalSum(sessions, "cacheCreationInputTokens30m");
+  const cacheCreationInputTokens12h = optionalSum(sessions, "cacheCreationInputTokens12h");
   return {
     estimatedCostUsd: cost.knownCount > 0 ? cost.value : undefined,
     knownCostSessions: cost.knownCount,
@@ -18,13 +20,15 @@ export function summarize(sessions: NormalizedUsage[]): Summary {
     cacheCreationInputTokens,
     cacheCreationInputTokens5m,
     cacheCreationInputTokens1h,
+    cacheCreationInputTokens30m,
+    cacheCreationInputTokens12h,
     inputTokens,
     outputTokens: sum(sessions, "outputTokens"),
     reasoningTokens: sum(sessions, "reasoningTokens"),
     cachedInputPct: inputTokens > 0 ? cachedInputTokens / inputTokens : 0,
     sessionCount: sessions.length,
     repoCount: repos.length,
-    modelCount: new Set(sessions.map((session) => session.model).filter(Boolean)).size,
+    modelCount: new Set(sessions.flatMap((session) => sessionModelSlices(session).map((slice) => slice.model)).filter(Boolean)).size,
     mostExpensiveRepo: repos.filter((repo) => repo.estimatedCostUsd !== undefined).sort((a, b) => (b.estimatedCostUsd ?? 0) - (a.estimatedCostUsd ?? 0))[0],
     unknownCostSessions: sessions.filter((session) => session.estimatedCostUsd === undefined).length,
     userPromptCount: optionalSum(sessions, "userPromptCount"),
@@ -57,13 +61,72 @@ export function groupByRepo(sessions: NormalizedUsage[]): UsageGroup[] {
 }
 
 export function groupByModel(sessions: NormalizedUsage[]): UsageGroup[] {
-  const groups = groupBy(sessions, (session) => session.model ?? "unknown-model", (session) => session.model ?? "Model not recorded");
-  const unknownModelSessions = sessions.filter((session) => !session.model);
+  const groups = new Map<string, UsageGroup>();
+  for (const session of sessions) {
+    for (const slice of sessionModelSlices(session)) {
+      const id = slice.model ?? "unknown-model";
+      const group = groups.get(id) ?? emptyGroup(id, slice.model ?? "Model not recorded");
+      accumulateGroup(group, session, slice);
+      groups.set(id, group);
+    }
+  }
+  const grouped = sortGroups([...groups.values()]);
+  const unknownModelSessions = sessions.filter((session) => !session.model && !(session.modelUsage ?? []).some((entry) => entry.model));
   // Keep mixed unknown-model buckets generic; only relabel when every unknown model is the Claude synthetic zero-usage case.
   if (unknownModelSessions.length > 0 && unknownModelSessions.every(isClaudeSyntheticZeroUsageSession)) {
-    return groups.map((group) => group.id === "unknown-model" ? { ...group, label: "Claude synthetic / no usage" } : group);
+    return grouped.map((group) => group.id === "unknown-model" ? { ...group, label: "Claude synthetic / no usage" } : group);
   }
-  return groups;
+  return grouped;
+}
+
+interface ModelUsageSlice {
+  model: string | undefined;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheCreationInputTokens5m: number;
+  cacheCreationInputTokens1h: number;
+  cacheCreationInputTokens30m: number;
+  cacheCreationInputTokens12h: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number | undefined;
+}
+
+// Sessions with request-level model attribution contribute each model's own token/cost slice;
+// other sessions contribute their session-level model and totals.
+function sessionModelSlices(session: NormalizedUsage): ModelUsageSlice[] {
+  if (session.modelUsage?.length) {
+    return session.modelUsage.map((entry) => ({
+      model: entry.model,
+      inputTokens: entry.inputTokens,
+      cachedInputTokens: entry.cachedInputTokens,
+      cacheCreationInputTokens: entry.cacheCreationInputTokens,
+      cacheCreationInputTokens5m: 0,
+      cacheCreationInputTokens1h: 0,
+      cacheCreationInputTokens30m: entry.cacheCreationInputTokens30m ?? 0,
+      cacheCreationInputTokens12h: entry.cacheCreationInputTokens12h ?? 0,
+      outputTokens: entry.outputTokens,
+      reasoningTokens: entry.reasoningTokens,
+      totalTokens: entry.totalTokens,
+      estimatedCostUsd: entry.estimatedCostUsd,
+    }));
+  }
+  return [{
+    model: session.model,
+    inputTokens: session.inputTokens,
+    cachedInputTokens: session.cachedInputTokens,
+    cacheCreationInputTokens: session.cacheCreationInputTokens ?? 0,
+    cacheCreationInputTokens5m: session.cacheCreationInputTokens5m ?? 0,
+    cacheCreationInputTokens1h: session.cacheCreationInputTokens1h ?? 0,
+    cacheCreationInputTokens30m: session.cacheCreationInputTokens30m ?? 0,
+    cacheCreationInputTokens12h: session.cacheCreationInputTokens12h ?? 0,
+    outputTokens: session.outputTokens,
+    reasoningTokens: session.reasoningTokens,
+    totalTokens: session.totalTokens,
+    estimatedCostUsd: session.estimatedCostUsd,
+  }];
 }
 
 export function groupBySourceApp(sessions: NormalizedUsage[]): UsageGroup[] {
@@ -82,46 +145,60 @@ function groupBy(sessions: NormalizedUsage[], keyFn: (session: NormalizedUsage) 
   const groups = new Map<string, UsageGroup>();
   for (const session of sessions) {
     const id = keyFn(session);
-    const existing = groups.get(id);
-    const group = existing ?? {
-      id,
-      label: labelFn(session),
-      estimatedCostUsd: undefined,
-      knownCostSessions: 0,
-      unknownCostSessions: 0,
-      inputTokens: 0,
-      cachedInputTokens: 0,
-      cacheCreationInputTokens: 0,
-      cacheCreationInputTokens5m: 0,
-      cacheCreationInputTokens1h: 0,
-      outputTokens: 0,
-      reasoningTokens: 0,
-      totalTokens: 0,
-      sessionCount: 0,
-      messageCount: 0,
-      warnings: [],
-    };
-
-    group.inputTokens += session.inputTokens;
-    group.cachedInputTokens += session.cachedInputTokens;
-    group.cacheCreationInputTokens = (group.cacheCreationInputTokens ?? 0) + (session.cacheCreationInputTokens ?? 0);
-    group.cacheCreationInputTokens5m = (group.cacheCreationInputTokens5m ?? 0) + (session.cacheCreationInputTokens5m ?? 0);
-    group.cacheCreationInputTokens1h = (group.cacheCreationInputTokens1h ?? 0) + (session.cacheCreationInputTokens1h ?? 0);
-    group.outputTokens += session.outputTokens;
-    group.reasoningTokens += session.reasoningTokens;
-    group.totalTokens += session.totalTokens;
-    group.sessionCount += 1;
-    group.messageCount += session.messageCount;
-    group.warnings = unique([...group.warnings, ...session.warnings]);
-    if (session.estimatedCostUsd !== undefined) {
-      group.estimatedCostUsd = roundCurrency((group.estimatedCostUsd ?? 0) + session.estimatedCostUsd);
-      group.knownCostSessions += 1;
-    } else {
-      group.unknownCostSessions += 1;
-    }
+    const group = groups.get(id) ?? emptyGroup(id, labelFn(session));
+    accumulateGroup(group, session, session);
     groups.set(id, group);
   }
-  return [...groups.values()].sort((a, b) => (b.estimatedCostUsd ?? 0) - (a.estimatedCostUsd ?? 0) || b.totalTokens - a.totalTokens);
+  return sortGroups([...groups.values()]);
+}
+
+function emptyGroup(id: string, label: string): UsageGroup {
+  return {
+    id,
+    label,
+    estimatedCostUsd: undefined,
+    knownCostSessions: 0,
+    unknownCostSessions: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheCreationInputTokens5m: 0,
+    cacheCreationInputTokens1h: 0,
+    cacheCreationInputTokens30m: 0,
+    cacheCreationInputTokens12h: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 0,
+    sessionCount: 0,
+    messageCount: 0,
+    warnings: [],
+  };
+}
+
+function accumulateGroup(group: UsageGroup, session: NormalizedUsage, slice: Pick<NormalizedUsage, "inputTokens" | "cachedInputTokens" | "outputTokens" | "reasoningTokens" | "totalTokens" | "estimatedCostUsd"> & { cacheCreationInputTokens?: number | undefined; cacheCreationInputTokens5m?: number | undefined; cacheCreationInputTokens1h?: number | undefined; cacheCreationInputTokens30m?: number | undefined; cacheCreationInputTokens12h?: number | undefined }): void {
+  group.inputTokens += slice.inputTokens;
+  group.cachedInputTokens += slice.cachedInputTokens;
+  group.cacheCreationInputTokens = (group.cacheCreationInputTokens ?? 0) + (slice.cacheCreationInputTokens ?? 0);
+  group.cacheCreationInputTokens5m = (group.cacheCreationInputTokens5m ?? 0) + (slice.cacheCreationInputTokens5m ?? 0);
+  group.cacheCreationInputTokens1h = (group.cacheCreationInputTokens1h ?? 0) + (slice.cacheCreationInputTokens1h ?? 0);
+  group.cacheCreationInputTokens30m = (group.cacheCreationInputTokens30m ?? 0) + (slice.cacheCreationInputTokens30m ?? 0);
+  group.cacheCreationInputTokens12h = (group.cacheCreationInputTokens12h ?? 0) + (slice.cacheCreationInputTokens12h ?? 0);
+  group.outputTokens += slice.outputTokens;
+  group.reasoningTokens += slice.reasoningTokens;
+  group.totalTokens += slice.totalTokens;
+  group.sessionCount += 1;
+  group.messageCount += session.messageCount;
+  group.warnings = unique([...group.warnings, ...session.warnings]);
+  if (slice.estimatedCostUsd !== undefined) {
+    group.estimatedCostUsd = roundCurrency((group.estimatedCostUsd ?? 0) + slice.estimatedCostUsd);
+    group.knownCostSessions += 1;
+  } else {
+    group.unknownCostSessions += 1;
+  }
+}
+
+function sortGroups(groups: UsageGroup[]): UsageGroup[] {
+  return groups.sort((a, b) => (b.estimatedCostUsd ?? 0) - (a.estimatedCostUsd ?? 0) || b.totalTokens - a.totalTokens);
 }
 
 function isClaudeSyntheticZeroUsageSession(session: NormalizedUsage): boolean {
@@ -150,6 +227,8 @@ export function toCsv(sessions: NormalizedUsage[]): string {
     "cacheCreationInputTokens",
     "cacheCreationInputTokens5m",
     "cacheCreationInputTokens1h",
+    "cacheCreationInputTokens30m",
+    "cacheCreationInputTokens12h",
     "outputTokens",
     "reasoningTokens",
     "reasoningOutputTokens",
@@ -216,6 +295,8 @@ function optionalSum(
     | "cacheCreationInputTokens"
     | "cacheCreationInputTokens5m"
     | "cacheCreationInputTokens1h"
+    | "cacheCreationInputTokens30m"
+    | "cacheCreationInputTokens12h"
     | "fileReadCount"
     | "fileEditCount"
     | "rawEventCount",

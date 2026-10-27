@@ -54,6 +54,24 @@ export interface SessionIdentity {
   sourceMetadata?: Record<string, unknown> | undefined;
 }
 
+export interface SessionModelUsage {
+  /** Model recorded for this slice of the session. Sessions that switch models have one entry per active model. */
+  model: string | undefined;
+  requestCount: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheCreationInputTokens5m?: number | undefined;
+  cacheCreationInputTokens1h?: number | undefined;
+  cacheCreationInputTokens30m?: number | undefined;
+  cacheCreationInputTokens12h?: number | undefined;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  /** API-equivalent cost for just this slice; undefined when any contributing request is unpriced. */
+  estimatedCostUsd: number | undefined;
+}
+
 export interface TokenAggregation {
   /** Total input tokens reported for the session, including cached/read and cache-write input when the source reports those separately. */
   inputTokens: number;
@@ -65,6 +83,12 @@ export interface TokenAggregation {
   cacheCreationInputTokens5m?: number | undefined;
   /** Input tokens written to Anthropic's 1-hour cache, when the source exposes the TTL split. */
   cacheCreationInputTokens1h?: number | undefined;
+  /** Input tokens written to OpenAI's 30-minute cache, when the source exposes the TTL split. */
+  cacheCreationInputTokens30m?: number | undefined;
+  /** Input tokens written to OpenAI's 12-hour cache, when the source exposes the TTL split. */
+  cacheCreationInputTokens12h?: number | undefined;
+  /** Per-model token and cost slices when the source exposes request-level model attribution. */
+  modelUsage?: SessionModelUsage[] | undefined;
   outputTokens: number;
   reasoningTokens: number;
   reasoningOutputTokens: number;
@@ -168,6 +192,8 @@ export interface UsageGroup {
   cacheCreationInputTokens?: number | undefined;
   cacheCreationInputTokens5m?: number | undefined;
   cacheCreationInputTokens1h?: number | undefined;
+  cacheCreationInputTokens30m?: number | undefined;
+  cacheCreationInputTokens12h?: number | undefined;
   outputTokens: number;
   reasoningTokens: number;
   totalTokens: number;
@@ -185,6 +211,8 @@ export interface Summary {
   cacheCreationInputTokens: number;
   cacheCreationInputTokens5m: number;
   cacheCreationInputTokens1h: number;
+  cacheCreationInputTokens30m: number;
+  cacheCreationInputTokens12h: number;
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
@@ -371,6 +399,8 @@ export interface ModelPricing {
   cachedInputPerMillion?: number;
   cacheCreationInput5mPerMillion?: number;
   cacheCreationInput1hPerMillion?: number;
+  cacheCreationInput30mPerMillion?: number;
+  cacheCreationInput12hPerMillion?: number;
   cacheCreationInputPerMillion?: number;
   outputPerMillion: number;
   reasoningOutputPerMillion?: number;
@@ -560,10 +590,21 @@ export interface PricingInfo {
   note: string;
 }
 
+/** Engine-derived request-context rule: requests on baseModel above the threshold reprice at longContextModel. */
+export interface PricingContextRule {
+  baseModel: string;
+  longContextModel: string;
+  thresholdInputTokens: number;
+}
+
 export interface PricingResponse {
   info: PricingInfo;
   path?: string;
   models: Record<string, ModelPricing>;
+  /** Bundled rate cards before user customization, for truthful "custom" labeling in Settings. */
+  defaults?: Record<string, ModelPricing>;
+  /** Engine's base→long-context card mapping; multiple bases may share one long-context card. */
+  contextRules?: PricingContextRule[];
 }
 
 export interface RtkCommand {

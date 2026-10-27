@@ -28,6 +28,30 @@ describe("summarize", () => {
     expect(summary.estimatedCostUsd).toBeUndefined();
     expect(summary.knownCostSessions).toBe(0);
   });
+
+  it("counts every distinct model slice, falls back to session model, and ignores unknown-only models", () => {
+    const mixed = usage({
+      id: "mixed",
+      model: "gpt-6-astra",
+      modelUsage: [
+        { model: "gpt-6-astra", requestCount: 1, inputTokens: 150, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 15, reasoningTokens: 0, totalTokens: 165, estimatedCostUsd: 1.5 },
+        { model: "gpt-6-sol", requestCount: 1, inputTokens: 50, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 5, reasoningTokens: 0, totalTokens: 55, estimatedCostUsd: 0.3 },
+      ],
+    });
+    expect(summarize([mixed]).modelCount).toBe(2);
+
+    // A filtered selection narrows the authoritative slices, so only the selected model counts.
+    const filtered = { ...mixed, model: "gpt-6-sol", modelUsage: [mixed.modelUsage![1]!] };
+    expect(summarize([filtered]).modelCount).toBe(1);
+
+    // Unknown-only slices keep the legacy "no known model" semantics — no stale representative count.
+    const unknownOnly = usage({ id: "u", model: undefined, modelUsage: [{ model: undefined, requestCount: 1, inputTokens: 10, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 1, reasoningTokens: 0, totalTokens: 11, estimatedCostUsd: undefined }] });
+    expect(summarize([unknownOnly]).modelCount).toBe(0);
+
+    // Legacy sessions without modelUsage count session.model, or nothing when absent.
+    expect(summarize([usage({ id: "legacy", model: "gpt-6-astra" })]).modelCount).toBe(1);
+    expect(summarize([usage({ id: "nomodel", model: undefined })]).modelCount).toBe(0);
+  });
 });
 
 describe("group helpers", () => {
@@ -52,6 +76,33 @@ describe("group helpers", () => {
       usage({ id: "b", model: undefined, warnings: [] }),
     ]);
     expect(mixed.find((g) => g.id === "unknown-model")?.label).toBe("Model not recorded");
+  });
+
+  it("splits a mixed-model session into per-model slices without duplicating the session", () => {
+    const groups = groupByModel([
+      usage({
+        id: "mixed",
+        model: "gpt-6-astra",
+        inputTokens: 200,
+        outputTokens: 20,
+        totalTokens: 220,
+        estimatedCostUsd: 1.8,
+        modelUsage: [
+          { model: "gpt-6-astra", requestCount: 1, inputTokens: 150, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 15, reasoningTokens: 0, totalTokens: 165, estimatedCostUsd: 1.5 },
+          { model: "gpt-6-sol", requestCount: 1, inputTokens: 50, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 5, reasoningTokens: 0, totalTokens: 55, estimatedCostUsd: 0.3 },
+        ],
+      }),
+      usage({ id: "solo", model: "gpt-6-sol", inputTokens: 10, outputTokens: 1, totalTokens: 11, estimatedCostUsd: 0.05 }),
+    ]);
+
+    const astra = groups.find((g) => g.id === "gpt-6-astra");
+    const sol = groups.find((g) => g.id === "gpt-6-sol");
+    expect(astra?.sessionCount).toBe(1);
+    expect(astra?.inputTokens).toBe(150);
+    expect(astra?.estimatedCostUsd).toBe(1.5);
+    expect(sol?.sessionCount).toBe(2);
+    expect(sol?.inputTokens).toBe(60);
+    expect(sol?.estimatedCostUsd).toBe(0.35);
   });
 
   it("groups by source app and by day", () => {

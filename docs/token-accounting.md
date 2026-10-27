@@ -6,6 +6,7 @@ RepoSpend uses one normalized token shape across local clients:
 - `cachedInputTokens` is the cache-read portion of input.
 - `cacheCreationInputTokens` is the cache-write portion of input, when the source exposes it.
 - `cacheCreationInputTokens5m` and `cacheCreationInputTokens1h` preserve Anthropic's Claude cache-write TTL split when local transcripts expose `usage.cache_creation`.
+- `cacheCreationInputTokens30m` and `cacheCreationInputTokens12h` preserve OpenAI's cache-write TTL split when usage records expose `cache_write_tokens_details` (flat or nested under `input_tokens_details`); `cacheCreationInputTokens` remains the total write bucket for billing.
 - `outputTokens` is visible/non-reasoning output.
 - `reasoningTokens` is reasoning output, when the source exposes it.
 - `totalTokens = inputTokens + outputTokens + reasoningTokens`.
@@ -55,14 +56,23 @@ session files exist, RepoSpend can show higher Claude totals than `ccusage` or
 Tokscale without a parser bug. When comparing tools, first check whether the
 same Claude roots are included.
 
-For Claude, RepoSpend also preserves the cache-write TTL split when it is present
+RepoSpend also preserves the cache-write TTL split when it is present
 in local logs:
 
 ```text
 5-minute cache write = cacheCreationInputTokens5m
 1-hour cache write = cacheCreationInputTokens1h
-unclassified cache write = cacheCreationInputTokens - cacheCreationInputTokens5m - cacheCreationInputTokens1h
+30-minute cache write = cacheCreationInputTokens30m
+12-hour cache write = cacheCreationInputTokens12h
+unclassified cache write = cacheCreationInputTokens - (5m + 1h + 30m + 12h buckets)
 ```
+
+OpenAI cache reads and writes may arrive as flat fields (`cached_input_tokens`,
+`cache_write_tokens`) or nested (`input_tokens_details.cached_tokens`,
+`input_tokens_details.cache_write_tokens` with
+`cache_write_tokens_details.ttl_30m_tokens` / `ttl_12h_tokens`). Both shapes
+normalize to the same buckets, and `inputTokens` stays inclusive of reads and
+writes per the OpenAI API contract.
 
 This is one reason RepoSpend API-equivalent cost can differ from `ccusage`.
 Anthropic prices 5-minute cache writes at a different rate than 1-hour cache
@@ -92,6 +102,13 @@ When checking RepoSpend against `ccusage`, Tokscale, or another local usage tool
 - Treat token total differences as suspicious only after accounting for cache semantics, reasoning semantics, date filters, and cumulative Codex checkpoints.
 
 For Codex, RepoSpend prefers per-turn `last_token_usage` deltas and skips stale duplicate snapshots when available. This avoids under-counting sessions that compacted and avoids over-counting rebroadcast cumulative checkpoints.
+
+Codex sessions can switch models mid-session. Per-turn and direct usage records
+each keep the model that was active for that request in the session's
+`modelUsage` slices, so per-request pricing and model rollups stay correct
+without creating duplicate session rows. Sessions that only expose cumulative
+snapshots fall back to the session model and are priced as an aggregate with an
+explicit assumption warning rather than invented per-request sizes.
 
 For GitHub Copilot, RepoSpend aligns with ccusage and Tokscale for OTEL-backed
 records, but keeps `cachedInputTokens` as a subset of `inputTokens` in the

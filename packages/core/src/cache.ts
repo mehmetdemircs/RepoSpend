@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { repospendHome } from "./pricing.js";
 
-const activeCacheVersion = "parse-v1";
+const activeCacheVersion = "parse-v2";
 let preparedCacheRoot: string | undefined;
 
 export function parseCacheRoot(): string {

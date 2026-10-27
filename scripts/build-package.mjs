@@ -28,7 +28,7 @@ await esbuild.build({
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node20",
+  target: "node22",
   external: ["@fastify/static", "better-sqlite3", "fastify"],
   plugins: [
     {

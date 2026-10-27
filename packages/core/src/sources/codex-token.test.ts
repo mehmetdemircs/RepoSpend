@@ -94,6 +94,63 @@ describe("Codex token normalization", () => {
     expect(aggregation.outputTokens).toBe(50);
     expect(aggregation.reasoningTokens).toBe(12);
   });
+
+  it("normalizes the nested OpenAI usage shape with cache writes inside input_tokens_details", () => {
+    const aggregation = aggregateTokens([
+      {
+        usage: {
+          input_tokens: 15_000,
+          input_tokens_details: { cached_tokens: 12_000, cache_write_tokens: 3_000 },
+          output_tokens: 1_000,
+          total_tokens: 16_000,
+        },
+      },
+    ]);
+
+    expect(aggregation.inputTokens).toBe(15_000);
+    expect(aggregation.cachedInputTokens).toBe(12_000);
+    expect(aggregation.cacheCreationInputTokens).toBe(3_000);
+    expect(aggregation.outputTokens).toBe(1_000);
+    expect(aggregation.requestUsages).toEqual([
+      expect.objectContaining({ inputTokens: 15_000, cachedInputTokens: 12_000, cacheCreationInputTokens: 3_000, requestInputTokens: 15_000 }),
+    ]);
+  });
+
+  it("extracts 30-minute and 12-hour cache-write splits from ttl details", () => {
+    const usage = {
+      input_tokens: 20_000,
+      cached_input_tokens: 5_000,
+      input_tokens_details: {
+        cache_write_tokens: 4_000,
+        cache_write_tokens_details: { ttl_30m_tokens: 3_000, ttl_12h_tokens: 1_000 },
+      },
+      output_tokens: 500,
+      total_tokens: 20_500,
+    };
+    const aggregation = aggregateTokens([{ usage }, { usage: { input_tokens: 5_000, cache_write_tokens_details: { ttl_30m_tokens: 1_000 }, output_tokens: 100, total_tokens: 5_100 } }]);
+
+    expect(aggregation.cacheCreationInputTokens).toBe(5_000);
+    expect(aggregation.cacheCreationInputTokens30m).toBe(4_000);
+    expect(aggregation.cacheCreationInputTokens12h).toBe(1_000);
+  });
+
+  it("carries the active record model into per-request usage slices", () => {
+    const astra = { type: "response", usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110 } };
+    const sol = { type: "response", usage: { input_tokens: 50, output_tokens: 5, total_tokens: 55 } };
+    const models = new Map<unknown, string>([[astra, "gpt-6-astra"], [sol, "gpt-6-sol"]]);
+
+    const aggregation = aggregateTokens([astra, sol], (record) => models.get(record));
+
+    expect(aggregation.requestUsages.map((usage) => usage.model)).toEqual(["gpt-6-astra", "gpt-6-sol"]);
+    expect(aggregation.requestUsages.map((usage) => usage.requestInputTokens)).toEqual([100, 50]);
+  });
+
+  it("marks cumulative-session request slices as unknown size with no record model", () => {
+    const aggregation = aggregateTokens([tokenCount(100, 20, 40, 10, 150), tokenCount(200, 50, 80, 20, 300)]);
+
+    expect(aggregation.requestUsages).toHaveLength(1);
+    expect(aggregation.requestUsages[0]).toMatchObject({ inputTokens: 200, requestInputTokens: undefined, model: undefined });
+  });
 });
 
 function tokenCount(input: number, cached: number, outputWithReasoning: number, reasoning: number, total: number) {

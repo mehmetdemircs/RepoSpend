@@ -4,12 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import type { CommandCategory, CommandIssueClassification, CommandIssueImpact, CommandIssueSample, CommandIssueSeverity, CompactionStats, NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SourceStatus } from "@repospend/types";
+import type { CommandCategory, CommandIssueClassification, CommandIssueImpact, CommandIssueSample, CommandIssueSeverity, CompactionStats, NormalizedUsage, PromptTimelineItem, RepoSpendConfig, SessionModelUsage, SourceStatus } from "@repospend/types";
 import { readJsonCache, writeJsonCache } from "../cache.js";
 import { calculateRequestCosts, type PricingTable } from "../pricing.js";
 import { resolveRepoInfo } from "../repo.js";
 import { analyzeAgentFriction, type CommandIssue } from "./agent-friction.js";
-import { aggregateTokens, type CodexTokenAggregation } from "./codex-token.js";
+import { aggregateTokens, type CodexRequestUsage, type CodexTokenAggregation } from "./codex-token.js";
 import type { SourceScanWindow } from "./index.js";
 
 interface CodexThreadRow {
@@ -28,7 +28,7 @@ interface CodexThreadRow {
 
 type ImportedModel = { model: string; provider: string | undefined };
 
-const codexSessionCacheVersion = "codex-session-v1";
+const codexSessionCacheVersion = "codex-session-v2";
 let nativeSqliteRebuildAttempted = false;
 
 interface SessionTokenBreakdown extends CodexTokenAggregation {
@@ -354,6 +354,9 @@ function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<str
     provider,
     inputTokens,
     cachedInputTokens,
+    cacheCreationInputTokens: sessionBreakdown.cacheCreationInputTokens,
+    cacheCreationInputTokens30m: sessionBreakdown.cacheCreationInputTokens30m,
+    cacheCreationInputTokens12h: sessionBreakdown.cacheCreationInputTokens12h,
     outputTokens,
     reasoningTokens,
     reasoningOutputTokens: reasoningTokens,
@@ -393,13 +396,14 @@ function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<str
     sessionOutcome: inferOutcome(sessionBreakdown),
     compaction: sessionBreakdown.compaction,
   };
-  const estimate = hasPricedBreakdown ? calculateRequestCosts([usage], options.pricing) : undefined;
-  const cost = estimate?.costUsd;
-  const costWarnings = hasPricedBreakdown ? warnings : [...warnings, "missing_token_breakdown"];
+  const estimate = hasPricedBreakdown ? sessionEstimate(sessionBreakdown.requestUsages, model, options.pricing) : undefined;
+  const cost = estimate?.result.costUsd;
+  const costWarnings = [...warnings, ...(estimate?.result.assumptions ?? [])];
   return {
     ...usage,
     estimatedCostUsd: cost,
-    warnings: cost === undefined ? [...new Set([...costWarnings, "unknown_pricing", ...(estimate?.warnings ?? [])])] : warnings,
+    modelUsage: estimate?.modelUsage,
+    warnings: cost === undefined ? [...new Set([...(hasPricedBreakdown ? costWarnings : [...costWarnings, "missing_token_breakdown"]), "unknown_pricing", ...(estimate?.result.warnings ?? [])])] : [...new Set(costWarnings)],
   };
 }
 
@@ -430,6 +434,9 @@ function readStandaloneSessions(sessionFiles: Map<string, string>, options: Code
       provider,
       inputTokens: breakdown.inputTokens,
       cachedInputTokens: breakdown.cachedInputTokens,
+      cacheCreationInputTokens: breakdown.cacheCreationInputTokens,
+      cacheCreationInputTokens30m: breakdown.cacheCreationInputTokens30m,
+      cacheCreationInputTokens12h: breakdown.cacheCreationInputTokens12h,
       outputTokens: breakdown.outputTokens,
       reasoningTokens: breakdown.reasoningTokens,
       reasoningOutputTokens: breakdown.reasoningTokens,
@@ -470,14 +477,54 @@ function readStandaloneSessions(sessionFiles: Map<string, string>, options: Code
       compaction: breakdown.compaction,
     };
     const hasPricedBreakdown = breakdown.inputTokens + breakdown.cachedInputTokens + breakdown.outputTokens + breakdown.reasoningTokens > 0;
-    const estimate = hasPricedBreakdown ? calculateRequestCosts([usage], options.pricing) : undefined;
-    const cost = estimate?.costUsd;
+    const estimate = hasPricedBreakdown ? sessionEstimate(breakdown.requestUsages, model, options.pricing) : undefined;
+    const cost = estimate?.result.costUsd;
     return {
       ...usage,
       estimatedCostUsd: cost,
-      warnings: cost === undefined ? [...new Set([...usage.warnings, hasPricedBreakdown ? "unknown_pricing" : "missing_token_breakdown", ...(estimate?.warnings ?? [])])] : usage.warnings,
+      modelUsage: estimate?.modelUsage,
+      warnings: cost === undefined ? [...new Set([...usage.warnings, hasPricedBreakdown ? "unknown_pricing" : "missing_token_breakdown", ...(estimate?.result.warnings ?? []), ...(estimate?.result.assumptions ?? [])])] : [...new Set([...usage.warnings, ...(estimate?.result.assumptions ?? [])])],
     };
   });
+}
+
+function sessionEstimate(requestUsages: CodexRequestUsage[], fallbackModel: string | undefined, pricing: PricingTable): { result: ReturnType<typeof calculateRequestCosts>; modelUsage: SessionModelUsage[] | undefined } {
+  const requests = requestUsages.map((request) => ({ ...request, model: request.model ?? fallbackModel }));
+  const result = calculateRequestCosts(requests, pricing);
+  return { result, modelUsage: buildSessionModelUsage(requests, result.requestCosts) };
+}
+
+function buildSessionModelUsage(requests: Array<CodexRequestUsage & { model: string | undefined }>, requestCosts: Array<number | undefined>): SessionModelUsage[] | undefined {
+  if (!requests.length) return undefined;
+  const groups = new Map<string | undefined, SessionModelUsage>();
+  requests.forEach((request, index) => {
+    const entry = groups.get(request.model) ?? {
+      model: request.model,
+      requestCount: 0,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheCreationInputTokens30m: 0,
+      cacheCreationInputTokens12h: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 0,
+      estimatedCostUsd: 0 as number | undefined,
+    };
+    entry.requestCount += 1;
+    entry.inputTokens += request.inputTokens;
+    entry.cachedInputTokens += request.cachedInputTokens;
+    entry.cacheCreationInputTokens += request.cacheCreationInputTokens;
+    entry.cacheCreationInputTokens30m = (entry.cacheCreationInputTokens30m ?? 0) + request.cacheCreationInputTokens30m;
+    entry.cacheCreationInputTokens12h = (entry.cacheCreationInputTokens12h ?? 0) + request.cacheCreationInputTokens12h;
+    entry.outputTokens += request.outputTokens;
+    entry.reasoningTokens += request.reasoningTokens;
+    entry.totalTokens += request.totalTokens;
+    const requestCost = requestCosts[index];
+    entry.estimatedCostUsd = requestCost === undefined || entry.estimatedCostUsd === undefined ? undefined : Number((entry.estimatedCostUsd + requestCost).toFixed(6));
+    groups.set(request.model, entry);
+  });
+  return [...groups.values()];
 }
 
 function hasImportedSession(sessions: NormalizedUsage[], candidate: NormalizedUsage): boolean {
@@ -637,7 +684,8 @@ function readSessionBreakdown(filePath: string): SessionTokenBreakdown {
       applyCompactionEvent(breakdown, record, lastUserMessageText);
     }
     breakdown.messageCount = eventMessageCount || responseMessageCount;
-    const tokenAggregation = aggregateTokens(records);
+    const modelByRecord = recordModels(records);
+    const tokenAggregation = aggregateTokens(records, (record) => modelByRecord.get(record));
     Object.assign(breakdown, {
       ...tokenAggregation,
       warnings: [...breakdown.warnings, ...tokenAggregation.warnings],
@@ -651,6 +699,26 @@ function readSessionBreakdown(filePath: string): SessionTokenBreakdown {
   }
   if (cacheKey) writeJsonCache("codex-session", cacheKey, breakdown);
   return breakdown;
+}
+
+// Tracks the active declared model as records stream by so each token usage can be priced
+// with the model that was active for its own API request instead of the session's first model.
+function recordModels(records: unknown[]): Map<unknown, string | undefined> {
+  const models = new Map<unknown, string | undefined>();
+  let current: string | undefined;
+  for (const record of records) {
+    const declared = declaredRecordModel(record);
+    if (declared) current = declared;
+    models.set(record, current);
+  }
+  return models;
+}
+
+function declaredRecordModel(record: unknown): string | undefined {
+  const object = asRecord(record);
+  const payload = firstObject(object?.payload) ?? object;
+  const collaborationSettings = firstObject(firstObject(payload?.collaboration_mode)?.settings);
+  return stringValue(payload?.model) ?? stringValue(collaborationSettings?.model);
 }
 
 function sessionBreakdownCacheKey(filePath: string): { version: string; filePath: string; size: number; mtimeMs: number } | undefined {
@@ -748,6 +816,7 @@ function emptyBreakdown(): SessionTokenBreakdown {
     outputTokens: 0,
     reasoningTokens: 0,
     totalTokens: 0,
+    requestUsages: [],
     tokenAggregationMethod: "unknown",
     tokenConfidence: "low",
     tokenSnapshotCount: 0,

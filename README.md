@@ -21,13 +21,15 @@ Project links:
 
 ## Model pricing and usage guides
 
-The 0.1.7 pricing update (October 17) adds Claude Haiku 5.5's two prompt-length tiers,
-reduces Sonnet 5.5 cache reads to $0.10 per million tokens, and adds Gemini 4
-Argon's introductory rates through November 30. Claude and Copilot inference
-records are priced per request; aggregate-only Haiku usage stays unpriced when
-request lengths are unavailable. These are current API-equivalent estimates,
-not historical invoices. See [pricing methodology](docs/pricing.md) for rates,
-promotion dates, and custom overrides.
+The 0.1.8 update (October 27) adds explicit GPT-6.1 Terra rates, prices each
+Codex request with the model that was active for it, applies OpenAI long-context
+tiers per request when request sizes are recorded, and normalizes OpenAI
+30-minute and 12-hour cache writes. Claude and Copilot inference records are
+still priced per request; aggregate-only Haiku usage stays unpriced when request
+lengths are unavailable, and aggregate-only OpenAI usage is flagged rather than
+silently tiered. These are current API-equivalent estimates, not historical
+invoices. See [pricing methodology](docs/pricing.md) for rates, promotion dates,
+and custom overrides.
 
 RepoSpend includes explicit **GPT-6.1 Sol** API-equivalent pricing: $2 input,
 $0.10 cached input, $2.50 cache writes, and $10 output per million tokens at
@@ -127,7 +129,7 @@ files alone.
 
 ## Requirements
 
-- Node.js `20` or newer
+- Node.js `22.12` or newer
 - macOS, Linux, or Windows
 - Local Codex, Claude Code, or GitHub Copilot data for usage analytics
 - Optional RTK data if you want token-reduction workflow context

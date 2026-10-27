@@ -210,6 +210,18 @@ describe("October pricing corrections", () => {
     expect(pricingOverrides(defaultPricing)).toEqual({});
   });
 
+  it("keeps Haiku's separately editable tiers when only the base card is customized", () => {
+    const pricing = { ...defaultPricing, "claude-haiku-5-5": { ...defaultPricing["claude-haiku-5-5"]!, inputPerMillion: 0.2 } };
+    // The canonical flat-override exception is a GPT-only policy: Haiku keeps its
+    // established contract — a customized base plus the unchanged long-context card
+    // still reprices large requests at the long tier (0.15 + 0.025), not flat (0.065).
+    expect(calculateCostUsd({ model: "claude-haiku-5-5", inputTokens: 300_000, cachedInputTokens: 0, cacheCreationInputTokens: 0, cacheCreationInputTokens5m: 0, cacheCreationInputTokens1h: 0, outputTokens: 10_000, reasoningTokens: 0 }, pricing, 300_000)).toBe(0.175);
+    // Unknown request lengths stay unpriced, and an exact custom snapshot keeps its flat authority.
+    expect(calculateCostUsd(usage("claude-haiku-5-5"), pricing)).toBeUndefined();
+    const snapshot = { "claude-haiku-5-5-20261007": { inputPerMillion: 7, outputPerMillion: 9 } };
+    expect(calculateCostUsd({ model: "claude-haiku-5-5-20261007", inputTokens: 300_000, cachedInputTokens: 0, cacheCreationInputTokens: 0, cacheCreationInputTokens5m: 0, cacheCreationInputTokens1h: 0, outputTokens: 10_000, reasoningTokens: 0 }, { ...defaultPricing, ...snapshot }, 300_000)).toBe(2.19);
+  });
+
   it("does not let an invalid internal context card inherit the base tier", () => {
     const high = "claude-haiku-5-5-long-context";
     const pricing = { ...defaultPricing, [high]: { ...defaultPricing[high]!, inputPerMillion: 0 } };
@@ -223,6 +235,191 @@ describe("October pricing corrections", () => {
     expect(calculateCostUsd(usage("claude-haiku-5-5"), pricing)).toBeUndefined();
     expect(calculateCostUsd(usage("claude-haiku-5-5"), pricing, 100_000)).toBeUndefined();
     expect(calculateCostUsd(usage("copilot/claude-haiku-5.5-20261007"), pricing)).toBeUndefined();
+  });
+});
+
+
+describe("GPT-6.1 Terra pricing", () => {
+  const usage = (model: string, inputTokens = 100_000) => ({
+    model,
+    inputTokens,
+    cachedInputTokens: 80_000,
+    cacheCreationInputTokens: 15_000,
+    outputTokens: 10_000,
+    reasoningTokens: 0,
+  });
+
+  it.each(["gpt-6.1-terra", "GPT-6.1-TERRA", "copilot/gpt-6.1-terra", "gpt-6.1-terra-2026-10-26", "gpt-6.1-terra-20261026"])("uses the explicit card for %s", (model) => {
+    expect(resolvePricingForModel(model, defaultPricing).sourceModel).toBe("gpt-6.1-terra");
+    // billable input 5K * 1 + cached 80K * 0.05 + generic write 15K * 1.25 + output 10K * 5
+    expect(calculateCostUsd(usage(model), defaultPricing)).toBe(0.07775);
+  });
+
+  it("does not inherit the older 5.6 Terra card", () => {
+    const resolution = resolvePricingForModel("gpt-6.1-terra", defaultPricing);
+    expect(resolution.pricing.inputPerMillion).toBe(1);
+    expect(resolution.pricing.outputPerMillion).toBe(5);
+    expect(resolution.pricing.inputPerMillion).not.toBe(defaultPricing["gpt-5.6-terra"]!.inputPerMillion);
+  });
+
+  it("prices 30m and 12h cache writes at their own rates", () => {
+    expect(
+      calculateCostUsd(
+        { ...usage("gpt-6.1-terra"), cacheCreationInputTokens30m: 10_000, cacheCreationInputTokens12h: 5_000 },
+        defaultPricing,
+      ),
+    ).toBe(0.084);
+  });
+
+  it("prefers an exact custom Terra row over bundled defaults and never invents a long-context card", () => {
+    const custom = { inputPerMillion: 0.5, outputPerMillion: 2 };
+    const pricing = { ...defaultPricing, "gpt-6.1-terra": custom };
+    expect(resolvePricingForModel("gpt-6.1-terra", pricing).pricing).toEqual(custom);
+    expect(calculateCostUsd({ model: "gpt-6.1-terra", inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 }, pricing)).toBe(0.7);
+  });
+});
+
+describe("OpenAI request-level long-context pricing", () => {
+  const request = (model: string, inputTokens: number) => ({ model, inputTokens, cachedInputTokens: 0, outputTokens: 10_000, reasoningTokens: 0, requestInputTokens: inputTokens });
+
+  it("prices GPT-6.1 Sol requests at the long-context tier only above 272K input tokens", () => {
+    expect(calculateRequestCostsUsd([request("gpt-6.1-sol", 300_000)], defaultPricing)).toBe(1.35);
+    expect(calculateRequestCostsUsd([request("gpt-6.1-sol", 272_000)], defaultPricing)).toBe(0.644);
+    expect(calculateRequestCostsUsd([request("gpt-6.1-sol", 272_001)], defaultPricing)).toBe(1.238004);
+  });
+
+  it("applies the long-context card to Terra requests in both GPT generations", () => {
+    expect(calculateRequestCostsUsd([request("gpt-6.1-terra", 300_000)], defaultPricing)).toBe(0.675);
+    expect(calculateRequestCostsUsd([request("gpt-5.6-terra", 300_000)], defaultPricing)).toBe(1.38);
+  });
+
+  it("applies the published GPT-5.x long-context tiers strictly above 272K input tokens", () => {
+    // gpt-5.6-sol: short 272K = 272K*4 + 10K*20 = 1.288; long = 272001*8 + 10K*30.
+    expect(calculateRequestCostsUsd([request("gpt-5.6-sol", 272_000)], defaultPricing)).toBe(1.288);
+    expect(calculateRequestCostsUsd([request("gpt-5.6-sol", 272_001)], defaultPricing)).toBe(2.476008);
+    expect(calculateRequestCostsUsd([request("gpt-5.6-terra", 300_000)], defaultPricing)).toBe(1.38);
+    expect(calculateRequestCostsUsd([request("gpt-5.6-luna", 300_000)], defaultPricing)).toBe(0.138);
+    expect(calculateRequestCostsUsd([request("gpt-5.5", 300_000)], defaultPricing)).toBe(3.45);
+    expect(calculateRequestCostsUsd([request("gpt-5.5-pro", 300_000)], defaultPricing)).toBe(20.7);
+    expect(calculateRequestCostsUsd([request("gpt-5.4", 300_000)], defaultPricing)).toBe(1.725);
+    expect(calculateRequestCostsUsd([request("gpt-5.4-pro", 300_000)], defaultPricing)).toBe(20.7);
+    // mini/nano have no published long-context tier and stay flat.
+    expect(calculateRequestCostsUsd([request("gpt-5.4-mini", 300_000)], defaultPricing)).toBe(0.27);
+    expect(calculateRequestCostsUsd([request("gpt-5.4-nano", 300_000)], defaultPricing)).toBe(0.0725);
+  });
+
+  it("applies the Sol long-context card through the gpt-5.6 alias and dated snapshots", () => {
+    for (const model of ["gpt-5.6", "gpt-5.6-sol-2026-10-26", "gpt-5.6-sol-20261026", "copilot/gpt-5.6-sol"]) {
+      expect(calculateRequestCostsUsd([request(model, 300_000)], defaultPricing)).toBe(2.7);
+    }
+  });
+
+  it("keeps a canonical custom flat override above 272K on GPT-5.x cards and honors a custom long card", () => {
+    const pricing = { ...defaultPricing, "gpt-5.6-sol": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    expect(calculateRequestCostsUsd([request("gpt-5.6-sol", 300_000)], pricing)).toBe(0.17);
+    const tiered = { ...pricing, "gpt-5.6-sol-long-context": { inputPerMillion: 4, outputPerMillion: 16 } };
+    expect(calculateRequestCostsUsd([request("gpt-5.6-sol", 300_000)], tiered)).toBe(1.36);
+  });
+
+  it("flags unknown request length at short-context rates and a missing long card on GPT-5.x", () => {
+    const unknown = calculateRequestCosts([{ ...request("gpt-5.6-terra", 100_000), requestInputTokens: undefined }], defaultPricing);
+    expect(unknown.costUsd).toBe(0.32);
+    expect(unknown.assumptions).toEqual(["assumed_short_context_rates:gpt-5.6-terra"]);
+    const pricing = { ...defaultPricing };
+    delete pricing["gpt-5.4-long-context"];
+    const missing = calculateRequestCosts([request("gpt-5.4", 300_000)], pricing);
+    expect(missing.costUsd).toBe(0.9);
+    expect(missing.assumptions).toEqual(["missing_long_context_pricing:gpt-5.4"]);
+  });
+
+  it("assumes short-context rates and flags usage when request size is unknown", () => {
+    const result = calculateRequestCosts([{ ...request("gpt-6-sol", 100_000), requestInputTokens: undefined }], defaultPricing);
+    expect(result.costUsd).toBe(0.3);
+    expect(result.assumptions).toEqual(["assumed_short_context_rates:gpt-6-sol"]);
+  });
+
+  it("falls back to base rates with an assumption when a saved table lacks the long-context card", () => {
+    const pricing = { ...defaultPricing };
+    delete pricing["gpt-6.1-terra-long-context"];
+    const result = calculateRequestCosts([request("gpt-6.1-terra", 300_000)], pricing);
+    expect(result.costUsd).toBe(0.35);
+    expect(result.assumptions).toEqual(["missing_long_context_pricing:gpt-6.1-terra"]);
+  });
+
+  it("uses a custom long-context row when the user saved one", () => {
+    const pricing = { ...defaultPricing, "gpt-6.1-terra-long-context": { inputPerMillion: 10, outputPerMillion: 40 } };
+    expect(calculateRequestCostsUsd([request("gpt-6.1-terra", 300_000)], pricing)).toBe(3.4);
+  });
+
+  it("preserves a canonical custom flat override instead of selecting the bundled long-context card", () => {
+    const pricing = { ...defaultPricing, "gpt-6.1-terra": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    // 300K * 0.5 + 10K * 2 with the user's flat card — not 0.675 at bundled long-context rates.
+    expect(calculateRequestCostsUsd([request("gpt-6.1-terra", 300_000)], pricing)).toBe(0.17);
+    expect(calculateRequestCostsUsd([request("gpt-6.1-terra", 100_000)], pricing)).toBe(0.07);
+  });
+
+  it("keeps flat overrides loaded from a sparse saved pricing file", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "repospend-pricing-"));
+    tempDirs.push(directory);
+    const pricingPath = path.join(directory, "pricing.json");
+    savePricingTable(pricingPath, { "gpt-6.1-terra": { inputPerMillion: 0.5, outputPerMillion: 2 } });
+
+    const loaded = loadPricingTable(pricingPath);
+    expect(loaded["gpt-6.1-terra"]).toEqual({ inputPerMillion: 0.5, outputPerMillion: 2 });
+    expect(calculateRequestCostsUsd([request("gpt-6.1-terra", 300_000)], loaded)).toBe(0.17);
+  });
+
+  it("keeps an exact custom snapshot flat at long-context sizes", () => {
+    const pricing = { ...defaultPricing, "gpt-6.1-terra-2026-10-26": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    expect(calculateRequestCostsUsd([request("gpt-6.1-terra-2026-10-26", 300_000)], pricing)).toBe(0.17);
+  });
+
+  it("still tiers when the user also customized the long-context card", () => {
+    const pricing = {
+      ...defaultPricing,
+      "gpt-6.1-terra": { inputPerMillion: 0.5, outputPerMillion: 2 },
+      "gpt-6.1-terra-long-context": { inputPerMillion: 4, outputPerMillion: 16 },
+    };
+    expect(calculateRequestCostsUsd([request("gpt-6.1-terra", 300_000)], pricing)).toBe(1.36);
+  });
+
+  it("carries the canonical flat override through dated, compact-date, and provider-prefixed aliases", () => {
+    const pricing = { ...defaultPricing, "gpt-6.1-terra": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    for (const model of ["gpt-6.1-terra", "gpt-6.1-terra-2026-10-26", "gpt-6.1-terra-20261026", "copilot/gpt-6.1-terra", "github_copilot/gpt-6.1-terra"]) {
+      expect(calculateRequestCostsUsd([request(model, 300_000)], pricing), model).toBe(0.17);
+    }
+  });
+
+  it("carries the saved canonical flat override through aliases after loadPricingTable", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "repospend-pricing-"));
+    tempDirs.push(directory);
+    const pricingPath = path.join(directory, "pricing.json");
+    savePricingTable(pricingPath, { "gpt-6.1-terra": { inputPerMillion: 0.5, outputPerMillion: 2 } });
+    const loaded = loadPricingTable(pricingPath);
+    for (const model of ["gpt-6.1-terra-2026-10-26", "copilot/gpt-6.1-terra"]) {
+      expect(calculateRequestCostsUsd([request(model, 300_000)], loaded), model).toBe(0.17);
+    }
+  });
+
+  it("keeps alias forms tiered when the user saved a custom long-context card", () => {
+    const pricing = {
+      ...defaultPricing,
+      "gpt-6.1-terra": { inputPerMillion: 0.5, outputPerMillion: 2 },
+      "gpt-6.1-terra-long-context": { inputPerMillion: 4, outputPerMillion: 16 },
+    };
+    expect(calculateRequestCostsUsd([request("gpt-6.1-terra-2026-10-26", 300_000)], pricing)).toBe(1.36);
+    expect(calculateRequestCostsUsd([request("copilot/gpt-6.1-terra", 300_000)], pricing)).toBe(1.36);
+  });
+
+  it("keeps an exact custom snapshot card flat at long-context sizes", () => {
+    const pricing = { ...defaultPricing, "gpt-6.1-terra-2026-10-26": { inputPerMillion: 0.5, outputPerMillion: 2 } };
+    expect(calculateRequestCostsUsd([request("gpt-6.1-terra-2026-10-26", 300_000)], pricing)).toBe(0.17);
+  });
+
+  it("bills legacy generic cache-write rates for unclassified OpenAI TTL writes", () => {
+    const pricing = { "custom-model": { inputPerMillion: 1, cacheCreationInputPerMillion: 2, outputPerMillion: 4 } };
+    const result = calculateRequestCosts([{ model: "custom-model", inputTokens: 10_000, cachedInputTokens: 0, cacheCreationInputTokens30m: 2_000, cacheCreationInputTokens12h: 1_000, outputTokens: 1_000, reasoningTokens: 0, requestInputTokens: 10_000 }], pricing);
+    expect(result.costUsd).toBe(0.017);
   });
 });
 

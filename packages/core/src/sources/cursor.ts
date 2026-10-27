@@ -24,6 +24,9 @@ interface CursorRecordBreakdown {
   model: string | undefined;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheCreationInputTokens30m: number;
+  cacheCreationInputTokens12h: number;
   outputTokens: number;
   reasoningTokens: number;
   totalTokens: number;
@@ -483,9 +486,12 @@ function applyCursorRecord(breakdown: CursorRecordBreakdown, record: unknown): v
   }
 
   const usage = extractUsage(objects);
-  if (usage.inputTokens + usage.cachedInputTokens + usage.outputTokens + usage.reasoningTokens + usage.totalTokens > 0) {
+  if (usage.inputTokens + usage.cachedInputTokens + usage.outputTokens + usage.reasoningTokens + usage.totalTokens + usage.cacheCreationInputTokens > 0) {
     breakdown.inputTokens += usage.inputTokens;
     breakdown.cachedInputTokens += usage.cachedInputTokens;
+    breakdown.cacheCreationInputTokens += usage.cacheCreationInputTokens;
+    breakdown.cacheCreationInputTokens30m += usage.cacheCreationInputTokens30m;
+    breakdown.cacheCreationInputTokens12h += usage.cacheCreationInputTokens12h;
     breakdown.outputTokens += usage.outputTokens;
     breakdown.reasoningTokens += usage.reasoningTokens;
     breakdown.totalTokens += usage.totalTokens;
@@ -587,12 +593,19 @@ function textFromUnknown(value: unknown): string | undefined {
   return stringValue(object.text) ?? stringValue(object.content) ?? stringValue(object.value);
 }
 
-function extractUsage(objects: Record<string, unknown>[]): { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningTokens: number; totalTokens: number; estimatedPromptTokens: boolean } {
+function extractUsage(objects: Record<string, unknown>[]): { inputTokens: number; cachedInputTokens: number; cacheCreationInputTokens: number; cacheCreationInputTokens30m: number; cacheCreationInputTokens12h: number; outputTokens: number; reasoningTokens: number; totalTokens: number; estimatedPromptTokens: boolean } {
   const usageObjects = objects.filter((object) => Object.keys(object).some((key) => key.toLowerCase().includes("token") || key.toLowerCase() === "usage"));
   const candidates = usageObjects.length ? usageObjects : objects;
+  const detailObjects = candidates.flatMap((candidate) => [firstObject(candidate.input_tokens_details), firstObject(candidate.inputTokensDetails), firstObject(candidate.cache_write_tokens_details)].filter((item): item is Record<string, unknown> => Boolean(item)));
+  const cacheCreation30m = firstNumberByKeys(detailObjects, ["ttl_30m_tokens", "ttl30mTokens"]) ?? 0;
+  const cacheCreation12h = firstNumberByKeys(detailObjects, ["ttl_12h_tokens", "ttl12hTokens"]) ?? 0;
+  const cacheCreationDeclared = firstNumberByKeys(candidates, ["cacheCreationInputTokens", "cache_creation_input_tokens", "cacheWriteInputTokens", "cache_write_input_tokens", "cache_write_tokens"]) ?? firstNumberByKeys(detailObjects, ["cache_write_tokens", "cacheWriteTokens"]) ?? 0;
   return {
     inputTokens: firstNumberByKeys(candidates, ["inputTokens", "input_tokens", "promptTokens", "prompt_tokens", "totalUsedTokens"]) ?? 0,
-    cachedInputTokens: firstNumberByKeys(candidates, ["cachedInputTokens", "cached_input_tokens", "cacheReadInputTokens", "cache_read_input_tokens"]) ?? 0,
+    cachedInputTokens: firstNumberByKeys(candidates, ["cachedInputTokens", "cached_input_tokens", "cached_tokens", "cacheReadInputTokens", "cache_read_input_tokens"]) ?? firstNumberByKeys(detailObjects, ["cached_tokens", "cachedTokens"]) ?? 0,
+    cacheCreationInputTokens: Math.max(cacheCreationDeclared, cacheCreation30m + cacheCreation12h),
+    cacheCreationInputTokens30m: cacheCreation30m,
+    cacheCreationInputTokens12h: cacheCreation12h,
     outputTokens: firstNumberByKeys(candidates, ["outputTokens", "output_tokens", "completionTokens", "completion_tokens"]) ?? 0,
     reasoningTokens: firstNumberByKeys(candidates, ["reasoningTokens", "reasoning_tokens", "reasoningOutputTokens", "reasoning_output_tokens"]) ?? 0,
     totalTokens: firstNumberByKeys(candidates, ["totalTokens", "total_tokens", "tokens", "tokenCount", "token_count"]) ?? 0,
@@ -652,6 +665,9 @@ function candidateToUsage(candidate: CursorSessionCandidate, index: number, opti
     provider: providerForModel(breakdown.model ?? ""),
     inputTokens: breakdown.inputTokens,
     cachedInputTokens: breakdown.cachedInputTokens,
+    cacheCreationInputTokens: breakdown.cacheCreationInputTokens || undefined,
+    cacheCreationInputTokens30m: breakdown.cacheCreationInputTokens30m || undefined,
+    cacheCreationInputTokens12h: breakdown.cacheCreationInputTokens12h || undefined,
     outputTokens: breakdown.outputTokens,
     reasoningTokens: breakdown.reasoningTokens,
     reasoningOutputTokens: breakdown.reasoningTokens,
@@ -704,7 +720,7 @@ function candidateToUsage(candidate: CursorSessionCandidate, index: number, opti
   return {
     ...usage,
     estimatedCostUsd,
-    warnings: estimatedCostUsd === undefined ? [...new Set([...usage.warnings, breakdown.hasEstimatedPromptTokens ? "cursor_cost_not_estimated_from_prompt_tokens" : hasTokenBreakdown ? "unknown_pricing" : "unknown_cost", ...(estimate?.warnings ?? [])])] : usage.warnings,
+    warnings: estimatedCostUsd === undefined ? [...new Set([...usage.warnings, breakdown.hasEstimatedPromptTokens ? "cursor_cost_not_estimated_from_prompt_tokens" : hasTokenBreakdown ? "unknown_pricing" : "unknown_cost", ...(estimate?.warnings ?? []), ...(estimate?.assumptions ?? [])])] : [...new Set([...usage.warnings, ...(estimate?.assumptions ?? [])])],
   };
 }
 
@@ -833,6 +849,9 @@ function emptyBreakdown(): CursorRecordBreakdown {
     model: undefined,
     inputTokens: 0,
     cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheCreationInputTokens30m: 0,
+    cacheCreationInputTokens12h: 0,
     outputTokens: 0,
     reasoningTokens: 0,
     totalTokens: 0,

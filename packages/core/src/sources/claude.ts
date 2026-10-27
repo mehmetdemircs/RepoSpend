@@ -361,7 +361,7 @@ function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options:
   return {
     ...usage,
     estimatedCostUsd: cost,
-    warnings: cost === undefined ? [...new Set([...usage.warnings, "unknown_pricing", ...(estimate?.warnings ?? []), ...(estimate?.warnings.some((warning) => warning.startsWith("unknown_pricing_model:") && warning.includes("fast-mode")) ? ["unknown_fast_mode_pricing"] : [])])] : usage.warnings,
+    warnings: cost === undefined ? [...new Set([...usage.warnings, "unknown_pricing", ...(estimate?.warnings ?? []), ...(estimate?.assumptions ?? []), ...(estimate?.warnings.some((warning) => warning.startsWith("unknown_pricing_model:") && warning.includes("fast-mode")) ? ["unknown_fast_mode_pricing"] : [])])] : [...new Set([...usage.warnings, ...(estimate?.assumptions ?? [])])],
   };
 }
 

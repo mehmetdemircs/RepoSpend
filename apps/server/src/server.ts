@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
-import Fastify from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
 import { pricingInfo } from "@repospend/core";
-import type { DashboardResponse, RepoSpendConfig, UsageFilters } from "@repospend/types";
+import type { DashboardResponse, ModelPricing, RepoSpendConfig, UsageFilters } from "@repospend/types";
 import { clearRepoSpendLocalData, clearRepoSpendParseCache, exportCsv, exportJson, parseDashboardOptions, parseFilters, readConfigData, readDashboardData, readPricingData, warmDashboardCache, writeConfigData, writePricingData } from "./data.js";
 import { demoModeEnabled, readDemoDashboardData, readDemoRtkGain } from "./demo/index.js";
 import { readRtkGain } from "./rtk.js";
@@ -20,12 +20,18 @@ export function createServer(options: ServerOptions = {}) {
   const app = Fastify({ logger: false });
 
   app.addHook("onRequest", async (request, reply) => {
-    if (!isProtectedLocalMutation(request.method, request.url)) return;
-    if (!isAllowedLocalHost(request.headers.host)) {
-      return reply.code(403).send({ error: "Mutating RepoSpend local settings requires a localhost Host header." });
+    const path = guardRequestPath(request);
+    if (isProtectedLocalMutation(request.method, path)) {
+      if (!isAllowedLocalHost(request.headers.host)) {
+        return reply.code(403).send({ error: "Mutating RepoSpend local settings requires a localhost Host header." });
+      }
+      if (!isAllowedLocalOrigin(request.headers.origin)) {
+        return reply.code(403).send({ error: "Mutating RepoSpend local settings requires a localhost Origin." });
+      }
+      return;
     }
-    if (!isAllowedLocalOrigin(request.headers.origin)) {
-      return reply.code(403).send({ error: "Mutating RepoSpend local settings requires a localhost Origin." });
+    if (isSensitiveLocalRead(request.method, path) && request.headers.host && !isAllowedLocalHost(request.headers.host)) {
+      return reply.code(403).send({ error: "Reading RepoSpend local data requires a localhost Host header." });
     }
   });
 
@@ -159,7 +165,39 @@ function isAddressInUse(error: unknown): boolean {
 
 function isProtectedLocalMutation(method: string, url: string): boolean {
   if (method !== "PUT" && method !== "POST" && method !== "DELETE") return false;
-  return url.startsWith("/api/settings/") || url.startsWith("/api/cache/");
+  const pathname = routerNormalizedPath(url);
+  return pathname.startsWith("/api/settings/") || pathname.startsWith("/api/cache/");
+}
+
+// DNS-rebinding guard: local data reads are still reachable only to callers presenting a
+// loopback Host header. CLI and health checks stay open (missing Host is allowed).
+const SENSITIVE_LOCAL_READS = new Set(["/api/dashboard", "/api/export.json", "/api/export.csv"]);
+
+function isSensitiveLocalRead(method: string, url: string): boolean {
+  if (method !== "GET" && method !== "HEAD") return false;
+  return SENSITIVE_LOCAL_READS.has(routerNormalizedPath(url));
+}
+
+// The matched route pattern is the same path the router used, so it is the most reliable
+// guard input. When it is not available in this hook, fall back to normalizing the request
+// target the way the router does — including absolute-form targets like
+// `GET http://host/api/dashboard`, which the router matches on the path portion.
+function guardRequestPath(request: FastifyRequest): string {
+  const matched = request.routeOptions?.url;
+  return typeof matched === "string" ? matched : routerNormalizedPath(request.url);
+}
+
+// find-my-way decodes percent-encoded path segments before matching, so the guard must
+// compare the same normalized path — a raw URL like /api/%64ashboard would otherwise
+// serve /api/dashboard while skipping the Host check.
+function routerNormalizedPath(url: string): string {
+  const absoluteStripped = url.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/?#]*/, "");
+  const raw = absoluteStripped.split("?")[0] ?? "";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }
 
 function isAllowedLocalHost(hostHeader: string | undefined): boolean {
@@ -197,25 +235,29 @@ function validatePricingBody(body: unknown) {
     throw new Error("Expected JSON body with a models object.");
   }
 
-  const validated: Record<string, { inputPerMillion: number; cachedInputPerMillion?: number; cacheCreationInput5mPerMillion?: number; cacheCreationInput1hPerMillion?: number; cacheCreationInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string }> = {};
+  const validated: Record<string, ModelPricing> = {};
   for (const [model, value] of Object.entries(models as Record<string, unknown>)) {
     if (!model.trim() || !value || typeof value !== "object" || Array.isArray(value)) continue;
     const row = value as Record<string, unknown>;
     const inputPerMillion = finiteNumber(row.inputPerMillion);
     const outputPerMillion = finiteNumber(row.outputPerMillion);
     if (inputPerMillion === undefined || outputPerMillion === undefined) continue;
-    const modelPricing: { inputPerMillion: number; cachedInputPerMillion?: number; cacheCreationInput5mPerMillion?: number; cacheCreationInput1hPerMillion?: number; cacheCreationInputPerMillion?: number; outputPerMillion: number; reasoningOutputPerMillion?: number; note?: string } = {
+    const modelPricing: ModelPricing = {
       inputPerMillion,
       outputPerMillion,
     };
     const cachedInputPerMillion = finiteNumber(row.cachedInputPerMillion);
     const cacheCreationInput5mPerMillion = finiteNumber(row.cacheCreationInput5mPerMillion);
     const cacheCreationInput1hPerMillion = finiteNumber(row.cacheCreationInput1hPerMillion);
+    const cacheCreationInput30mPerMillion = finiteNumber(row.cacheCreationInput30mPerMillion);
+    const cacheCreationInput12hPerMillion = finiteNumber(row.cacheCreationInput12hPerMillion);
     const cacheCreationInputPerMillion = finiteNumber(row.cacheCreationInputPerMillion);
     const reasoningOutputPerMillion = finiteNumber(row.reasoningOutputPerMillion);
     if (cachedInputPerMillion !== undefined) modelPricing.cachedInputPerMillion = cachedInputPerMillion;
     if (cacheCreationInput5mPerMillion !== undefined) modelPricing.cacheCreationInput5mPerMillion = cacheCreationInput5mPerMillion;
     if (cacheCreationInput1hPerMillion !== undefined) modelPricing.cacheCreationInput1hPerMillion = cacheCreationInput1hPerMillion;
+    if (cacheCreationInput30mPerMillion !== undefined) modelPricing.cacheCreationInput30mPerMillion = cacheCreationInput30mPerMillion;
+    if (cacheCreationInput12hPerMillion !== undefined) modelPricing.cacheCreationInput12hPerMillion = cacheCreationInput12hPerMillion;
     if (cacheCreationInputPerMillion !== undefined) modelPricing.cacheCreationInputPerMillion = cacheCreationInputPerMillion;
     if (reasoningOutputPerMillion !== undefined) modelPricing.reasoningOutputPerMillion = reasoningOutputPerMillion;
     if (typeof row.note === "string") modelPricing.note = row.note;
