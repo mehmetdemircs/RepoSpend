@@ -24,11 +24,24 @@ export const pricingInfo = {
     { label: "GitHub Copilot model pricing reference", url: "https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" },
   ],
   unit: "USD per 1M tokens",
-  updatedAt: "2026-10-27",
+  updatedAt: "2026-11-21",
   note: "RepoSpend estimates API-equivalent cost from local token counts and public Standard pricing. Requests over each model's long-context threshold reprice per request when request sizes are recorded; aggregate-only usage assumes short-context rates and is flagged. Claude transcript fast-mode speeds use explicit published cards. Other processing modes, regional, and account-specific pricing can differ. This is not your actual bill.",
 };
 
 export const defaultPricing: PricingTable = {
+  "gpt-6.2-astra": { inputPerMillion: 8, cachedInputPerMillion: 0.4, cacheCreationInputPerMillion: 10, cacheCreationInput30mPerMillion: 10, cacheCreationInput12hPerMillion: 20, outputPerMillion: 40, reasoningOutputPerMillion: 40 },
+  "gpt-6.2-astra-long-context": { inputPerMillion: 16, cachedInputPerMillion: 0.8, cacheCreationInputPerMillion: 20, cacheCreationInput30mPerMillion: 20, cacheCreationInput12hPerMillion: 40, outputPerMillion: 60, reasoningOutputPerMillion: 60 },
+  "gpt-6.2-sol": { inputPerMillion: 2, cachedInputPerMillion: 0.1, cacheCreationInputPerMillion: 2.5, cacheCreationInput30mPerMillion: 2.5, cacheCreationInput12hPerMillion: 5, outputPerMillion: 10, reasoningOutputPerMillion: 10 },
+  "gpt-6.2-sol-long-context": { inputPerMillion: 4, cachedInputPerMillion: 0.2, cacheCreationInputPerMillion: 5, cacheCreationInput30mPerMillion: 5, cacheCreationInput12hPerMillion: 10, outputPerMillion: 15, reasoningOutputPerMillion: 15 },
+  "claude-fable-5-2": { inputPerMillion: 8, cachedInputPerMillion: 0.2, cacheCreationInput5mPerMillion: 10, cacheCreationInput1hPerMillion: 16, cacheCreationInputPerMillion: 16, outputPerMillion: 40 },
+  "claude-mythos-5-2": { inputPerMillion: 8, cachedInputPerMillion: 0.2, cacheCreationInput5mPerMillion: 10, cacheCreationInput1hPerMillion: 16, cacheCreationInputPerMillion: 16, outputPerMillion: 40 },
+  "claude-fable-5-2-fast-mode": { inputPerMillion: 16, cachedInputPerMillion: 0.4, cacheCreationInput5mPerMillion: 20, cacheCreationInput1hPerMillion: 32, cacheCreationInputPerMillion: 32, outputPerMillion: 80 },
+  "claude-mythos-5-2-fast-mode": { inputPerMillion: 16, cachedInputPerMillion: 0.4, cacheCreationInput5mPerMillion: 20, cacheCreationInput1hPerMillion: 32, cacheCreationInputPerMillion: 32, outputPerMillion: 80 },
+  "gemini-4-carbon": { inputPerMillion: 2, cachedInputPerMillion: 0.1, outputPerMillion: 10, reasoningOutputPerMillion: 10, note: "Introductory Copilot rate through November 30, 2026. From December 1: $4 input, $0.20 cache reads, $20 output per 1M." },
+  "gemini-4-neon": { inputPerMillion: 3, cachedInputPerMillion: 0.15, outputPerMillion: 15, reasoningOutputPerMillion: 15 },
+  "gemini-4-hydrogen": { inputPerMillion: 1.5, cachedInputPerMillion: 0.075, outputPerMillion: 7.5, reasoningOutputPerMillion: 7.5 },
+  "mai-code-2": { inputPerMillion: 0.5, cachedInputPerMillion: 0.025, outputPerMillion: 2.5, reasoningOutputPerMillion: 2.5, note: "Introductory GitHub Copilot rate before May 17, 2027." },
+  "mai-code-2-flash": { inputPerMillion: 0.05, cachedInputPerMillion: 0.005, outputPerMillion: 0.25, reasoningOutputPerMillion: 0.25, note: "Introductory GitHub Copilot rate before May 17, 2027." },
   "gpt-6-astra": { inputPerMillion: 10, cachedInputPerMillion: 1, cacheCreationInputPerMillion: 12.5, cacheCreationInput30mPerMillion: 12.5, cacheCreationInput12hPerMillion: 25, outputPerMillion: 50, reasoningOutputPerMillion: 50 },
   "gpt-6-astra-long-context": { inputPerMillion: 20, cachedInputPerMillion: 2, cacheCreationInputPerMillion: 25, cacheCreationInput30mPerMillion: 25, cacheCreationInput12hPerMillion: 50, outputPerMillion: 75, reasoningOutputPerMillion: 75, note: "RepoSpend pricing card, not a provider model ID. Applied to the whole request when a single API call exceeds 272K input tokens: input and cache rates 2x, output 1.5x." },
   "gpt-6-sol": { inputPerMillion: 2, cachedInputPerMillion: 0.2, cacheCreationInputPerMillion: 2.5, cacheCreationInput30mPerMillion: 2.5, cacheCreationInput12hPerMillion: 5, outputPerMillion: 10, reasoningOutputPerMillion: 10 },
@@ -39,8 +52,8 @@ export const defaultPricing: PricingTable = {
   "gpt-6.1-sol-long-context": { inputPerMillion: 4, cachedInputPerMillion: 0.2, cacheCreationInputPerMillion: 5, cacheCreationInput30mPerMillion: 5, cacheCreationInput12hPerMillion: 10, outputPerMillion: 15, reasoningOutputPerMillion: 15, note: "RepoSpend pricing card, not a provider model ID. Applied to the whole request when a single API call exceeds 272K input tokens: input and cache rates 2x, output 1.5x." },
   "gpt-6.1-terra": { inputPerMillion: 1, cachedInputPerMillion: 0.05, cacheCreationInputPerMillion: 1.25, cacheCreationInput30mPerMillion: 1.25, cacheCreationInput12hPerMillion: 2.5, outputPerMillion: 5, reasoningOutputPerMillion: 5, note: "GPT-6.1 Terra Standard short-context rates, released October 26, 2026. Cache writes are 1.25x input for 30-minute TTL and 2.5x for 12-hour TTL." },
   "gpt-6.1-terra-long-context": { inputPerMillion: 2, cachedInputPerMillion: 0.1, cacheCreationInputPerMillion: 2.5, cacheCreationInput30mPerMillion: 2.5, cacheCreationInput12hPerMillion: 5, outputPerMillion: 7.5, reasoningOutputPerMillion: 7.5, note: "RepoSpend pricing card, not a provider model ID. Applied to the whole request when a single API call exceeds 272K input tokens: input and cache rates 2x, output 1.5x." },
-  "gpt-5.6": { inputPerMillion: 4, cachedInputPerMillion: 0.4, cacheCreationInputPerMillion: 5, cacheCreationInput30mPerMillion: 5, cacheCreationInput12hPerMillion: 10, outputPerMillion: 20, reasoningOutputPerMillion: 20, note: "GPT-5.6 aliases Sol. Promotional Standard short-context rates are available at least through November 21, 2026: $4 input / $20 output, $0.40 cache reads, and $5 cache writes per 1M tokens." },
-  "gpt-5.6-sol": { inputPerMillion: 4, cachedInputPerMillion: 0.4, cacheCreationInputPerMillion: 5, cacheCreationInput30mPerMillion: 5, cacheCreationInput12hPerMillion: 10, outputPerMillion: 20, reasoningOutputPerMillion: 20, note: "Promotional Standard short-context rates available at least through November 21, 2026." },
+  "gpt-5.6": { inputPerMillion: 4, cachedInputPerMillion: 0.4, cacheCreationInputPerMillion: 5, cacheCreationInput30mPerMillion: 5, cacheCreationInput12hPerMillion: 10, outputPerMillion: 20, reasoningOutputPerMillion: 20, note: "GPT-5.6 aliases Sol. Promotional Standard short-context rates are available through November 30, 2026: $4 input / $20 output, $0.40 cache reads, and $5 cache writes per 1M tokens." },
+  "gpt-5.6-sol": { inputPerMillion: 4, cachedInputPerMillion: 0.4, cacheCreationInputPerMillion: 5, cacheCreationInput30mPerMillion: 5, cacheCreationInput12hPerMillion: 10, outputPerMillion: 20, reasoningOutputPerMillion: 20, note: "Promotional Standard short-context rates available through November 30, 2026." },
   "gpt-5.6-terra": { inputPerMillion: 2, cachedInputPerMillion: 0.2, cacheCreationInputPerMillion: 2.5, cacheCreationInput30mPerMillion: 2.5, cacheCreationInput12hPerMillion: 5, outputPerMillion: 12, reasoningOutputPerMillion: 12, note: "GPT-5.6 Terra reduced API pricing effective July 30, 2026. Cache reads are 90% below input and cache writes are 1.25x input." },
   "gpt-5.6-luna": { inputPerMillion: 0.2, cachedInputPerMillion: 0.02, cacheCreationInputPerMillion: 0.25, cacheCreationInput30mPerMillion: 0.25, cacheCreationInput12hPerMillion: 0.5, outputPerMillion: 1.2, reasoningOutputPerMillion: 1.2, note: "GPT-5.6 Luna reduced API pricing effective July 30, 2026. Cache reads are 90% below input and cache writes are 1.25x input." },
   "gpt-5.5": { inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30, reasoningOutputPerMillion: 30 },
@@ -218,6 +231,12 @@ export function calculateRequestCosts(requests: Array<CostUsage & { requestInput
       resolution = resolvePricingForModel(request.model, pricing);
       resolutions.set(request.model, resolution);
     }
+    if (request.model && resolution?.inherited && resolution.sourceModel) {
+      const model = normalizePricingModelId(request.model);
+      const source = normalizePricingModelId(resolution.sourceModel);
+      const withoutSnapshot = model.replace(/-(?:\d{4}-\d{2}-\d{2}|\d{8})$/, "");
+      if (withoutSnapshot !== source) assumptions.add(`inherited_pricing:${model}:${source}`);
+    }
     const context = requestContextPricing(request, pricing, resolution);
     if (context.assumption) assumptions.add(context.assumption);
     const cost = context.pricing === undefined ? undefined : costFromModelPricing(request, context.pricing);
@@ -252,6 +271,8 @@ interface RequestContextRule {
 }
 
 const REQUEST_CONTEXT_RULES: RequestContextRule[] = [
+  { baseModel: "gpt-6.2-astra", thresholdInputTokens: 272_000, longContextModel: "gpt-6.2-astra-long-context", unknownRequestSize: "short-context", missingLongContextCard: "base", canonicalFlatOverride: true },
+  { baseModel: "gpt-6.2-sol", thresholdInputTokens: 272_000, longContextModel: "gpt-6.2-sol-long-context", unknownRequestSize: "short-context", missingLongContextCard: "base", canonicalFlatOverride: true },
   { baseModel: "claude-haiku-5-5", thresholdInputTokens: 100_000, longContextModel: "claude-haiku-5-5-long-context", unknownRequestSize: "unpriced", missingLongContextCard: "unpriced", inheritedModelPattern: /^claude-haiku-5-5(?:$|[-.@[])/ },
   { baseModel: "gpt-6-astra", thresholdInputTokens: 272_000, longContextModel: "gpt-6-astra-long-context", unknownRequestSize: "short-context", missingLongContextCard: "base", canonicalFlatOverride: true },
   { baseModel: "gpt-6-sol", thresholdInputTokens: 272_000, longContextModel: "gpt-6-sol-long-context", unknownRequestSize: "short-context", missingLongContextCard: "base", canonicalFlatOverride: true },

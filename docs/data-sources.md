@@ -108,6 +108,10 @@ The normalized usage shape lives in `packages/types` and is intended to support 
 For details on cache, reasoning, and comparison with tools such as `ccusage` and
 Tokscale, see [token-accounting.md](token-accounting.md).
 
+## Linked Git worktrees
+
+Linked checkouts that point to a common repository `.git` directory roll up to that repository. The session keeps its checkout path and branch. Use the repository's Sessions tab to filter by checkout. If the common Git directory cannot be associated with a checkout root, the local checkout stays under its own path.
+
 ## RepoSpend-Owned Data
 
 RepoSpend-owned settings are stored separately under `~/.repospend/`:

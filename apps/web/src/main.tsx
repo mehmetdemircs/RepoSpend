@@ -276,7 +276,7 @@ function App() {
   React.useEffect(() => {
     const repoSource = filterOptionsData ?? data;
     if (repoSource && selectedRepo && !repoSource.repos.some((repo) => repo.id === selectedRepo)) {
-      setSelectedRepo(null);
+      setSelectedRepo(repoSource.sessions.find((session) => session.worktreeRoot === selectedRepo)?.repoRoot ?? null);
     }
   }, [data, filterOptionsData, selectedRepo]);
 
@@ -1924,12 +1924,14 @@ function RepoTable({
 function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, onOpenSession }: { repo: UsageGroup | undefined; sessions: Session[]; allRepos: RepoRow[]; data: ApiData; dateRangeLabel: string; pageSize: number; onOpenSession?: (sessionId: string) => void }) {
   const [activeTab, setActiveTab] = React.useState<RepoDetailTab>("overview");
   const [sessionSearch, setSessionSearch] = React.useState("");
+  const [checkout, setCheckout] = React.useState("");
   const [quickFilter, setQuickFilter] = React.useState<RepoSessionQuickFilter | "">("");
   const [visibleColumns, setVisibleColumns] = React.useState<SessionColumnKey[]>(repoDetailSessionColumns);
 
   React.useEffect(() => {
     setActiveTab("overview");
     setSessionSearch("");
+    setCheckout("");
     setQuickFilter("");
   }, [repo?.id]);
 
@@ -1946,7 +1948,10 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
   const concentration = repoCostConcentration(row, sessions);
   const primaryIssue = primaryRepoIssue(warnings, concentration);
   const reviewSessions = topSessionsToReview(sessions, row);
-  const filteredSessions = sessions.filter((session) => sessionMatchesSearch(session, sessionSearch) && sessionMatchesRepoQuickFilter(session, quickFilter, sessions));
+  const checkouts = [...new Set(sessions.map((session) => session.worktreeRoot ?? repo.id))].sort();
+  const activeCheckout = checkouts.includes(checkout) ? checkout : "";
+  const checkoutSessions = activeCheckout ? sessions.filter((session) => (session.worktreeRoot ?? repo.id) === activeCheckout) : sessions;
+  const filteredSessions = checkoutSessions.filter((session) => sessionMatchesSearch(session, sessionSearch) && sessionMatchesRepoQuickFilter(session, quickFilter, checkoutSessions));
   const tabs: Array<{ key: RepoDetailTab; label: string }> = [
     { key: "overview", label: "Overview" },
     { key: "sessions", label: "Sessions" },
@@ -1965,7 +1970,7 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
   ] as Array<[RepoSessionQuickFilter, string]>).map(([value, label]) => ({
     value,
     label,
-    count: sessions.filter((session) => sessionMatchesRepoQuickFilter(session, value, sessions)).length,
+    count: checkoutSessions.filter((session) => sessionMatchesRepoQuickFilter(session, value, checkoutSessions)).length,
   }));
   return (
     <div className="repo-detail-page">
@@ -2022,8 +2027,20 @@ function RepoDetail({ repo, sessions, allRepos, data, dateRangeLabel, pageSize, 
               <Search className="h-4 w-4" aria-hidden />
               <input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="Search sessions..." />
             </label>
+            {checkouts.some((root) => root !== repo.id) ? (
+              <Select
+                icon={<FolderGit2 aria-hidden />}
+                label="Checkout"
+                value={activeCheckout}
+                onChange={(value) => { setCheckout(value); setQuickFilter(""); }}
+                options={[{ value: "", label: "All checkouts" }, ...checkouts.map((root) => ({
+                  value: root,
+                  label: root === repo.id ? "Main checkout" : shortPath(root),
+                }))]}
+              />
+            ) : null}
             <div className="quick-filter-row">
-              <button className={`quick-filter ${quickFilter === "" ? "active" : ""}`} type="button" onClick={() => setQuickFilter("")}>All <span>{sessions.length}</span></button>
+              <button className={`quick-filter ${quickFilter === "" ? "active" : ""}`} type="button" onClick={() => setQuickFilter("")}>All <span>{checkoutSessions.length}</span></button>
               {quickFilterOptions.map(({ value, label, count: filterCount }) => (
                 <button
                   className={`quick-filter ${quickFilter === value ? "active" : ""}`}
@@ -2384,6 +2401,12 @@ function repoWarningDetail(warning: string): RepoWarningDetail {
   };
   if (normalized === "unknown_request_context" || normalized.startsWith("unknown_pricing_model:")) {
     return { key: warning, title: normalized === "unknown_request_context" ? "Missing request lengths" : "Unpriced request model", detail: readableWarning(warning), category: "pricing", categoryLabel: "Pricing incomplete", tone: "warning", actionLabel: "Pricing review" };
+  }
+  if (normalized.startsWith("inherited_pricing:")) {
+    return { ...fallback, title: "Inherited rate", category: "pricing", categoryLabel: "Pricing assumption", actionLabel: "Pricing review" };
+  }
+  if (normalized === "codex_cumulative_checkpoint_without_request_detail") {
+    return { ...fallback, title: "Incomplete Codex coverage", tone: "warning" };
   }
   if (normalized.startsWith("assumed_short_context_rates:")) {
     return { key: warning, title: "Short-context rates assumed", detail: readableWarning(warning), category: "pricing", categoryLabel: "Pricing assumption", tone: "info", actionLabel: "Pricing review" };
@@ -5643,6 +5666,8 @@ function repoWarningBadgeItem(warning: string): WarningBadgeItem {
   const title = readableWarning(warning);
   if (warning.toLowerCase() === "unknown_request_context") return { label: "Missing request lengths", title, tone: "warning" };
   if (warning.toLowerCase().startsWith("unknown_pricing_model:")) return { label: "Unpriced request model", title, tone: "warning" };
+  if (warning.toLowerCase().startsWith("inherited_pricing:")) return { label: "Inherited rate", title, tone: "info" };
+  if (normalized === "codex cumulative checkpoint without request detail") return { label: "Incomplete Codex coverage", title, tone: "warning" };
   if (warning.toLowerCase().startsWith("assumed_short_context_rates:")) return { label: "Short-context assumed", title, tone: "info" };
   if (warning.toLowerCase().startsWith("missing_long_context_pricing:")) return { label: "Long-context card missing", title, tone: "warning" };
   if (normalized === "expensive session concentration") return { label: "Cost concentration", title, tone: "warning" };

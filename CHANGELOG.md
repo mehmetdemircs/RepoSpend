@@ -4,6 +4,13 @@ All notable changes to RepoSpend will be documented in this file.
 
 ## Unreleased
 
+## 0.1.9
+
+- Add exact GPT-6.2 Astra and Sol rates, including per-request long-context rules, and Claude Fable and Mythos 5.2 Standard and Fast rates. Refresh pricing coverage for Gemini 4 and MAI Code 2 in Copilot. Show inherited rates in session warnings and the confidence report.
+- Count Codex response records and their matching token-count events once, and preserve mixed-model attribution when cumulative-only checkpoints coexist. Flag unmatched checkpoints that can make totals incomplete.
+- Group linked Git worktrees by their owning repo, retain checkout and branch metadata, and filter repo sessions by checkout.
+
+
 ## 0.1.8
 
 - Add explicit GPT-6.1 Terra Standard API-equivalent pricing ($1 input / $0.05 cached input / $5 output per 1M) with alias, snapshot, and custom-override handling, and per-request long-context cards for GPT-6/6.1 models: a single request over 272,000 input tokens reprices that request at 2x input/cache rates and 1.5x output rates. The same per-request tiers now cover the GPT-5.x Standard cards (5.6 Sol/Terra/Luna, 5.5, 5.5 Pro, 5.4, 5.4 Pro); mini and nano have no published tier and stay flat.

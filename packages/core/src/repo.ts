@@ -7,6 +7,7 @@ import type { FileSystemLike } from "./fs.js";
 
 export interface RepoInfo {
   repoRoot: string;
+  worktreeRoot?: string | undefined;
   repoName: string;
   gitRemoteUrl: string | undefined;
   gitBranch: string | undefined;
@@ -47,10 +48,10 @@ export function findGitRoot(cwd: string, fileSystem: Pick<FileSystemLike, "exist
 export function resolveRepoInfo(cwd: string, config: RepoSpendConfig = {}, fileSystem: FileSystemLike = fs): RepoInfo {
   const warnings: string[] = [];
   const gitRoot = safeFindGitRoot(cwd, fileSystem);
-  const repoRoot = gitRoot ?? fallbackWorkspaceRoot(cwd, fileSystem);
+  const gitMeta = gitRoot ? readGitMetadata(gitRoot, fileSystem) : { remote: undefined, branch: undefined };
+  const repoRoot = gitMeta.repositoryRoot ?? gitRoot ?? fallbackWorkspaceRoot(cwd, fileSystem);
   const alias = aliasForPath(repoRoot, config);
   const repoName = alias ?? (gitRoot ? path.basename(repoRoot) : fallbackWorkspaceLabel(repoRoot));
-  const gitMeta = gitRoot ? readGitMetadata(gitRoot, fileSystem) : { remote: undefined, branch: undefined };
 
   if (!gitRoot) {
     warnings.push("repo_unverified_no_git_root");
@@ -59,6 +60,7 @@ export function resolveRepoInfo(cwd: string, config: RepoSpendConfig = {}, fileS
   return {
     repoRoot,
     repoName,
+    worktreeRoot: gitRoot !== repoRoot ? gitRoot : undefined,
     gitRemoteUrl: gitMeta.remote,
     gitBranch: gitMeta.branch,
     verified: Boolean(gitRoot),
@@ -134,16 +136,23 @@ function fallbackWorkspaceLabel(repoRoot: string): string {
   return path.basename(repoRoot) || "unknown-workspace";
 }
 
-function readGitMetadata(repoRoot: string, fileSystem: FileSystemLike): { remote: string | undefined; branch: string | undefined } {
+function readGitMetadata(repoRoot: string, fileSystem: FileSystemLike): { remote?: string | undefined; branch?: string | undefined; repositoryRoot?: string | undefined } {
   const gitPath = path.join(repoRoot, ".git");
   try {
     const stat = fileSystem.statSync(gitPath);
     const gitDir = stat.isFile() ? resolveGitFile(repoRoot, fileSystem.readFileSync(gitPath, "utf8")) : gitPath;
-    const configPath = path.join(gitDir, "config");
+    const commonDirFile = path.join(gitDir, "commondir");
+    const commonDir = stat.isFile() && fileSystem.existsSync(commonDirFile)
+      ? path.resolve(gitDir, fileSystem.readFileSync(commonDirFile, "utf8").trim())
+      : gitDir;
+    const repositoryRoot = commonDir !== gitDir && path.basename(commonDir) === ".git"
+      ? normalizeRoot(path.dirname(commonDir))
+      : undefined;
+    const configPath = path.join(commonDir, "config");
     const headPath = path.join(gitDir, "HEAD");
     const remote = fileSystem.existsSync(configPath) ? parseRemote(fileSystem.readFileSync(configPath, "utf8")) : undefined;
     const branch = fileSystem.existsSync(headPath) ? parseBranch(fileSystem.readFileSync(headPath, "utf8")) : undefined;
-    return { remote, branch };
+    return { remote, branch, repositoryRoot };
   } catch {
     return { remote: undefined, branch: undefined };
   }

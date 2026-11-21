@@ -28,6 +28,7 @@ export interface SessionIdentity {
   sourceAppRaw: string | undefined;
   sourcePath: string;
   repoRoot: string;
+  worktreeRoot?: string | undefined;
   repoName: string;
   cwd: string;
   gitRemoteUrl: string | undefined;
@@ -414,11 +415,15 @@ export function normalizePricingModelId(model: string): string {
     .replace(/^github_copilot\//, "")
     .replace(/^github-copilot\//, "")
     .replace(/^copilot\//, "")
-    .replace(/claude-(opus|sonnet|haiku)-(\d+)\.(\d+)(?=$|[-.])/, "claude-$1-$2-$3");
+    .replace(/claude-(fable|mythos|opus|sonnet|haiku)-(\d+)\.(\d+)(?=$|[-.])/, "claude-$1-$2-$3");
 }
 
 export function claudePricingFamilyModel(model: string, isUsable: (model: string) => boolean = () => true): string | undefined {
   const families = [
+    "claude-fable-5-2-fast-mode",
+    "claude-mythos-5-2-fast-mode",
+    "claude-fable-5-2",
+    "claude-mythos-5-2",
     "claude-fable-5-1",
     "claude-fable-5",
     "claude-mythos-5-1",
@@ -460,7 +465,7 @@ export function copilotPricingFamilyModel(model: string, isUsable: (model: strin
   if ((normalized === "gemini-3-flash" || normalized.startsWith("gemini-3-flash-")) && isUsable("gemini-3-flash")) return "gemini-3-flash";
   if ((normalized === "gemini-3.1-pro" || normalized.startsWith("gemini-3.1-pro-")) && isUsable("gemini-3.1-pro")) return "gemini-3.1-pro";
   if ((normalized === "gemini-3.5-flash" || normalized.startsWith("gemini-3.5-flash-")) && isUsable("gemini-3.5-flash")) return "gemini-3.5-flash";
-  for (const candidate of ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-4-argon", "grok-4.5", "grok-4.6", "grok-4.7", "mai-code-1.1-flash", "kimi-k3"]) {
+  for (const candidate of ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon", "gemini-4-neon", "gemini-4-hydrogen", "mai-code-2-flash", "mai-code-2", "grok-4.5", "grok-4.6", "grok-4.7", "mai-code-1.1-flash", "kimi-k3"]) {
     if ((normalized === candidate || normalized.startsWith(`${candidate}-`)) && isUsable(candidate)) return candidate;
   }
   if ((normalized === "raptor-mini" || normalized.startsWith("raptor-mini-") || normalized.startsWith("oswe-vscode")) && isUsable("raptor-mini")) return "raptor-mini";

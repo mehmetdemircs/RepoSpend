@@ -654,6 +654,7 @@ function candidateToUsage(candidate: CursorSessionCandidate, index: number, opti
     sourceAppRaw: candidate.surface,
     sourcePath: candidate.sourcePath,
     repoRoot: repo.repoRoot,
+    worktreeRoot: repo.worktreeRoot,
     repoName: repo.repoName,
     cwd,
     gitRemoteUrl: repo.gitRemoteUrl,

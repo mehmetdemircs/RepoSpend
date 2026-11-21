@@ -66,7 +66,7 @@ function matchesAny(value: string | undefined, filter: UsageFilters["source"]): 
 function matchesRepo(session: NormalizedUsage, filter: UsageFilters["repo"]): boolean {
   const values = filterValues(filter);
   if (!values.length) return true;
-  return values.includes(session.repoName) || values.includes(session.repoRoot);
+  return values.includes(session.repoName) || values.includes(session.repoRoot) || Boolean(session.worktreeRoot && values.includes(session.worktreeRoot));
 }
 
 function matchesModel(session: NormalizedUsage, filter: UsageFilters["model"]): boolean {

@@ -272,6 +272,7 @@ function claudeBreakdownToUsage(file: ClaudeSessionFile, index: number, options:
     sourceAppRaw: entrypoint,
     sourcePath: file.filePath,
     repoRoot: repo.repoRoot,
+    worktreeRoot: repo.worktreeRoot,
     repoName: repo.repoName,
     cwd,
     gitRemoteUrl: repo.gitRemoteUrl,

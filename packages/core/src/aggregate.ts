@@ -264,6 +264,7 @@ export function toCsv(sessions: NormalizedUsage[]): string {
     "fileReadCount",
     "fileEditCount",
     "sessionOutcome",
+    "worktreeRoot",
   ];
   const rows = sessions.map((session) => columns.map((column) => csvEscape(Array.isArray(session[column]) ? (session[column] as string[]).join(";") : session[column])));
   return [columns.join(","), ...rows.map((row) => row.join(","))].join("\n");

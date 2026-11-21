@@ -144,6 +144,20 @@ function dataConfidenceIssues({
     });
   }
 
+  const inheritedPricingSessions = sessions.filter((session) => session.warnings.some((warning) => warning.startsWith("inherited_pricing:")));
+  if (inheritedPricingSessions.length > 0) {
+    const rateMatches = new Set(inheritedPricingSessions.flatMap((session) => session.warnings
+      .filter((warning) => warning.startsWith("inherited_pricing:"))
+      .map((warning) => warning.slice("inherited_pricing:".length).replace(":", " uses "))));
+    issues.push({
+      id: "inherited-model-pricing",
+      title: "Some estimates use inherited model rates",
+      detail: [...rateMatches].join(", "),
+      tone: "attention",
+      affectedSessionIds: inheritedPricingSessions.map((session) => session.id),
+    });
+  }
+
   if (parseIssueCount > 0) {
     issues.push({
       id: "parse-issues",

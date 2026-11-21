@@ -472,6 +472,11 @@ export function readableWarning(warning: string): string {
   if (normalized === "output_heavy_sessions") return "Output tokens are unusually high compared with total token volume.";
   if (normalized === "high-token no-edit") return "A high-token session had no detected file edits.";
   if (normalized === "duplicate_or_stale_token_snapshots_skipped") return "Duplicate or stale token snapshots were skipped while counting tokens.";
+  if (normalized.startsWith("inherited_pricing:")) {
+    const [, model, rateModel] = warning.split(":");
+    return `${model} uses the ${rateModel} rate card.`;
+  }
+  if (normalized === "codex_cumulative_checkpoint_without_request_detail") return "Codex recorded cumulative usage without matching request details. Totals include only the requests that could be identified.";
   if (normalized === "token_direct_usage_ignored_after_cumulative_snapshot") return "Direct token usage was ignored after a cumulative snapshot to avoid double counting.";
   if (normalized.startsWith("invalid_token_snapshots")) return "Invalid token snapshots were skipped while counting tokens.";
   if (normalized === "copilot_partial_token_breakdown") return "GitHub Copilot exposed a partial token breakdown for this session.";
@@ -972,6 +977,7 @@ export function exportSessionsCsv(sessions: Session[]): void {
     fileEdits: session.fileEditCount ?? 0,
     outcome: session.sessionOutcome ?? "unknown",
     tokenConfidence: session.tokenConfidence ?? "unknown",
+    worktreeRoot: session.worktreeRoot ?? "",
   }));
   downloadText(`repospend-sessions-${new Date().toISOString().slice(0, 10)}.csv`, objectsToCsv(rows));
 }

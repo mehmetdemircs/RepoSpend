@@ -357,8 +357,8 @@ describe("pricing and grouping", () => {
   });
 
   it("inherits the nearest older known Fable and Mythos versions", () => {
-    expect(versionedFallbackModel("claude-fable-6", Object.keys(defaultPricing))).toBe("claude-fable-5-1");
-    expect(versionedFallbackModel("claude-mythos-6", Object.keys(defaultPricing))).toBe("claude-mythos-5-1");
+    expect(versionedFallbackModel("claude-fable-6", Object.keys(defaultPricing))).toBe("claude-fable-5-2");
+    expect(versionedFallbackModel("claude-mythos-6", Object.keys(defaultPricing))).toBe("claude-mythos-5-2");
   });
 
   it("prices GPT-5.6 tiers from their own bundled rate cards", () => {
@@ -519,3 +519,19 @@ function usage(overrides: Partial<NormalizedUsage> = {}): NormalizedUsage {
     ...overrides,
   };
 }
+
+it("rolls a linked worktree into its owning repository while preserving checkout metadata", () => {
+  const root = makeRepo();
+  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "repospend-checkout-"));
+  tempDirs.push(checkout);
+  const gitDir = path.join(root, ".git", "worktrees", "linked");
+  fs.mkdirSync(gitDir, { recursive: true });
+  fs.writeFileSync(path.join(checkout, ".git"), `gitdir: ${gitDir}\n`);
+  fs.writeFileSync(path.join(gitDir, "commondir"), "../..\n");
+  fs.writeFileSync(path.join(gitDir, "HEAD"), "ref: refs/heads/topic\n");
+  fs.writeFileSync(path.join(root, ".git", "config"), '[remote "origin"]\n  url = git@example.com:team/repo.git\n');
+
+  expect(resolveRepoInfo(checkout)).toMatchObject({
+    repoRoot: root, worktreeRoot: checkout, gitBranch: "topic", gitRemoteUrl: "git@example.com:team/repo.git",
+  });
+});

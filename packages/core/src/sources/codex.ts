@@ -28,7 +28,7 @@ interface CodexThreadRow {
 
 type ImportedModel = { model: string; provider: string | undefined };
 
-const codexSessionCacheVersion = "codex-session-v2";
+const codexSessionCacheVersion = "codex-session-v3";
 let nativeSqliteRebuildAttempted = false;
 
 interface SessionTokenBreakdown extends CodexTokenAggregation {
@@ -343,6 +343,7 @@ function threadToUsage(row: CodexThreadRow, index: number, sessionFiles: Map<str
     sourceAppRaw,
     sourcePath,
     repoRoot: repo.repoRoot,
+    worktreeRoot: repo.worktreeRoot,
     repoName: repo.repoName,
     cwd,
     gitRemoteUrl: repo.gitRemoteUrl,
@@ -423,6 +424,7 @@ function readStandaloneSessions(sessionFiles: Map<string, string>, options: Code
       sourceAppRaw,
       sourcePath,
       repoRoot: repo.repoRoot,
+      worktreeRoot: repo.worktreeRoot,
       repoName: repo.repoName,
       cwd,
       gitRemoteUrl: repo.gitRemoteUrl,

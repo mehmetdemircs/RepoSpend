@@ -28,6 +28,10 @@ interface ExtractedTokenUsage {
   reasoningTokens: number;
   totalTokens: number;
   cumulative: boolean;
+  requestDelta?: true;
+  responseRecord?: true;
+  responseId?: string;
+  threadSnapshot?: TokenBuckets;
   model?: string | undefined;
   cumulativeSnapshot?: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot" | "model"> | undefined;
 }
@@ -127,7 +131,9 @@ function finalizeTokenAccumulator(accumulator: CodexTokenAccumulator): void {
   const invalidSnapshots = [...accumulator.cumulativeTokenSnapshots, ...accumulator.directTokenUsages].filter((usage) => !isValidTokenUsage(usage)).length;
   if (invalidSnapshots > 0) accumulator.warnings.push(`invalid_token_snapshots:${invalidSnapshots}`);
   const cumulative = accumulator.cumulativeTokenSnapshots.filter((snapshot) => isValidTokenUsage(snapshot));
-  if (cumulative.length > 0) {
+  const direct = accumulator.directTokenUsages.filter((usage) => isValidTokenUsage(usage));
+  const requestDeltas = direct.filter((usage) => usage.requestDelta);
+  if (cumulative.length > 0 && requestDeltas.length === 0) {
     const finalSnapshot = cumulative.reduce((best, snapshot) => (snapshot.totalTokens >= best.totalTokens ? snapshot : best), cumulative[0]!);
     applyFinalUsage(accumulator, finalSnapshot);
     accumulator.tokenAggregationMethod = "final_snapshot";
@@ -141,9 +147,16 @@ function finalizeTokenAccumulator(accumulator: CodexTokenAccumulator): void {
     return;
   }
 
-  const direct = accumulator.directTokenUsages.filter((usage) => isValidTokenUsage(usage));
   if (direct.length > 0) {
-    const filteredDirect = filterDuplicateDirectUsages(direct);
+    // Prefer explicit per-request deltas over cumulative or unclassified records that may overlap.
+    const candidates = cumulative.length > 0 ? requestDeltas : direct;
+    const filteredDirect = filterDuplicateDirectUsages(candidates);
+    const pricedCheckpoints = new Set(filteredDirect.flatMap((delta) => {
+      const snapshot = delta.cumulativeSnapshot ?? delta.threadSnapshot;
+      return snapshot ? [tokenUsageKey(snapshot)] : [];
+    }));
+    const hasUnmatchedCheckpoint = cumulative.some((snapshot) => !pricedCheckpoints.has(tokenUsageKey(snapshot)));
+    if (hasUnmatchedCheckpoint) accumulator.warnings.push("codex_cumulative_checkpoint_without_request_detail");
     const total = filteredDirect.reduce(
       (sum, usage) => ({
         inputTokens: sum.inputTokens + usage.inputTokens,
@@ -159,9 +172,9 @@ function finalizeTokenAccumulator(accumulator: CodexTokenAccumulator): void {
     );
     applyFinalUsage(accumulator, total);
     accumulator.tokenAggregationMethod = "delta_sum";
-    accumulator.tokenConfidence = "high";
+    accumulator.tokenConfidence = hasUnmatchedCheckpoint ? "medium" : "high";
     accumulator.requestUsages = filteredDirect.map((usage) => requestUsageFrom(usage, usage.inputTokens));
-    const skipped = direct.length - filteredDirect.length;
+    const skipped = candidates.length - filteredDirect.length;
     if (skipped > 0) accumulator.warnings.push("duplicate_or_stale_token_snapshots_skipped");
     return;
   }
@@ -199,12 +212,28 @@ function extractRecordTokens(record: unknown): ExtractedTokenUsage | undefined {
     const usage = tokenUsageFromObject(codexLastUsage, false);
     const cumulativeSnapshot = firstObject(payloadInfo?.total_token_usage);
     const cumulativeUsage = cumulativeSnapshot ? tokenUsageFromObject(cumulativeSnapshot, true) : undefined;
-    return usage ? { ...usage, cumulativeSnapshot: cumulativeUsage ? stripSnapshot(cumulativeUsage) : undefined } : undefined;
+    return usage ? { ...usage, requestDelta: true, cumulativeSnapshot: cumulativeUsage ? stripSnapshot(cumulativeUsage) : undefined } : undefined;
   }
 
   const codexTotalUsage = firstObject(payloadInfo?.total_token_usage);
   if (codexTotalUsage) {
     return tokenUsageFromObject(codexTotalUsage, true);
+  }
+
+  if (object.type === "token_usage_record") {
+    const requestUsage = firstObject(payload?.usage);
+    const usage = requestUsage && tokenUsageFromObject(requestUsage, false);
+    if (!usage) return undefined;
+    const responseId = typeof payload?.response_id === "string" ? payload.response_id : "";
+    const threadUsage = firstObject(payload?.thread_token_usage);
+    const thread = threadUsage && tokenUsageFromObject(threadUsage, true);
+    return {
+      ...usage,
+      requestDelta: true,
+      responseRecord: true,
+      ...(responseId ? { responseId } : {}),
+      ...(thread ? { threadSnapshot: stripSnapshot(thread) } : {}),
+    };
   }
 
   const response = firstObject(object.response);
@@ -214,9 +243,36 @@ function extractRecordTokens(record: unknown): ExtractedTokenUsage | undefined {
 
 function filterDuplicateDirectUsages(usages: ExtractedTokenUsage[]): ExtractedTokenUsage[] {
   const filtered: ExtractedTokenUsage[] = [];
-  let previous: Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot" | "model"> | undefined;
+  let previous: TokenBuckets | undefined;
+  const responseIds = new Set<string>();
+  const responseRecords = new Set<ExtractedTokenUsage>();
+  const remainingMatches = new Map<string, number>();
+  // Both event formats can report the same request. Match one legacy delta per response
+  // using both its request buckets and the thread totals, regardless of rollout order.
   for (const usage of usages) {
+    if (!usage.responseRecord || (usage.responseId && responseIds.has(usage.responseId))) continue;
+    if (usage.responseId) responseIds.add(usage.responseId);
+    responseRecords.add(usage);
+    if (!usage.threadSnapshot) continue;
+    const key = responseUsageKey(usage, usage.threadSnapshot);
+    remainingMatches.set(key, (remainingMatches.get(key) ?? 0) + 1);
+  }
+
+  for (const usage of usages) {
+    if (usage.responseRecord) {
+      if (responseRecords.has(usage)) filtered.push(usage);
+      continue;
+    }
     const snapshot = usage.cumulativeSnapshot;
+    if (snapshot) {
+      const key = responseUsageKey(usage, snapshot);
+      const matches = remainingMatches.get(key) ?? 0;
+      if (matches > 0) {
+        remainingMatches.set(key, matches - 1);
+        previous = snapshot;
+        continue;
+      }
+    }
     if (snapshot && previous) {
       if (sameTokenUsage(snapshot, previous)) continue;
       if (!isMonotonicFrom(snapshot, previous) && looksLikeStaleRegression(snapshot, previous, usage)) continue;
@@ -227,7 +283,17 @@ function filterDuplicateDirectUsages(usages: ExtractedTokenUsage[]): ExtractedTo
   return filtered;
 }
 
-type TokenBuckets = Omit<ExtractedTokenUsage, "cumulative" | "cumulativeSnapshot" | "model">;
+type TokenBuckets = Pick<ExtractedTokenUsage, "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens"
+  | "cacheCreationInputTokens30m" | "cacheCreationInputTokens12h" | "outputTokens" | "reasoningTokens" | "totalTokens">;
+
+function responseUsageKey(usage: TokenBuckets, snapshot: TokenBuckets): string {
+  return `${tokenUsageKey(snapshot)}/${tokenUsageKey(usage)}`;
+}
+
+function tokenUsageKey(usage: TokenBuckets): string {
+  return [usage.inputTokens, usage.cachedInputTokens, usage.cacheCreationInputTokens, usage.cacheCreationInputTokens30m,
+    usage.cacheCreationInputTokens12h, usage.outputTokens, usage.reasoningTokens, usage.totalTokens].join(":");
+}
 
 function sameTokenUsage(a: TokenBuckets, b: TokenBuckets): boolean {
   return a.inputTokens === b.inputTokens && a.cachedInputTokens === b.cachedInputTokens && a.cacheCreationInputTokens === b.cacheCreationInputTokens && a.cacheCreationInputTokens30m === b.cacheCreationInputTokens30m && a.cacheCreationInputTokens12h === b.cacheCreationInputTokens12h && a.outputTokens === b.outputTokens && a.reasoningTokens === b.reasoningTokens && a.totalTokens === b.totalTokens;

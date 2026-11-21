@@ -74,7 +74,7 @@ describe("GPT-6.1 Sol pricing", () => {
 
   it("keeps GPT-6 Sol's original cache rate and inherits the newest same-tier card for future Sol versions", () => {
     expect(calculateCostUsd(usage("gpt-6-sol"), defaultPricing)).toBe(6.54);
-    expect(resolvePricingForModel("gpt-6.2-sol", defaultPricing)).toMatchObject({ sourceModel: "gpt-6.1-sol", inherited: true });
+    expect(resolvePricingForModel("gpt-6.3-sol", defaultPricing)).toMatchObject({ sourceModel: "gpt-6.2-sol", inherited: true });
     expect(resolvePricingForModel("gpt-6.1-astra", defaultPricing).sourceModel).toBe("gpt-6-astra");
     expect(calculateCostUsd(usage("gpt-6.1-sol-fast-mode"), defaultPricing)).toBeUndefined();
   });
@@ -431,5 +431,30 @@ describe("Claude snapshot version matching", () => {
   it.each([["claude-opus-4-20250514", 22.5, "claude-opus-4"], ["claude-sonnet-4-20250514", 4.5, "claude-sonnet-4"], ["claude-sonnet-5-20260630", 3, "claude-sonnet-5"]])("keeps %s in its own generation", (model, cost, sourceModel) => {
     expect(calculateCostUsd({ model, inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 100_000, reasoningTokens: 0 }, defaultPricing)).toBe(cost);
     expect(resolvePricingForModel(model, defaultPricing).sourceModel).toBe(sourceModel);
+  });
+});
+
+describe("November model pricing", () => {
+  it("prices Astra 6.2 from its own card and applies long-context tiers per request", () => {
+    const request = { model: "gpt-6.2-astra", inputTokens: 272_001, cachedInputTokens: 200_000, outputTokens: 10_000, reasoningTokens: 0 };
+    expect(calculateCostUsd(request, defaultPricing, 272_001)).toBe(1.912016);
+    expect(resolvePricingForModel("copilot/gpt-6.2-astra", defaultPricing).sourceModel).toBe("gpt-6.2-astra");
+  });
+
+  it("reports inherited pricing without treating a dated ID for the same model as provisional", () => {
+    const request = { inputTokens: 1_000, cachedInputTokens: 0, outputTokens: 100, reasoningTokens: 0 };
+    const result = calculateRequestCosts([
+      { ...request, model: "gpt-6.1-sol-2026-09-29", requestInputTokens: 1_000 },
+      { ...request, model: "gpt-6.9-astra", requestInputTokens: 1_000 },
+    ], defaultPricing);
+    expect(result.assumptions).toEqual(["inherited_pricing:gpt-6.9-astra:gpt-6.2-astra"]);
+  });
+
+  it("prices Fable 5.2 Fast and its one-hour writes", () => {
+    expect(calculateCostUsd({
+      model: "claude-fable-5-2-fast-mode",
+      inputTokens: 100_000, cachedInputTokens: 0, cacheCreationInputTokens: 100_000, cacheCreationInputTokens1h: 100_000,
+      outputTokens: 10_000, reasoningTokens: 0,
+    }, defaultPricing)).toBe(4);
   });
 });

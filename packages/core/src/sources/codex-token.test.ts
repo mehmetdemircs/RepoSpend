@@ -191,3 +191,51 @@ function lastAndTotal(last: UsageInput, total: UsageInput) {
     },
   };
 }
+
+it("keeps per-request model attribution when cumulative-only checkpoints surround a reset", () => {
+  const aggregation = aggregateTokens([
+    tokenCount(100, 20, 40, 0, 140),
+    lastAndTotal({ input: 100, cached: 20, output: 40, reasoning: 0, total: 140 }, { input: 100, cached: 20, output: 40, reasoning: 0, total: 140 }),
+    lastAndTotal({ input: 30, cached: 0, output: 10, reasoning: 0, total: 40 }, { input: 30, cached: 0, output: 10, reasoning: 0, total: 40 }),
+    tokenCount(30, 0, 10, 0, 40),
+  ], (record) => typeof record === "object" && record ? "gpt-6.2-sol" : undefined);
+
+  expect(aggregation.totalTokens).toBe(180);
+  expect(aggregation.requestUsages.map(({ model, requestInputTokens }) => [model, requestInputTokens]))
+    .toEqual([["gpt-6.2-sol", 100], ["gpt-6.2-sol", 30]]);
+});
+
+it("counts each Codex response once when the rollout also emits a token-count delta", () => {
+  const first = { input_tokens: 100, cached_input_tokens: 20, output_tokens: 40, reasoning_output_tokens: 0, total_tokens: 140 };
+  const second = { input_tokens: 60, cached_input_tokens: 10, output_tokens: 20, reasoning_output_tokens: 0, total_tokens: 80 };
+  const record = (id: string, usage: typeof first, thread: typeof first) => ({
+    type: "token_usage_record",
+    payload: { response_id: id, usage, thread_token_usage: thread },
+  });
+  const firstRecord = record("response-first", first, first);
+  const aggregation = aggregateTokens([
+    firstRecord,
+    { type: "event_msg", payload: { type: "token_count", info: { last_token_usage: first, total_token_usage: first } } },
+    firstRecord,
+    record("response-second", second, {
+      input_tokens: 160, cached_input_tokens: 30, output_tokens: 60, reasoning_output_tokens: 0, total_tokens: 220,
+    }),
+  ]);
+
+  expect(aggregation.totalTokens).toBe(220);
+  expect(aggregation.requestUsages.map(usage => usage.requestInputTokens)).toEqual([100, 60]);
+});
+
+it.each([true, false])("matches legacy deltas across record order even without a response ID (record first: %s)", (recordFirst) => {
+  const usage = { input_tokens: 100, cached_input_tokens: 20, output_tokens: 40, reasoning_output_tokens: 0, total_tokens: 140 };
+  const ledger = { type: "token_usage_record", payload: { usage, thread_token_usage: usage } };
+  const legacy = { type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage, total_token_usage: usage } } };
+  const distinctLedger = { type: "token_usage_record", payload: {
+    response_id: "another-response",
+    usage: { input_tokens: 50, output_tokens: 10, total_tokens: 60 },
+    thread_token_usage: { input_tokens: 150, cached_input_tokens: 20, output_tokens: 50, total_tokens: 200 },
+  } };
+  const records = recordFirst ? [ledger, distinctLedger, legacy] : [legacy, distinctLedger, ledger];
+
+  expect(aggregateTokens(records).totalTokens).toBe(200);
+});

@@ -591,6 +591,7 @@ function breakdownToUsage(breakdown: CopilotSessionBreakdown, index: number, opt
     sourceAppRaw: breakdown.surface,
     sourcePath: breakdown.sourcePaths[0] ?? "",
     repoRoot: repo.repoRoot,
+    worktreeRoot: repo.worktreeRoot,
     repoName: repo.repoName,
     cwd,
     gitRemoteUrl: repo.gitRemoteUrl,
@@ -648,6 +649,7 @@ function breakdownToUsage(breakdown: CopilotSessionBreakdown, index: number, opt
 function unknownCopilotRepoInfo() {
   return {
     repoRoot: "unknown-copilot-repo",
+    worktreeRoot: undefined,
     repoName: "Unknown repo/folder",
     gitRemoteUrl: undefined,
     gitBranch: undefined,

@@ -31,6 +31,8 @@ silently tiered. These are current API-equivalent estimates, not historical
 invoices. See [pricing methodology](docs/pricing.md) for rates, promotion dates,
 and custom overrides.
 
+RepoSpend includes exact **GPT-6.2 Astra and Sol** cards for Standard requests and applies long-context rates per request above 272K input tokens. The local dashboard and `repospend doctor` flag estimates that use an inherited card. Linked Git worktrees roll up to their repository and can be inspected in the repository’s Sessions tab.
+
 RepoSpend includes explicit **GPT-6.1 Sol** API-equivalent pricing: $2 input,
 $0.10 cached input, $2.50 cache writes, and $10 output per million tokens at
 Standard short-context rates. GPT-6 Sol keeps its separate $0.20 cache-read rate.

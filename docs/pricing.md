@@ -6,6 +6,21 @@ The bundled table is seeded from public OpenAI, Anthropic, Google, and GitHub Co
 
 The October 27, 2026 update adds the GPT-6.1 Terra card and OpenAI's 30-minute and 12-hour cache-write rates, and checks Claude Haiku 5.5, Sonnet 5.5, Fable 5.1, Mythos 5.1, and Gemini 4 Argon against provider documentation. The GPT-6.1 Sol card was checked on September 29; the other bundled defaults retain the September 28 snapshot. Defaults use published Standard API prices. Sonnet 5.5 cache reads fell from $0.20 to $0.10 per 1M tokens on October 7; its $2 input, $10 output, $2.50 5-minute writes, and $4 1-hour writes are unchanged. Sonnet 5 retains its $0.20 cache-read rate.
 
+### November 21, 2026 snapshot
+
+OpenAI GPT-6.2 Astra and Sol have separate Standard cards. Values are USD per million tokens. Above 272,000 input tokens, the whole request uses 2× input and cache prices and 1.5× output prices.
+
+| Model | Input | Cache reads | 30m writes | 12h writes | Output |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GPT-6.2 Astra | $8 | $0.40 | $10 | $20 | $40 |
+| GPT-6.2 Sol | $2 | $0.10 | $2.50 | $5 | $10 |
+
+Claude Fable 5.2 and the restricted-availability Mythos 5.2 use $8 input, $0.20 cache reads, $10 5-minute writes, $16 1-hour writes and $40 output. Transcript-recorded Fast uses twice those rates. OpenAI Fast and Ultrafast modifiers are outside the bundled Standard estimate.
+
+Copilot coverage also includes Gemini 4 Carbon, Neon and Hydrogen, and MAI Code 2 and 2 Flash. Carbon and Argon introductory rates end November 30. From December 1, the published replacement card is $4 input, $0.20 cached input and $20 output per million. This bundled snapshot keeps the November rates until an intentional table refresh or local override.
+
+Sources are [OpenAI pricing](https://developers.openai.com/api/docs/pricing), [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing), and [GitHub Copilot pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing).
+
 ### Claude Haiku 5.5 and request-length pricing
 
 All rates are USD per 1M tokens, using Anthropic's global Standard API prices:
@@ -43,7 +58,7 @@ Claude Fable 5.1 and Mythos 5.1 retain their predecessor's base rates but have l
 
 OpenAI reduced GPT-5.6 pricing effective July 30, 2026. RepoSpend uses $2 input and $12 output per 1M tokens for Terra, and $0.20 input and $1.20 output for Luna. Cached input remains 90% below the uncached input rate, and cache writes are billed at 1.25x the uncached input rate, so Luna's bundled cache-write rate is $0.25 per 1M tokens.
 
-GPT-5.6 Sol and its `gpt-5.6` alias use promotional $4 input, $0.40 cached input, $5 cache writes, and $20 output/reasoning per 1M tokens, available at least through November 21, 2026 — recheck the promotional card on November 22, 2026. Older full bundled pricing files receive this correction; intentionally saved sparse overrides remain unchanged.
+GPT-5.6 Sol and its `gpt-5.6` alias use promotional $4 input, $0.40 cached input, $5 cache writes, and $20 output/reasoning per 1M tokens, available through November 30, 2026. Recheck the provider’s rates on December 1. Older full bundled pricing files receive this correction; intentionally saved sparse overrides remain unchanged.
 
 Gemini 3.6, 3.7, and 3.8 Flash use GitHub Copilot promotional rates through December 31, 2026. MAI-Code-1.1-Flash, Grok 4.5–4.7, and Kimi K3 have explicit Copilot reference cards. Grok rates use the up-to-200K input tier; longer requests cost more.
 
@@ -107,7 +122,7 @@ sessions that mostly used 5-minute cache writes. RepoSpend prices the buckets
 recorded in the local Claude transcript instead of forcing every cache write into
 one column.
 
-When an exact model id is not present in the pricing table, RepoSpend first tries the closest older version in the same model tier, then conservative family matching for known provider naming patterns. For example, a nearby newer Claude Opus 4.x or GPT 5.x variant can inherit the closest older bundled rate so the dashboard stays useful while public rate cards catch up. Inherited rates are labeled in Settings.
+When an exact model id is not present in the pricing table, RepoSpend first tries the closest older version in the same model tier, then conservative family matching for known provider naming patterns. For example, a nearby newer Claude Opus 4.x or GPT 5.x variant can inherit the closest older bundled rate so the dashboard stays useful while public rate cards catch up. Inherited rates are labeled in Settings. Session warnings and `repospend doctor` flag model substitutions.
 
 If RepoSpend cannot resolve a usable rate, it still displays token totals and marks cost as unknown. Unknown pricing does not stop scans, dashboard responses, CLI output, or exports.
 

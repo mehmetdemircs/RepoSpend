@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { groupByDay, groupByHour, groupByModel, groupByRepo, groupBySourceApp, toCsv } from "@repospend/core";
+import { pricingInfo } from "@repospend/core";
 import { readDashboardData } from "./data.js";
 import { parseCliDashboardOptions, parseCliDateFilters, parseCliFilters, valueAfter } from "./cli-options.js";
 import { startServer } from "./server.js";
@@ -76,6 +77,7 @@ function printGroups(groups: ReturnType<typeof groupByRepo>): void {
 
 function printDoctor(data: ReturnType<typeof readDashboardData>): void {
   const confidence = data.confidence;
+  console.log(`Bundled pricing snapshot: ${pricingInfo.updatedAt}`);
   console.log(`RepoSpend data confidence: ${confidence.label} (${confidence.score}/100)`);
   console.table([
     { metric: "Sessions", value: confidence.sessionCount },
